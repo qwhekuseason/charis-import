@@ -5,44 +5,44 @@ export const PREORDER_TERMS = [
   {
     icon: CheckCircle2,
     color: '#2563eb',
-    title: 'Paid in Full Upfront',
-    desc: 'Preorders are paid in full before your order is processed and reserved with our overseas manufacturers.'
+    title: 'Payment Confirms Your Order',
+    desc: 'Your preorder is confirmed and secured once payment is received via Mobile Money or at pickup.'
   },
   {
     icon: Clock,
     color: '#3b82f6',
-    title: 'Batch Procurement',
-    desc: 'Orders are placed directly with suppliers as soon as the active preorder batch window closes.'
+    title: 'Factory-Direct Pricing',
+    desc: 'We combine orders directly with overseas manufacturers to give you wholesale factory prices.'
   },
   {
     icon: Ship,
     color: '#0ea5e9',
-    title: 'Estimated Sea Transit: 30–50 Days',
-    desc: 'Estimated shipping time to Ghana is 30–50 days from international port departure.'
+    title: 'Shipping Times',
+    desc: 'Sea shipping takes about 35–45 working days. Air cargo takes 7–12 working days.'
   },
   {
     icon: ShieldAlert,
     color: '#8b5cf6',
-    title: 'Port Clearance: 3–7 Days',
-    desc: 'After vessel arrival at Tema Port or airport, customs inspection and port clearance takes approximately 3–7 business days.'
+    title: 'Customs Handled for You',
+    desc: 'We manage all customs clearance at Tema Port or Kotoka International Airport so you don\'t have to worry.'
   },
   {
     icon: Scale,
     color: '#10b981',
-    title: 'Shipping Fees Paid Separately on Arrival',
-    desc: 'International freight and local delivery fees are calculated by actual weight/CBM and paid when your package safely lands in Ghana.'
+    title: 'No Surprise Hidden Fees',
+    desc: 'Your shipping fee is calculated and clearly shown at checkout so you know exactly what you are paying.'
   },
   {
     icon: ShieldCheck,
     color: '#2563eb',
-    title: 'Confirm Specs Before Payment',
-    desc: 'Product colours, sizes, voltage, and exact specifications must be thoroughly reviewed and confirmed prior to checkout.'
+    title: 'Check Your Specs',
+    desc: 'Please ensure you have selected your preferred size, colour, or model before completing payment.'
   },
   {
     icon: FileCheck,
     color: '#ef4444',
-    title: 'Strict Order Locking',
-    desc: 'Once an order batch has been submitted to the supplier, modifications, cancellations, or refunds are not possible.'
+    title: 'Prompt Production',
+    desc: 'Once your order is confirmed with the factory, manufacturing begins right away and cannot be changed.'
   },
   {
     icon: AlertCircle,

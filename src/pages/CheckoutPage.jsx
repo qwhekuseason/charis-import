@@ -62,30 +62,30 @@ export const CheckoutPage = () => {
   const FREIGHT_OPTIONS = [
     {
       id: 'sea_freight',
-      name: 'Consolidated Sea Freight Pre-Order',
+      name: 'Sea Shipping (Pre-Order)',
       type: 'SEA_FREIGHT',
       icon: Ship,
       cost: 35.00,
-      time: '35 - 45 business days',
-      desc: 'Container FCL from Guangzhou Port to Tema Port MPS Terminal 3. Lowest cost per KG/CBM.'
+      time: '35 - 45 working days',
+      desc: 'Shipped safely by sea from China to Tema Port. Most affordable option.'
     },
     {
       id: 'air_cargo',
-      name: 'Express Air Cargo Pre-Order',
+      name: 'Air Cargo (Fast Pre-Order)',
       type: 'AIR_FREIGHT',
       icon: Plane,
       cost: 75.00,
-      time: '7 - 12 business days',
-      desc: 'Direct cargo flight to Kotoka International Airport (KIA Cargo Terminal). Fast-track delivery.'
+      time: '7 - 12 working days',
+      desc: 'Flown directly by air cargo into Accra for quicker delivery.'
     },
     {
       id: 'local_express',
-      name: 'Accra Doorstep Express Courier',
+      name: 'Local Delivery (Accra & Nearby)',
       type: 'LOCAL_DISPATCH',
       icon: Truck,
       cost: 40.00,
-      time: 'Same day or next day',
-      desc: 'Immediate dispatch from Spintex Fulfillment Hub to your doorstep anywhere in Greater Accra.'
+      time: '1 - 2 working days',
+      desc: 'Delivered directly to your doorstep anywhere in Greater Accra from our Spintex hub.'
     }
   ];
 
@@ -265,12 +265,12 @@ export const CheckoutPage = () => {
             : 'Pay on Collection / Inspection (Spintex Hub)',
         waybillNumber: `BL-GH-${orderId}`,
         steps: [
-          { title: 'Order Confirmed & FX Locked', time: 'Just Now', location: 'Accra FX Treasury Hub', done: true, note: `USD/GHS: ${fxRates?.USD_GHS || 15.65} snapshot locked. PO queued with supplier.` },
-          { title: 'Factory Batching & QC Inspection', time: 'Cutoff: 3 Days', location: 'Fulfillment Consolidation Depot', done: false, note: 'Supplier fabrication, stress testing, and batch packaging.' },
-          { title: 'On High Seas / International Flight', time: selectedShipping.type === 'SEA_FREIGHT' ? 'Sea: 35–45 days' : 'Air: 7–12 days', location: 'International Cargo Transit Corridor', done: false, note: 'Marine vessel routing or air cargo dispatch to Ghana.' },
-          { title: 'Local Customs Clearance (Tema Port / KIA)', time: 'Pending Arrival', location: 'MPS Terminal 3 / GRA ICUMS', done: false, note: 'Single window duty assessment and port clearance.' },
-          { title: 'Arrived at Accra Central Distribution Hub', time: 'Pending', location: 'Spintex Rd Fulfillment Hub', done: false, note: 'Consolidation sorting and final-mile staging.' },
-          { title: 'Out for Delivery / Station Ready', time: 'Pending', location: `${formData.city}, ${formData.region}`, done: false, note: 'Designated courier assigned with delivery code.' }
+          { title: 'Order Confirmed', time: 'Just Now', location: 'Charis Import Office', done: true, note: 'Order registered and price locked in Cedis.' },
+          { title: 'Supplier Processing & Quality Check', time: '1–3 Days', location: 'Overseas Warehouse', done: false, note: 'Supplier prepares and inspects items before shipping.' },
+          { title: 'In Transit to Ghana', time: selectedShipping.type === 'SEA_FREIGHT' ? 'Sea: 35–45 days' : 'Air: 7–12 days', location: 'En Route to Ghana', done: false, note: 'Cargo moving safely to Ghana.' },
+          { title: 'Customs Clearance at Port', time: 'Pending Arrival', location: 'Tema Port / Airport', done: false, note: 'Customs duties and port clearance processed.' },
+          { title: 'Arrived at Accra Hub', time: 'Pending', location: 'Spintex Rd Hub, Accra', done: false, note: 'Sorted and prepared for local delivery.' },
+          { title: 'Out for Delivery / Ready for Pickup', time: 'Pending', location: `${formData.city}, ${formData.region}`, done: false, note: 'Delivered to your address or ready for pickup.' }
         ]
       };
 
@@ -328,7 +328,7 @@ export const CheckoutPage = () => {
     <div className="section" style={{ minHeight: '85vh', paddingTop: '28px' }}>
       <div className="container" style={{ maxWidth: '1080px' }}>
         
-        {/* FX Rate & Idempotency Guarantee Ticker Banner */}
+        {/* Exchange Rate & Guarantee Banner */}
         <div
           className="glass-panel"
           style={{
@@ -344,16 +344,16 @@ export const CheckoutPage = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span className="fx-rate-pill-dot" />
             <span style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-              FX Snapshot Guaranteed: 1 USD = GH₵{fxRates?.USD_GHS || '15.65'} • 1 RMB = GH₵{fxRates?.RMB_GHS || '2.18'}
+              Guaranteed Exchange Rate: 1 USD = GH₵{fxRates?.USD_GHS || '15.65'} • 1 RMB = GH₵{fxRates?.RMB_GHS || '2.18'}
             </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.76rem', color: 'var(--text-muted)' }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#10b981', fontWeight: 700 }}>
-              <ShieldCheck size={14} /> Idempotency Key Active: {idempotencyKey.slice(0, 14)}...
+              <ShieldCheck size={14} /> 100% Safe &amp; Verified Order
             </span>
             <span>•</span>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-              <Clock size={13} /> 30-Min Price Lock
+              <Clock size={13} /> Price Locked
             </span>
           </div>
         </div>
@@ -393,7 +393,7 @@ export const CheckoutPage = () => {
             >
               1
             </span>
-            <span>Delivery & Logistics</span>
+            <span>Delivery Information</span>
           </div>
 
           <div style={{ width: '40px', height: '2px', backgroundColor: step >= 2 ? 'var(--accent)' : 'var(--border-light)' }} />
@@ -535,7 +535,7 @@ export const CheckoutPage = () => {
                   FREIGHT / ROUTE
                 </div>
                 <div style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: '4px' }}>
-                  {placedOrderDetails.freightType === 'SEA_FREIGHT' ? 'Sea Freight (FCL)' : placedOrderDetails.freightType === 'AIR_FREIGHT' ? 'Air Cargo Express' : 'Local Courier'}
+                  {placedOrderDetails.freightType === 'SEA_FREIGHT' ? 'Sea Shipping (Pre-Order)' : placedOrderDetails.freightType === 'AIR_FREIGHT' ? 'Air Cargo (Express)' : 'Local Delivery'}
                 </div>
               </div>
             </div>
@@ -812,10 +812,10 @@ export const CheckoutPage = () => {
                 >
                   <div>
                     <h3 style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 4px' }}>
-                      Delivery &amp; Freight Routing
+                      Delivery Information
                     </h3>
                     <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
-                      Enter your address and select your international importation corridor.
+                      Enter your address and choose how you would like your items delivered.
                     </p>
                   </div>
 
@@ -900,7 +900,7 @@ export const CheckoutPage = () => {
 
                   <div>
                     <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '6px', color: 'var(--text-primary)' }}>
-                      Doorstep Address / VIP Bus Station Destination *
+                      Street Address or Bus Station Destination *
                     </label>
                     <input
                       type="text"
@@ -917,10 +917,10 @@ export const CheckoutPage = () => {
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                       <label style={{ fontSize: '0.84rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                        Select International Logistics Method
+                        Select Shipping Method
                       </label>
                       <span style={{ fontSize: '0.72rem', color: 'var(--accent)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '3px' }}>
-                        <Scale size={12} /> {freightCalc.cbm} CBM • {freightCalc.actualKg} KG Volumetric
+                        <Scale size={12} /> Est. Weight: {freightCalc.actualKg} KG
                       </span>
                     </div>
 
@@ -978,7 +978,7 @@ export const CheckoutPage = () => {
                   </div>
 
                   <button type="submit" className="btn btn-primary btn-lg" style={{ marginTop: '8px', borderRadius: '12px' }}>
-                    Continue to Payment Options <ArrowRight size={18} />
+                    Continue to Payment <ArrowRight size={18} />
                   </button>
                 </form>
               ) : (
@@ -998,7 +998,7 @@ export const CheckoutPage = () => {
                         Select Payment Method
                       </h3>
                       <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
-                        Encrypted Mobile Money &amp; Card checkout with transaction idempotency.
+                        Pay safely using Mobile Money (MoMo) or pay upon pickup in Accra.
                       </p>
                     </div>
                     <button
@@ -1202,7 +1202,7 @@ export const CheckoutPage = () => {
                         >
                           Preorder Terms &amp; Conditions
                         </button>
-                        . I understand that the FX rate (1 USD = GH₵{fxRates?.USD_GHS || '15.65'}) is locked at this moment, sea transit is 35-45 days, and delivery to my doorstep is fully handled.
+                        . I understand that today's price is locked in Cedis, shipping takes the estimated days shown, and Charis Import handles the full delivery.
                       </span>
                     </label>
                   </div>

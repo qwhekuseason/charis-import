@@ -212,19 +212,19 @@ export const HomePage = () => {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <Ship size={17} color="#2563eb" />
                     <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#0f172a' }}>
-                      Container Batch CN-GH-2026-FCL04
+                      Next Sea Shipping Batch
                     </span>
                   </div>
                   <span style={{ fontSize: '0.74rem', fontWeight: 800, color: '#2563eb' }}>
-                    82% Filled • Departs in 3 Days
+                    82% Full • Closes in 3 Days
                   </span>
                 </div>
                 <div style={{ width: '100%', height: '8px', background: '#e2e8f0', borderRadius: '9999px', overflow: 'hidden' }}>
                   <div style={{ width: '82%', height: '100%', background: 'linear-gradient(90deg, #0284c7 0%, #2563eb 100%)', borderRadius: '9999px' }} />
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: '#64748b', marginTop: '8px' }}>
-                  <span>Guangzhou → Port of Tema (MPS Terminal 3)</span>
-                  <span style={{ color: '#059669', fontWeight: 700 }}>Single Window ICUMS Verified</span>
+                  <span>China → Tema Port, Ghana</span>
+                  <span style={{ color: '#059669', fontWeight: 700 }}>Customs Clearance Included</span>
                 </div>
               </div>
 

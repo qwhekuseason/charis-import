@@ -257,7 +257,7 @@ export const CartDrawer = () => {
                         margin: '4px 0'
                       }}
                     >
-                      GH₵{item.unitPrice.toFixed(2)} per unit • {(item.product.cbm || 0.035).toFixed(3)} CBM
+                      GH₵{item.unitPrice.toFixed(2)} each
                     </div>
 
                     {/* Stepper & Total */}
@@ -324,27 +324,26 @@ export const CartDrawer = () => {
                 </div>
               ))}
 
-              {/* Cargo Volumetric Metrics */}
+              {/* Package Summary */}
               <div
                 className="glass-panel"
                 style={{
-                  padding: '12px 14px',
+                  padding: '10px 14px',
                   borderRadius: '12px',
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  fontSize: '0.78rem',
+                  fontSize: '0.8rem',
                   color: 'var(--text-secondary)',
                   border: '1px solid var(--border-light)'
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Boxes size={14} color="#D4AF37" />
-                  <span>Cargo Metrics:</span>
+                  <Boxes size={14} color="#2563eb" />
+                  <span>Items: <strong>{totalItemCount}</strong></span>
                 </div>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <span>Vol: <strong style={{ color: 'var(--text-primary)' }}>{totalCbm.toFixed(3)} CBM</strong></span>
-                  <span>Est. Wt: <strong style={{ color: 'var(--text-primary)' }}>{totalWeight.toFixed(1)} KG</strong></span>
+                <div>
+                  <span>Est. Weight: <strong style={{ color: 'var(--text-primary)' }}>{totalWeight.toFixed(1)} KG</strong></span>
                 </div>
               </div>
 
@@ -491,7 +490,7 @@ export const CartDrawer = () => {
                 marginBottom: '6px'
               }}
             >
-              <span>Batch Pre-order Subtotal:</span>
+              <span>Subtotal:</span>
               <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
                 GH₵{cartSubtotal.toFixed(2)}
               </span>

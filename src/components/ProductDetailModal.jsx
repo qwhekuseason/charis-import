@@ -265,19 +265,19 @@ export const ProductDetailModal = () => {
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Truck size={16} color="#D4AF37" />
                 <span>
-                  <strong style={{ color: 'var(--text-primary)' }}>Ghana Nationwide Distribution:</strong> VIP & OA bus stations, or courier to your doorstep in Accra, Kumasi, Takoradi.
+                  <strong style={{ color: 'var(--text-primary)' }}>Nationwide Delivery in Ghana:</strong> Available via bus stations (VIP/OA) or doorstep delivery across Ghana.
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <ShieldCheck size={16} color="#10b981" />
                 <span>
-                  <strong style={{ color: 'var(--text-primary)' }}>Factory QC Inspection:</strong> Pre-shipment batch verification in Guangzhou/Yiwu before vessel loading.
+                  <strong style={{ color: 'var(--text-primary)' }}>Quality Inspected:</strong> Checked and verified before shipping from the factory.
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Lock size={16} color="#6366f1" />
                 <span>
-                  <strong style={{ color: 'var(--text-primary)' }}>FX Margin Protection:</strong> Locked rate of $1 = GH₵{fxRates?.USD_GHS || '15.65'} upon checkout.
+                  <strong style={{ color: 'var(--text-primary)' }}>Price Guaranteed in Cedis:</strong> No hidden price jumps after your order is confirmed.
                 </span>
               </div>
             </div>

@@ -53,12 +53,12 @@ export const TrackOrderPage = () => {
               shippingMethod: liveOrder.deliveryMethod,
               destination: liveOrder.address ? `${liveOrder.address}, ${liveOrder.city}` : liveOrder.city,
               steps: [
-                { title: 'Order Confirmed & FX Locked', time: new Date(liveOrder.createdAt).toLocaleDateString('en-GB'), location: 'Accra FX Treasury Hub', done: true, note: 'Payment verified and FX rate snapshot secured.' },
-                { title: 'Factory Batching & QC Inspection', time: 'In Progress', location: 'Fulfillment Consolidation Depot', done: liveOrder.orderStatus !== 'PENDING', note: 'Quality check and batch allocation.' },
-                { title: 'On High Seas / Cargo Transit', time: 'Pending', location: 'International Cargo Corridor', done: liveOrder.orderStatus === 'SHIPPED' || liveOrder.orderStatus === 'DELIVERED', note: 'Vessel transit or dispatch in progress.' },
-                { title: 'Local Customs Clearance', time: 'Pending', location: 'Tema Port / KIA Single Window', done: liveOrder.orderStatus === 'SHIPPED' || liveOrder.orderStatus === 'DELIVERED', note: 'ICUMS customs valuation & duty declaration.' },
-                { title: 'Arrived at Accra Central Distribution Hub', time: 'Pending', location: 'Spintex Rd Fulfillment Hub', done: liveOrder.orderStatus === 'DELIVERED', note: 'Sorting and local dispatch staging.' },
-                { title: 'Out for Delivery / Ready for Collection', time: 'Pending', location: liveOrder.city || 'Greater Accra', done: liveOrder.orderStatus === 'DELIVERED', note: 'Final doorstep delivery or station pickup.' }
+                { title: 'Order Confirmed', time: new Date(liveOrder.createdAt).toLocaleDateString('en-GB'), location: 'Charis Import Office', done: true, note: 'Order registered and recorded.' },
+                { title: 'Supplier Processing & Quality Check', time: 'In Progress', location: 'Overseas Warehouse', done: liveOrder.orderStatus !== 'PENDING', note: 'Goods being prepared and inspected before transit.' },
+                { title: 'In Transit to Ghana', time: 'Pending', location: 'Cargo En Route', done: liveOrder.orderStatus === 'SHIPPED' || liveOrder.orderStatus === 'DELIVERED', note: 'Cargo moving safely to Ghana.' },
+                { title: 'Customs Clearance at Port', time: 'Pending', location: 'Tema Port / Airport', done: liveOrder.orderStatus === 'SHIPPED' || liveOrder.orderStatus === 'DELIVERED', note: 'Customs duties and inspections handled.' },
+                { title: 'Arrived at Accra Hub', time: 'Pending', location: 'Spintex Rd Hub, Accra', done: liveOrder.orderStatus === 'DELIVERED', note: 'Sorted and ready for local dispatch.' },
+                { title: 'Out for Delivery / Ready for Pickup', time: 'Pending', location: liveOrder.city || 'Greater Accra', done: liveOrder.orderStatus === 'DELIVERED', note: 'On the way to your doorstep or ready for collection.' }
               ]
             });
           } else if (orders[code]) {
