@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Environment variables — NEVER commit these
+.env
+.env.local
+.env.production
+
+# Production build output
+dist/
+
+# Uploaded product images (ephemeral — use cloud storage in production)
+public/uploads/
+
+# Prisma generated client
+node_modules/.prisma/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / Editor artifacts
+.DS_Store
+Thumbs.db
+.vscode/

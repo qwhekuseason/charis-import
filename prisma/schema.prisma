@@ -1,0 +1,137 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Product {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique
+  category      String
+  price         Float
+  originalPrice Float?
+  inStock       Boolean  @default(true)
+  rating        Float    @default(4.8)
+  reviewsCount  Int      @default(0)
+  badge         String?
+  image         String
+  gallery       String[] @default([])
+  description   String
+  specs         Json?
+  tags          String[] @default([])
+  reviews       Review[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Category {
+  id    String  @id
+  name  String
+  slug  String  @unique
+  icon  String?
+  image String?
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  phone     String?
+  role      String   @default("CUSTOMER")
+  address   String?
+  city      String?
+  orders    Order[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Order {
+  id             String   @id @default(cuid())
+  orderCode      String   @unique
+  customerName   String
+  email          String?
+  phone          String
+  city           String
+  address        String
+  deliveryMethod String
+  paymentMethod  String
+  paymentStatus  String   @default("PENDING")
+  orderStatus    String   @default("PROCESSING")
+  subtotal       Float
+  deliveryFee    Float
+  total          Float
+  items          Json
+  notes          String?
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Inquiry {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  phone     String?
+  subject   String
+  message   String
+  status    String   @default("NEW")
+  createdAt DateTime @default(now())
+}
+
+model Discount {
+  id             String    @id @default(cuid())
+  code           String    @unique
+  description    String?
+  type           String    @default("PERCENTAGE") // "PERCENTAGE" or "FIXED"
+  value          Float
+  minOrderAmount Float?    @default(0)
+  maxDiscount    Float?
+  usageLimit     Int?
+  usedCount      Int       @default(0)
+  isActive       Boolean   @default(true)
+  expiresAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model Batch {
+  id              String   @id @default(cuid())
+  batchNumber     String   @unique
+  type            String   @default("SEA_FCL") // "SEA_FCL" or "AIR_CARGO"
+  containerType   String   @default("40ft High Cube Container")
+  carrier         String
+  originPort      String   @default("Guangzhou Port, China")
+  destinationPort String   @default("Port of Tema (MPS Terminal 3)")
+  capacityCbm     Float?
+  allocatedCbm    Float?
+  capacityKg      Float?
+  allocatedKg     Float?
+  totalOrders     Int      @default(0)
+  status          String   @default("CONFIRMED") // "CONFIRMED", "QC_BATCHING", "HIGH_SEAS", "CUSTOMS_CLEARANCE", "ACCRA_HUB", "DELIVERY_READY"
+  cutoffDate      String?
+  eta             String?
+  lockedFxRate    String?  @default("15.65")
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Review {
+  id           String   @id @default(cuid())
+  productId    String
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  userName     String
+  userCity     String?  @default("Accra")
+  rating       Int      @default(5)
+  title        String?
+  comment      String
+  verified     Boolean  @default(true)
+  helpfulCount Int      @default(0)
+  createdAt    DateTime @default(now())
+}
