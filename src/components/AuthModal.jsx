@@ -204,17 +204,42 @@ export const AuthModal = () => {
           {error && (
             <div
               style={{
-                backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                backgroundColor: 'rgba(239, 68, 68, 0.12)',
                 border: '1px solid rgba(239, 68, 68, 0.3)',
                 color: '#ef4444',
-                padding: '10px 14px',
+                padding: '12px 14px',
                 borderRadius: '10px',
                 fontSize: '0.85rem',
                 marginBottom: '16px',
-                fontWeight: 600
+                fontWeight: 600,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '6px'
               }}
             >
-              {error}
+              <div>{error}</div>
+              {error.toLowerCase().includes('already exists') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode('login');
+                    setError('');
+                  }}
+                  style={{
+                    alignSelf: 'flex-start',
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--accent)',
+                    fontWeight: 700,
+                    fontSize: '0.82rem',
+                    textDecoration: 'underline',
+                    cursor: 'pointer',
+                    padding: 0
+                  }}
+                >
+                  Already have an account? Click here to Sign In →
+                </button>
+              )}
             </div>
           )}
 
