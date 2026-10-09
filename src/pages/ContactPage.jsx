@@ -127,7 +127,7 @@ export const ContactPage = () => {
                 className="btn btn-whatsapp"
                 style={{ width: '100%' }}
               >
-                <MessageCircle size={18} /> Chat: 0249 773 097
+                <MessageCircle size={18} /> Chat: +233 59 144 0934
               </a>
             </div>
 

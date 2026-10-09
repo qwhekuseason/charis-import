@@ -399,20 +399,6 @@ export const AdminPage = () => {
             >
               Sign In with Admin Account
             </button>
-            <button
-              onClick={async () => {
-                try {
-                  await login('admin@charisimport.com', 'admin123456');
-                  showToast('Signed in as Admin Administrator', 'success');
-                } catch (e) {
-                  openAuth('login');
-                }
-              }}
-              className="btn btn-dark"
-              style={{ padding: '12px 24px', borderRadius: '12px', fontWeight: 800 }}
-            >
-              Instant Demo Admin Login
-            </button>
           </div>
         </div>
       </div>

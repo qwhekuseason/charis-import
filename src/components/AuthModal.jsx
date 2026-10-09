@@ -48,17 +48,6 @@ export const AuthModal = () => {
     }
   };
 
-  const fillQuickDemo = (role) => {
-    setError('');
-    if (role === 'admin') {
-      setEmail('admin@charisimport.com');
-      setPassword('admin123456');
-    } else {
-      setEmail('customer@charisimport.com');
-      setPassword('customer123456');
-    }
-  };
-
   return (
     <div
       style={{
@@ -432,58 +421,6 @@ export const AuthModal = () => {
             </button>
           </form>
 
-          {/* Quick Demo Credentials */}
-          {authMode === 'login' && (
-            <div
-              className="glass-panel"
-              style={{
-                marginTop: '20px',
-                padding: '14px',
-                borderRadius: '12px',
-                border: '1px dashed var(--border-light)'
-              }}
-            >
-              <div style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '8px' }}>
-                Quick Fill Demo Accounts
-              </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button
-                  type="button"
-                  onClick={() => fillQuickDemo('admin')}
-                  style={{
-                    flex: 1,
-                    padding: '8px',
-                    backgroundColor: 'var(--bg-main)',
-                    border: '1px solid var(--border-light)',
-                    borderRadius: '8px',
-                    fontSize: '0.78rem',
-                    fontWeight: 700,
-                    color: 'var(--text-primary)',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Admin Demo
-                </button>
-                <button
-                  type="button"
-                  onClick={() => fillQuickDemo('customer')}
-                  style={{
-                    flex: 1,
-                    padding: '8px',
-                    backgroundColor: 'var(--bg-main)',
-                    border: '1px solid var(--border-light)',
-                    borderRadius: '8px',
-                    fontSize: '0.78rem',
-                    fontWeight: 700,
-                    color: 'var(--text-primary)',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Customer Demo
-                </button>
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>

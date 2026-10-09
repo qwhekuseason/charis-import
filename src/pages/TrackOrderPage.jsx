@@ -789,12 +789,23 @@ export const TrackOrderPage = () => {
             <p style={{ fontSize: '0.92rem', color: 'var(--text-muted)', marginBottom: '22px', maxWidth: '480px', margin: '0 auto 22px' }}>
               Please verify your tracking code or the Ghana phone number used during checkout.
             </p>
-            <button
-              className="btn btn-primary"
-              onClick={() => loadPreset('CHR-2026-7841')}
-            >
-              Load Demo Order #CHR-2026-7841
-            </button>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button
+                className="btn btn-outline"
+                onClick={() => { setSearchInput(''); setHasSearched(false); }}
+              >
+                Clear Search
+              </button>
+              <a
+                href={`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(`Hello CHARI Logistics, I need help tracking my order with query: "${searchInput}"`)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn-whatsapp"
+              >
+                <MessageCircle size={18} />
+                <span>Inquire on WhatsApp</span>
+              </a>
+            </div>
           </div>
         ) : null}
       </div>

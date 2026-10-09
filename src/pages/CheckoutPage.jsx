@@ -22,7 +22,8 @@ import {
   Scale,
   Lock,
   Clock,
-  Check
+  Check,
+  Copy
 } from 'lucide-react';
 
 export const CheckoutPage = () => {
@@ -96,6 +97,27 @@ export const CheckoutPage = () => {
   const [placedOrderDetails, setPlacedOrderDetails] = useState(null);
   const [termsAgreed, setTermsAgreed] = useState(false);
   const [step, setStep] = useState(1);
+  const [copiedField, setCopiedField] = useState(null);
+
+  const handleCopy = (text, fieldName, label) => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setCopiedField(fieldName);
+      showToast(`${label} copied to clipboard!`, 'success');
+      setTimeout(() => setCopiedField(null), 2500);
+    } catch {
+      showToast(`Copied: ${text}`, 'info');
+    }
+  };
 
   const [formData, setFormData] = useState({
     fullName: user?.name || '',
@@ -239,10 +261,8 @@ export const CheckoutPage = () => {
         region: formData.region,
         paymentMethod:
           paymentMethod === 'momo'
-            ? `${momoProvider.toUpperCase()} MoMo (${momoNumber || formData.phone})`
-            : paymentMethod === 'card'
-            ? 'Debit / Credit Card (3D Secure)'
-            : 'Pay on Collection / Inspection',
+            ? `${momoProvider.toUpperCase()} MoMo Transfer (${momoNumber || formData.phone})`
+            : 'Pay on Collection / Inspection (Spintex Hub)',
         waybillNumber: `BL-GH-${orderId}`,
         steps: [
           { title: 'Order Confirmed & FX Locked', time: 'Just Now', location: 'Accra FX Treasury Hub', done: true, note: `USD/GHS: ${fxRates?.USD_GHS || 15.65} snapshot locked. PO queued with supplier.` },
@@ -261,7 +281,15 @@ export const CheckoutPage = () => {
       clearCart();
       setStep(3);
       window.scrollTo({ top: 0, behavior: 'smooth' });
-      showToast(`Order #${confirmedOrder.orderCode || confirmedOrder.orderId} locked & confirmed!`, 'success');
+      showToast(`Order #${confirmedOrder.orderCode || confirmedOrder.orderId} recorded successfully!`, 'success');
+
+      // Auto-open WhatsApp with order details
+      try {
+        const waLink = getOrderWhatsAppLink(confirmedOrder);
+        window.open(waLink, '_blank');
+      } catch (err) {
+        console.warn('WhatsApp auto-open popup notice:', err);
+      }
     } catch (err) {
       console.error('Error in handlePlaceOrder:', err);
       showToast('Could not complete order. Please try again.', 'error');
@@ -271,12 +299,27 @@ export const CheckoutPage = () => {
   };
 
   const getOrderWhatsAppLink = (order) => {
-    const itemsList = order.items
-      .map((it) => `• ${it.name} (${it.qty} pcs) @ GH₵${it.price.toFixed(2)}`)
+    const code = order.orderCode || order.orderId;
+    const itemsList = (order.items || [])
+      .map((it) => `• ${it.name} (${it.qty} pcs) @ GH₵${(it.price || 0).toFixed(2)}`)
       .join('\n');
 
     const msg = encodeURIComponent(
-      `Hello CHARI Team,\n\nI just placed an international import pre-order:\n*Order ID: #${order.orderId}*\nCustomer: *${order.customerName}*\nPhone: *${order.phone}*\nFreight Route: *${order.shippingMethod}*\nDestination: *${order.destination}*\n\n*Items:*\n${itemsList}\n\n*Total Amount: GH₵${order.total.toFixed(2)}*\nPayment: *${order.paymentMethod}*\nFX Lock Snapshot: *USD ${order.fxLock?.usdRate || '15.65'}*\nIdempotency Key: *${order.idempotencyKey}*\n\nPlease confirm receipt and allocation into the next container batch.`
+      `*📦 NEW ORDER CONFIRMATION - CHARIS IMPORT*\n\n` +
+      `*Order ID:* #${code}\n` +
+      `*Customer:* ${order.customerName}\n` +
+      `*Phone:* ${order.phone}\n` +
+      (order.email ? `*Email:* ${order.email}\n` : '') +
+      `*Delivery Address:* ${order.destination || order.city}\n` +
+      `*Logistics / Freight:* ${order.shippingMethod}\n\n` +
+      `*ORDER ITEMS:*\n${itemsList}\n\n` +
+      `*Subtotal:* GH₵${(order.subtotal || 0).toFixed(2)}\n` +
+      `*Delivery / Shipping:* GH₵${(order.shippingCost || order.deliveryFee || 0).toFixed(2)}\n` +
+      (order.discountAmount ? `*Discount:* -GH₵${order.discountAmount.toFixed(2)}\n` : '') +
+      `*TOTAL PAYABLE:* GH₵${(order.total || 0).toFixed(2)}\n\n` +
+      `*Payment Method:* ${order.paymentMethod}\n` +
+      `*Payment MoMo Account:* 059 144 0934 (CHARIS IMPORT)\n\n` +
+      `Hello CHARIS team, I have confirmed this order on your website and am sending my payment details / transfer receipt now.`
     );
     return `https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`;
   };
@@ -414,71 +457,73 @@ export const CheckoutPage = () => {
           </div>
         </div>
 
-        {/* STEP 3: ORDER CONFIRMATION */}
+        {/* STEP 3: ORDER CONFIRMATION & PAYMENT TRANSFER DETAILS */}
         {step === 3 && placedOrderDetails && (
           <div
             className="glass-panel-elevated"
             style={{
-              padding: '40px 32px',
-              textAlign: 'center',
-              maxWidth: '720px',
+              padding: '36px 28px',
+              maxWidth: '740px',
               margin: '0 auto'
             }}
           >
-            <div
-              style={{
-                width: '80px',
-                height: '80px',
-                borderRadius: '50%',
-                backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                color: '#10b981',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                margin: '0 auto 20px',
-                border: '2px solid rgba(16, 185, 129, 0.3)'
-              }}
-            >
-              <CheckCircle2 size={48} />
+            {/* Header / Success Indicator */}
+            <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+              <div
+                style={{
+                  width: '76px',
+                  height: '76px',
+                  borderRadius: '50%',
+                  backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                  color: '#10b981',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto 16px',
+                  border: '2px solid rgba(16, 185, 129, 0.3)'
+                }}
+              >
+                <CheckCircle2 size={44} />
+              </div>
+
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#059669', padding: '4px 12px', borderRadius: '20px', fontSize: '0.78rem', fontWeight: 800, marginBottom: '10px' }}>
+                <Check size={14} /> ORDER CONFIRMED &bull; AWAITING MOMO TRANSFER
+              </div>
+              
+              <h2 style={{ fontSize: '1.95rem', fontWeight: 900, color: 'var(--text-primary)', marginBottom: '6px', letterSpacing: '-0.02em' }}>
+                Order #{placedOrderDetails.orderCode || placedOrderDetails.orderId} Placed!
+              </h2>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.92rem', maxWidth: '540px', margin: '0 auto' }}>
+                Thank you, <strong>{placedOrderDetails.customerName}</strong>! Your order has been recorded. Please complete your Mobile Money transfer to the number below to initiate processing.
+              </p>
             </div>
 
-            <span className="badge badge-stock" style={{ marginBottom: '10px' }}>
-              Transaction & Allocation Secured
-            </span>
-            
-            <h2 style={{ fontSize: '2.1rem', fontWeight: 900, color: 'var(--text-primary)', marginBottom: '8px', letterSpacing: '-0.02em' }}>
-              Order Confirmed, {placedOrderDetails.customerName}!
-            </h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', marginBottom: '28px' }}>
-              Your order is recorded with transactional database lock. Exchange rate and freight space snapshot locked.
-            </p>
-
-            {/* Order Reference Box */}
+            {/* Order Reference & Amount Ticker */}
             <div
               style={{
                 backgroundColor: 'var(--bg-subtle)',
-                borderRadius: '16px',
-                padding: '20px',
-                border: '1.5px dashed var(--border-medium)',
-                marginBottom: '28px',
+                borderRadius: '14px',
+                padding: '16px 20px',
+                border: '1px solid var(--border-light)',
+                marginBottom: '24px',
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-                gap: '16px',
+                gap: '14px',
                 textAlign: 'center'
               }}
             >
               <div>
                 <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                  TRACKING ID
+                  ORDER REFERENCE
                 </div>
-                <div style={{ fontSize: '1.35rem', fontWeight: 900, color: 'var(--text-primary)', marginTop: '2px' }}>
-                  #{placedOrderDetails.orderId}
+                <div style={{ fontSize: '1.25rem', fontWeight: 900, color: 'var(--text-primary)', marginTop: '2px' }}>
+                  #{placedOrderDetails.orderCode || placedOrderDetails.orderId}
                 </div>
               </div>
 
               <div>
                 <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                  TOTAL LOCKED
+                  TOTAL TO TRANSFER
                 </div>
                 <div style={{ fontSize: '1.35rem', fontWeight: 900, color: 'var(--accent)', marginTop: '2px' }}>
                   GH₵{placedOrderDetails.total.toFixed(2)}
@@ -487,35 +532,222 @@ export const CheckoutPage = () => {
 
               <div>
                 <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                  FREIGHT TYPE
+                  FREIGHT / ROUTE
                 </div>
-                <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: '4px' }}>
-                  {placedOrderDetails.freightType === 'SEA_FREIGHT' ? 'Sea Freight FCL' : placedOrderDetails.freightType === 'AIR_FREIGHT' ? 'Air Cargo' : 'Local Courier'}
+                <div style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: '4px' }}>
+                  {placedOrderDetails.freightType === 'SEA_FREIGHT' ? 'Sea Freight (FCL)' : placedOrderDetails.freightType === 'AIR_FREIGHT' ? 'Air Cargo Express' : 'Local Courier'}
                 </div>
               </div>
             </div>
 
-            {/* Next Steps Notification */}
+            {/* HERO PAYMENT TRANSFER CARD */}
             <div
               style={{
-                backgroundColor: 'var(--accent-subtle)',
-                borderRadius: '14px',
-                padding: '18px 20px',
-                border: '1px solid var(--accent-border)',
-                textAlign: 'left',
-                marginBottom: '28px',
-                fontSize: '0.88rem',
-                color: 'var(--text-primary)'
+                backgroundColor: 'var(--bg-card)',
+                borderRadius: '16px',
+                padding: '24px',
+                border: '2px solid rgba(245, 158, 11, 0.45)',
+                boxShadow: '0 8px 24px rgba(245, 158, 11, 0.08)',
+                marginBottom: '24px'
               }}
             >
-              <div style={{ fontWeight: 800, color: 'var(--accent)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <PackageCheck size={18} /> Pre-Order Batching Lifecycle:
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: '#f59e0b', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: '0.8rem' }}>
+                    MTN
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
+                      Mobile Money Transfer Details
+                    </h3>
+                    <div style={{ fontSize: '0.76rem', color: '#059669', fontWeight: 700 }}>
+                      Official Charis Import Verified Recipient
+                    </div>
+                  </div>
+                </div>
+                <span style={{ fontSize: '0.74rem', backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#d97706', padding: '3px 10px', borderRadius: '20px', fontWeight: 700 }}>
+                  Zero Extra Fees
+                </span>
               </div>
-              <ul style={{ paddingLeft: '22px', margin: 0, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
-                <li>Supplier fabrication and quality stress inspection initiated.</li>
-                <li>Your items are consolidated into container batch <strong>BATCH-2026-FCL04</strong>.</li>
-                <li>Customs single window clearance through Tema MPS Terminal 3 included.</li>
-              </ul>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {/* Number Box */}
+                <div
+                  style={{
+                    backgroundColor: 'var(--bg-subtle)',
+                    padding: '14px 16px',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border-medium)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px'
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                      TRANSFER TO (MTN MOMO NUMBER)
+                    </div>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--text-primary)', letterSpacing: '0.02em', marginTop: '2px' }}>
+                      059 144 0934
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      International format: +233 59 144 0934
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy('0591440934', 'momoNumber', 'MoMo Number')}
+                    className="btn btn-outline"
+                    style={{ padding: '8px 14px', fontSize: '0.82rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    {copiedField === 'momoNumber' ? (
+                      <>
+                        <Check size={15} color="#10b981" />
+                        <span style={{ color: '#10b981' }}>Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={15} />
+                        <span>Copy Number</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Account Name */}
+                <div
+                  style={{
+                    backgroundColor: 'var(--bg-subtle)',
+                    padding: '12px 16px',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border-light)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px'
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                      REGISTERED ACCOUNT NAME
+                    </div>
+                    <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: '2px' }}>
+                      CHARIS IMPORT
+                    </div>
+                  </div>
+                  <span style={{ fontSize: '0.74rem', color: '#059669', fontWeight: 700, backgroundColor: 'rgba(16, 185, 129, 0.1)', padding: '3px 8px', borderRadius: '6px' }}>
+                    Verified Merchant
+                  </span>
+                </div>
+
+                {/* Amount to send */}
+                <div
+                  style={{
+                    backgroundColor: 'var(--bg-subtle)',
+                    padding: '12px 16px',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border-light)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px'
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                      EXACT AMOUNT TO SEND
+                    </div>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 900, color: 'var(--accent)', marginTop: '2px' }}>
+                      GH₵{placedOrderDetails.total.toFixed(2)}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(placedOrderDetails.total.toFixed(2), 'momoAmount', 'Amount')}
+                    className="btn btn-outline"
+                    style={{ padding: '8px 14px', fontSize: '0.82rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    {copiedField === 'momoAmount' ? (
+                      <>
+                        <Check size={15} color="#10b981" />
+                        <span style={{ color: '#10b981' }}>Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={15} />
+                        <span>Copy Amount</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Reference */}
+                <div
+                  style={{
+                    backgroundColor: 'var(--bg-subtle)',
+                    padding: '12px 16px',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border-light)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px'
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                      MOMO PAYMENT REFERENCE (REQUIRED)
+                    </div>
+                    <div style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--text-primary)', marginTop: '2px' }}>
+                      {placedOrderDetails.orderCode || placedOrderDetails.orderId}
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: '#d97706', fontWeight: 600, marginTop: '2px' }}>
+                      Put this reference in your MoMo transfer so we instantly identify your payment.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(placedOrderDetails.orderCode || placedOrderDetails.orderId, 'momoRef', 'Reference')}
+                    className="btn btn-outline"
+                    style={{ padding: '8px 14px', fontSize: '0.82rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    {copiedField === 'momoRef' ? (
+                      <>
+                        <Check size={15} color="#10b981" />
+                        <span style={{ color: '#10b981' }}>Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={15} />
+                        <span>Copy Reference</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Instructions 1-2-3 */}
+              <div
+                style={{
+                  marginTop: '18px',
+                  padding: '14px',
+                  backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                  borderRadius: '10px',
+                  fontSize: '0.82rem',
+                  lineHeight: 1.5,
+                  color: 'var(--text-primary)'
+                }}
+              >
+                <div style={{ fontWeight: 800, marginBottom: '6px', color: '#b45309' }}>
+                  📌 Quick 3-Step Transfer Guide:
+                </div>
+                <ol style={{ paddingLeft: '18px', margin: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <li>Dial <strong>*170#</strong> or open your MTN MoMo / Bank App.</li>
+                  <li>Transfer <strong>GH₵{placedOrderDetails.total.toFixed(2)}</strong> to <strong>059 144 0934</strong> with reference <strong>{placedOrderDetails.orderCode || placedOrderDetails.orderId}</strong>.</li>
+                  <li>Click the button below to send your payment screenshot or SMS confirmation to WhatsApp.</li>
+                </ol>
+              </div>
             </div>
 
             {/* Action Buttons */}
@@ -525,13 +757,16 @@ export const CheckoutPage = () => {
                 target="_blank"
                 rel="noreferrer"
                 className="btn btn-whatsapp btn-lg"
-                style={{ borderRadius: '14px' }}
+                style={{ borderRadius: '14px', fontSize: '0.98rem', padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}
               >
-                <MessageCircle size={20} />
-                <span>Send Order Slip to WhatsApp Support</span>
+                <MessageCircle size={22} />
+                <span>Send Order &amp; Payment Receipt via WhatsApp</span>
               </a>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+                💡 WhatsApp opened automatically upon checkout. Click the button above if it did not open.
+              </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '6px' }}>
                 <button
                   className="btn btn-outline"
                   onClick={() => navigate('track-order', { prefillCode: placedOrderDetails.orderCode || placedOrderDetails.orderId })}
@@ -812,7 +1047,7 @@ export const CheckoutPage = () => {
                       <div style={{ flex: 1 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <span style={{ fontWeight: 800, fontSize: '0.96rem', color: 'var(--text-primary)' }}>
-                            Mobile Money (MoMo Direct)
+                            Mobile Money Transfer (MoMo)
                           </span>
                           <div style={{ display: 'flex', gap: '6px' }}>
                             <span style={{ backgroundColor: '#f59e0b', color: '#000', padding: '2px 7px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 800 }}>MTN</span>
@@ -821,7 +1056,7 @@ export const CheckoutPage = () => {
                           </div>
                         </div>
                         <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                          Instant MoMo prompt sent directly to your phone. Zero merchant fees.
+                          Transfer directly to our official MoMo number (059 144 0934) after confirming. Details provided on next screen and sent to WhatsApp.
                         </p>
                       </div>
                     </label>
@@ -842,7 +1077,7 @@ export const CheckoutPage = () => {
                       >
                         <div>
                           <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>
-                            Choose Network Provider:
+                            Your Network Provider:
                           </label>
                           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
                             {[
@@ -877,7 +1112,7 @@ export const CheckoutPage = () => {
 
                         <div>
                           <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>
-                            {momoProvider.toUpperCase()} MoMo Phone Number *
+                            Your {momoProvider.toUpperCase()} Phone Number:
                           </label>
                           <input
                             type="tel"
@@ -887,9 +1122,6 @@ export const CheckoutPage = () => {
                             onChange={(e) => setMomoNumber(e.target.value)}
                             style={{ width: '100%' }}
                           />
-                          <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
-                            Enter your PIN on your handset when prompted to verify reservation.
-                          </span>
                         </div>
                       </div>
                     )}
@@ -924,40 +1156,6 @@ export const CheckoutPage = () => {
                         </span>
                         <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px' }}>
                           Inspect stock in person at our Spintex / Accra warehouse hub before final settlement.
-                        </p>
-                      </div>
-                    </label>
-
-                    {/* Card Option */}
-                    <label
-                      style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: '14px',
-                        padding: '16px',
-                        borderRadius: '14px',
-                        border: paymentMethod === 'card'
-                          ? '2px solid var(--accent)'
-                          : '1px solid var(--border-light)',
-                        backgroundColor: paymentMethod === 'card'
-                          ? 'var(--accent-subtle)'
-                          : 'var(--bg-subtle)',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <input
-                        type="radio"
-                        name="paymentMethod"
-                        checked={paymentMethod === 'card'}
-                        onChange={() => setPaymentMethod('card')}
-                        style={{ marginTop: '4px', accentColor: 'var(--accent)' }}
-                      />
-                      <div>
-                        <span style={{ fontWeight: 800, fontSize: '0.96rem', color: 'var(--text-primary)' }}>
-                          Debit / Credit Card (Visa / Mastercard)
-                        </span>
-                        <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                          Encrypted 3D Secure Ghanaian card payment.
                         </p>
                       </div>
                     </label>
@@ -1016,8 +1214,8 @@ export const CheckoutPage = () => {
                     style={{ marginTop: '8px', borderRadius: '12px', opacity: termsAgreed ? 1 : 0.5 }}
                   >
                     {isSubmitting
-                      ? 'Confirming Transaction & Locking Rates...'
-                      : `Pay GH₵${grandTotal.toFixed(2)} & Lock Pre-Order`}
+                      ? 'Placing Order & Connecting WhatsApp...'
+                      : `Confirm Order & View Transfer Details (GH₵${grandTotal.toFixed(2)})`}
                   </button>
                 </div>
               )}
