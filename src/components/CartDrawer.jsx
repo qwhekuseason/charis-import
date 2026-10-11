@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useStore } from '../context/StoreContext';
+import { sizedImage } from '../utils/images';
 import { validateDiscountCode } from '../services/api';
 import {
   X,
@@ -77,6 +78,7 @@ export const CartDrawer = () => {
 
   const totalCbm = cart.reduce((sum, item) => sum + (item.product.cbm || 0.035) * item.quantity, 0);
   const totalWeight = cart.reduce((sum, item) => sum + (item.product.weightKg || 2.5) * item.quantity, 0);
+  const totalItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   const handleProceedToCheckout = () => {
     setCartDrawerOpen(false);
@@ -105,8 +107,8 @@ export const CartDrawer = () => {
           }}
         >
           <div className="drawer-title" style={{ color: 'var(--text-primary)' }}>
-            <ShoppingBag size={22} color="#D4AF37" />
-            <span>Pre-Order Bag ({cart.length})</span>
+            <ShoppingBag size={22} color="#2563eb" />
+            <span>Your cart ({totalItemCount})</span>
           </div>
           <button
             onClick={() => setCartDrawerOpen(false)}
@@ -121,29 +123,6 @@ export const CartDrawer = () => {
           >
             <X size={18} />
           </button>
-        </div>
-
-        {/* FX & Container Mini Banner */}
-        <div
-          style={{
-            padding: '10px 18px',
-            backgroundColor: 'rgba(212, 175, 55, 0.08)',
-            borderBottom: '1px solid var(--border-light)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            fontSize: '0.75rem',
-            color: 'var(--text-secondary)'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Anchor size={13} color="#D4AF37" />
-            <span>Batch: <strong style={{ color: 'var(--text-primary)' }}>{activeContainerBatch?.containerNumber || 'CN-GH-2026-FCL04'}</strong></span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Lock size={12} color="#10b981" />
-            <span style={{ color: '#10b981', fontWeight: 700 }}>FX Rate Locked</span>
-          </div>
         </div>
 
         {/* Content */}
@@ -166,21 +145,21 @@ export const CartDrawer = () => {
                   width: '80px',
                   height: '80px',
                   borderRadius: '50%',
-                  backgroundColor: 'rgba(212, 175, 55, 0.1)',
+                  backgroundColor: 'rgba(37, 99, 235, 0.1)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   marginBottom: '16px',
-                  color: '#D4AF37'
+                  color: '#2563eb'
                 }}
               >
                 <ShoppingBag size={40} />
               </div>
               <h3 style={{ fontSize: '1.2rem', color: 'var(--text-primary)', marginBottom: '8px', fontWeight: 800 }}>
-                Your pre-order bag is empty
+                Your cart is empty
               </h3>
               <p style={{ fontSize: '0.88rem', marginBottom: '24px', color: 'var(--text-secondary)' }}>
-                Browse our verified factory batches from Guangzhou & Yiwu!
+                Browse our products and add what you like.
               </p>
               <button
                 className="btn btn-primary"
@@ -189,7 +168,7 @@ export const CartDrawer = () => {
                   navigate('shop');
                 }}
               >
-                Explore Active Batches
+                Start shopping
               </button>
             </div>
           ) : (
@@ -208,7 +187,7 @@ export const CartDrawer = () => {
                   }}
                 >
                   <img
-                    src={item.product.images?.[0] || item.product.image || ''}
+                    src={sizedImage(item.product.images?.[0] || item.product.image || '', 160)}
                     alt={item.product.name}
                     style={{
                       width: '74px',
@@ -339,11 +318,11 @@ export const CartDrawer = () => {
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Boxes size={14} color="#2563eb" />
+                  
                   <span>Items: <strong>{totalItemCount}</strong></span>
                 </div>
                 <div>
-                  <span>Est. Weight: <strong style={{ color: 'var(--text-primary)' }}>{totalWeight.toFixed(1)} KG</strong></span>
+                  <span>Approx. weight: <strong style={{ color: 'var(--text-primary)' }}>{totalWeight.toFixed(1)} kg</strong></span>
                 </div>
               </div>
 
@@ -406,17 +385,17 @@ export const CartDrawer = () => {
                             alignItems: 'center',
                             gap: '4px',
                             padding: '3px 8px',
-                            backgroundColor: 'rgba(212, 175, 55, 0.1)',
-                            border: '1px dashed #D4AF37',
+                            backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                            border: '1px dashed #2563eb',
                             borderRadius: '6px',
                             fontSize: '0.74rem',
                             fontWeight: 700,
-                            color: '#D4AF37',
+                            color: '#2563eb',
                             cursor: 'pointer'
                           }}
                           title={coupon.description}
                         >
-                          <Tag size={10} /> {coupon.code} • {coupon.badge}
+                           {coupon.code} • {coupon.badge}
                         </button>
                       ))}
                     </div>
@@ -440,7 +419,7 @@ export const CartDrawer = () => {
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Tag size={13} />
+                      
                       <span>
                         Coupon <strong>{discountInfo.code}</strong> applied (
                         {discountInfo.type === 'PERCENTAGE'
@@ -528,7 +507,7 @@ export const CartDrawer = () => {
               }}
             >
               <span>Landed Total:</span>
-              <span style={{ color: '#D4AF37' }}>
+              <span style={{ color: '#2563eb' }}>
                 <span className="currency-ghc">GH₵</span>
                 {grandTotal.toFixed(2)}
               </span>
@@ -539,7 +518,7 @@ export const CartDrawer = () => {
               style={{ width: '100%', marginBottom: '8px', borderRadius: '12px', padding: '12px' }}
               onClick={handleProceedToCheckout}
             >
-              Proceed to Ghanaian Checkout <ArrowRight size={18} />
+              Go to checkout <ArrowRight size={18} />
             </button>
 
             <button

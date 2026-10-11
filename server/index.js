@@ -8,6 +8,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import multer from 'multer';
+import crypto from 'crypto';
+import { v2 as cloudinary } from 'cloudinary';
 
 dotenv.config();
 
@@ -17,28 +19,48 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 5000;
-const JWT_SECRET = process.env.JWT_SECRET || 'charis_super_secret_jwt_key_2026_accra';
+// Login tokens are signed with this secret — a guessable value would let anyone forge an admin login.
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET || JWT_SECRET.length < 32 || JWT_SECRET === 'your_secure_jwt_secret_here') {
+  console.error('❌ JWT_SECRET is missing or too weak. Set a random value of 32+ characters in your environment (e.g. Render → Environment).');
+  process.exit(1);
+}
 
-// Ensure public/uploads directory exists
+// Image storage: Cloudinary when CLOUDINARY_URL is set (permanent, survives redeploys),
+// otherwise the local public/uploads folder (fine for development only — Render wipes it).
+cloudinary.config(true); // re-read CLOUDINARY_URL now that dotenv has loaded it
+cloudinary.config({ secure: true });
+const cloudinaryEnabled = Boolean(process.env.CLOUDINARY_URL && cloudinary.config().cloud_name);
+console.log(cloudinaryEnabled
+  ? `🖼️  Image uploads → Cloudinary (${cloudinary.config().cloud_name})`
+  : '⚠️  CLOUDINARY_URL not set — uploads are saved locally and will be lost on redeploy.');
+
 const uploadsDir = path.join(__dirname, '../public/uploads');
-if (!fs.existsSync(uploadsDir)) {
+if (!cloudinaryEnabled && !fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Multer Storage Configuration
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadsDir);
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, `prod-${uniqueSuffix}${ext}`);
-  }
+const uploadToCloudinary = (buffer) => new Promise((resolve, reject) => {
+  const stream = cloudinary.uploader.upload_stream(
+    {
+      folder: 'chari/products',
+      resource_type: 'image',
+      // Cap stored originals at 2000px so phone photos don't eat the free quota.
+      transformation: [{ width: 2000, height: 2000, crop: 'limit' }],
+    },
+    (error, result) => (error ? reject(error) : resolve(result))
+  );
+  stream.end(buffer);
+});
+
+// Delivery URL: auto WebP/AVIF + auto quality, max 1200px — much lighter on mobile data.
+const optimizedImageUrl = (publicId) => cloudinary.url(publicId, {
+  secure: true,
+  transformation: [{ width: 1200, crop: 'limit', fetch_format: 'auto', quality: 'auto' }],
 });
 
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024 }, // 15MB max file size
   fileFilter: (req, file, cb) => {
     const allowed = /jpeg|jpg|png|webp|gif|avif/;
@@ -50,6 +72,38 @@ const upload = multer({
     cb(new Error('Only image files (JPG, PNG, WEBP, GIF, AVIF) are allowed'));
   }
 });
+
+// "Food & Snacks" → "food-snacks" (must match src/utils/categories.js)
+const slugify = (value) => String(value || '').toLowerCase().replace(/&/g, ' ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+// Render sits behind a proxy — trust it so req.ip is the visitor's real address.
+app.set('trust proxy', 1);
+
+// Simple in-memory limiter: blocks repeated guessing of passwords and order codes.
+const rateLimit = ({ windowMs, max, message }) => {
+  const hits = new Map();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of hits) if (entry.resetAt <= now) hits.delete(key);
+  }, windowMs).unref();
+  return (req, res, next) => {
+    const now = Date.now();
+    const entry = hits.get(req.ip);
+    if (!entry || entry.resetAt <= now) {
+      hits.set(req.ip, { count: 1, resetAt: now + windowMs });
+      return next();
+    }
+    entry.count += 1;
+    if (entry.count > max) {
+      res.set('Retry-After', String(Math.ceil((entry.resetAt - now) / 1000)));
+      return res.status(429).json({ success: false, error: message });
+    }
+    next();
+  };
+};
+
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: 'Too many attempts. Please wait 15 minutes and try again.' });
+const trackLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: 'Too many tracking lookups. Please wait a few minutes and try again.' });
 
 // Middleware
 app.use(cors());
@@ -148,12 +202,15 @@ app.get('/api/health', async (req, res) => {
 // ---------------------------------------------------------------------------
 
 // POST /api/auth/register
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
     const { name, email, password, phone, city, address } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ success: false, error: 'Name, email, and password are required.' });
+    }
+    if (String(password).length < 8) {
+      return res.status(400).json({ success: false, error: 'Password must be at least 8 characters.' });
     }
 
     const existingUser = await prisma.user.findUnique({
@@ -166,6 +223,15 @@ app.post('/api/auth/register', async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    // Link to whoever invited them. Ignore codes that don't exist or point at the same phone number.
+    let referredById = null;
+    const inviteCode = String(req.body.referralCode || '').trim().toUpperCase();
+    if (inviteCode) {
+      const referrer = await prisma.user.findUnique({ where: { referralCode: inviteCode } });
+      const samePhone = referrer?.phone && phone && normalizePhone(referrer.phone) === normalizePhone(phone);
+      if (referrer && !samePhone) referredById = referrer.id;
+    }
+
     const newUser = await prisma.user.create({
       data: {
         name: name.trim(),
@@ -175,6 +241,8 @@ app.post('/api/auth/register', async (req, res) => {
         city: city ? city.trim() : 'Accra',
         address: address ? address.trim() : null,
         role: 'CUSTOMER',
+        referralCode: await generateReferralCode(),
+        referredById,
       },
       select: {
         id: true,
@@ -209,7 +277,7 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 // POST /api/auth/login
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -388,6 +456,7 @@ app.get('/api/products', async (req, res) => {
     const formatted = products.map((p) => ({
       ...p,
       images: p.gallery && p.gallery.length > 0 ? p.gallery : [p.image],
+      categorySlug: slugify(p.category),
       specifications: p.specs || [],
       reviewCount: p.reviewsCount,
     }));
@@ -418,6 +487,7 @@ app.get('/api/products/:idOrSlug', async (req, res) => {
       data: {
         ...product,
         images: product.gallery && product.gallery.length > 0 ? product.gallery : [product.image],
+        categorySlug: slugify(product.category),
         specifications: product.specs || [],
         reviewCount: product.reviewsCount,
       },
@@ -429,7 +499,7 @@ app.get('/api/products/:idOrSlug', async (req, res) => {
 
 // POST /api/upload (Admin upload product image)
 app.post('/api/upload', authenticateUser, requireAdmin, (req, res) => {
-  upload.single('image')(req, res, (err) => {
+  upload.single('image')(req, res, async (err) => {
     if (err instanceof multer.MulterError) {
       return res.status(400).json({ success: false, error: `Upload error: ${err.message}` });
     } else if (err) {
@@ -440,15 +510,26 @@ app.post('/api/upload', authenticateUser, requireAdmin, (req, res) => {
       return res.status(400).json({ success: false, error: 'No image file was provided' });
     }
 
-    const fileUrl = `/uploads/${req.file.filename}`;
-    console.log(`📸 Image uploaded successfully: ${fileUrl} (${(req.file.size / 1024).toFixed(1)} KB)`);
+    try {
+      let fileUrl;
+      let filename;
+      if (cloudinaryEnabled) {
+        const result = await uploadToCloudinary(req.file.buffer);
+        fileUrl = optimizedImageUrl(result.public_id);
+        filename = result.public_id;
+      } else {
+        const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
+        filename = `prod-${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ext}`;
+        await fs.promises.writeFile(path.join(uploadsDir, filename), req.file.buffer);
+        fileUrl = `/uploads/${filename}`;
+      }
 
-    res.json({
-      success: true,
-      url: fileUrl,
-      filename: req.file.filename,
-      size: req.file.size
-    });
+      console.log(`📸 Image uploaded: ${fileUrl} (${(req.file.size / 1024).toFixed(1)} KB)`);
+      res.json({ success: true, url: fileUrl, filename, size: req.file.size });
+    } catch (uploadError) {
+      console.error('Image upload failed:', uploadError);
+      res.status(502).json({ success: false, error: 'Image upload failed. Please try again.' });
+    }
   });
 });
 
@@ -555,78 +636,263 @@ app.get('/api/categories', async (req, res) => {
 // ---------------------------------------------------------------------------
 
 // POST /api/orders (Checkout create order)
+// Delivery options offered at checkout. Fees are decided here, never by the browser.
+const DELIVERY_OPTIONS = [
+  { id: 'sea_freight', name: 'Sea shipping', fee: 35 },
+  { id: 'air_cargo', name: 'Air shipping', fee: 75 },
+  { id: 'local_express', name: 'Local delivery (Accra)', fee: 40 },
+];
+
+const roundMoney = (n) => Math.round(n * 100) / 100;
+
+// Unambiguous characters only (no 0/O, 1/I) so codes are easy to read out over the phone.
+const ORDER_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const generateOrderCode = (prefix) => {
+  const bytes = crypto.randomBytes(8);
+  const suffix = Array.from(bytes, (b) => ORDER_CODE_ALPHABET[b % ORDER_CODE_ALPHABET.length]).join('');
+  return `${prefix}-${suffix}`;
+};
+
+// Compare Ghana numbers regardless of format (+233 24..., 024..., 24...).
+const normalizePhone = (value) => String(value || '').replace(/\D/g, '').slice(-9);
+
+// ---------------------------------------------------------------------------
+// Referral programme
+//   • A signed-up friend gets GH₵25 off their first order.
+//   • The person who invited them gets GH₵25 store credit once that order is marked PAID.
+//   • Credit is stored on the server, logged in CreditTransaction, and spent at checkout.
+// ---------------------------------------------------------------------------
+const REFERRAL_REWARD = 25;
+const REFERRAL_WELCOME_DISCOUNT = 25;
+
+async function generateReferralCode() {
+  for (;;) {
+    const bytes = crypto.randomBytes(6);
+    const code = `CHARI-${Array.from(bytes, (b) => ORDER_CODE_ALPHABET[b % ORDER_CODE_ALPHABET.length]).join('')}`;
+    if (!(await prisma.user.findUnique({ where: { referralCode: code } }))) return code;
+  }
+}
+
+// Older accounts were created before referral codes existed.
+async function ensureReferralCode(user) {
+  if (user.referralCode) return user.referralCode;
+  const referralCode = await generateReferralCode();
+  await prisma.user.update({ where: { id: user.id }, data: { referralCode } });
+  return referralCode;
+}
+
+async function isEligibleForWelcomeDiscount(user) {
+  if (!user?.referredById) return false;
+  const previousOrders = await prisma.order.count({
+    where: { userId: user.id, orderStatus: { not: 'CANCELLED' } },
+  });
+  return previousOrders === 0;
+}
+
+// Pays the referrer once, when the invited friend's first order is paid.
+async function rewardReferrerIfDue(order) {
+  if (!order.userId || order.referralRewarded || order.paymentStatus !== 'PAID') return;
+  const buyer = await prisma.user.findUnique({ where: { id: order.userId } });
+  if (!buyer?.referredById) return;
+
+  const earlierPaid = await prisma.order.count({
+    where: { userId: buyer.id, paymentStatus: 'PAID', id: { not: order.id }, createdAt: { lt: order.createdAt } },
+  });
+  if (earlierPaid > 0) return;
+
+  await prisma.$transaction(async (tx) => {
+    // Flip the flag first so a double-click can't pay twice.
+    const { count } = await tx.order.updateMany({
+      where: { id: order.id, referralRewarded: false },
+      data: { referralRewarded: true },
+    });
+    if (count === 0) return;
+    await tx.user.update({ where: { id: buyer.referredById }, data: { creditBalance: { increment: REFERRAL_REWARD } } });
+    await tx.creditTransaction.create({
+      data: { userId: buyer.referredById, amount: REFERRAL_REWARD, type: 'REFERRAL_REWARD', orderId: order.id, note: `${buyer.name.split(' ')[0]}'s first order` },
+    });
+  });
+  console.log(`🎁 Referral reward GH₵${REFERRAL_REWARD} paid for order ${order.orderCode}`);
+}
+
+// Gives back store credit when an order that used it is cancelled.
+async function refundCreditIfCancelled(order) {
+  if (order.orderStatus !== 'CANCELLED' || !order.userId || !(order.creditUsed > 0) || order.creditRefunded) return;
+  await prisma.$transaction(async (tx) => {
+    const { count } = await tx.order.updateMany({
+      where: { id: order.id, creditRefunded: false },
+      data: { creditRefunded: true },
+    });
+    if (count === 0) return;
+    await tx.user.update({ where: { id: order.userId }, data: { creditBalance: { increment: order.creditUsed } } });
+    await tx.creditTransaction.create({
+      data: { userId: order.userId, amount: order.creditUsed, type: 'ORDER_REFUND', orderId: order.id, note: `Order ${order.orderCode} cancelled` },
+    });
+  });
+}
+
+// GET /api/referrals/me — the signed-in customer's code, balance and history
+app.get('/api/referrals/me', authenticateUser, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+    const referralCode = await ensureReferralCode(user);
+    const [invited, rewards, history, welcomeDiscountAvailable] = await Promise.all([
+      prisma.user.count({ where: { referredById: user.id } }),
+      prisma.creditTransaction.count({ where: { userId: user.id, type: 'REFERRAL_REWARD' } }),
+      prisma.creditTransaction.findMany({ where: { userId: user.id }, orderBy: { createdAt: 'desc' }, take: 20 }),
+      isEligibleForWelcomeDiscount(user),
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        referralCode,
+        creditBalance: roundMoney(user.creditBalance || 0),
+        invitedCount: invited,
+        rewardedCount: rewards,
+        rewardAmount: REFERRAL_REWARD,
+        welcomeDiscount: REFERRAL_WELCOME_DISCOUNT,
+        welcomeDiscountAvailable,
+        history: history.map((t) => ({ id: t.id, amount: t.amount, type: t.type, note: t.note, createdAt: t.createdAt })),
+      },
+    });
+  } catch (error) {
+    console.error('Error loading referrals:', error);
+    res.status(500).json({ success: false, error: 'Could not load your referral details.' });
+  }
+});
+
 app.post('/api/orders', optionalAuth, async (req, res) => {
   try {
     const {
-      orderCode: clientOrderCode,
-      orderId,
       customerName,
       phone,
       email,
       city,
       address,
       deliveryMethod,
+      deliveryMethodId,
       paymentMethod,
       items,
-      subtotal,
-      deliveryFee,
-      shippingCost,
-      total,
       notes,
     } = req.body;
 
-    if (!customerName || !phone || !items || items.length === 0) {
+    if (!customerName || !phone || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
         success: false,
         error: 'Missing required customer details or order items',
       });
     }
 
-    // Determine final order code — respect client provided code (e.g. CHR-SEA-4821) while guaranteeing uniqueness
-    let finalOrderCode = (clientOrderCode || orderId || '').trim().toUpperCase();
-    if (finalOrderCode) {
-      const existing = await prisma.order.findUnique({
-        where: { orderCode: finalOrderCode },
-      });
-      if (existing) {
-        finalOrderCode = `${finalOrderCode}-${Math.floor(100 + Math.random() * 900)}`;
+    // Re-price every line from the database — the browser's prices are ignored.
+    const productIds = [...new Set(items.map((item) => String(item.id || '')))];
+    const products = await prisma.product.findMany({ where: { id: { in: productIds } } });
+    const productById = new Map(products.map((p) => [p.id, p]));
+
+    const pricedItems = [];
+    for (const item of items) {
+      const product = productById.get(String(item.id || ''));
+      const qty = Number(item.qty ?? item.quantity);
+      if (!product) {
+        return res.status(400).json({ success: false, error: 'One of the items in your cart is no longer available. Please refresh and try again.' });
       }
-    } else {
-      const randomDigits = Math.floor(1000 + Math.random() * 9000);
-      finalOrderCode = `CHR-${new Date().getFullYear()}-${randomDigits}`;
+      if (!product.inStock) {
+        return res.status(400).json({ success: false, error: `"${product.name}" is currently out of stock.` });
+      }
+      if (!Number.isInteger(qty) || qty < 1 || qty > 1000) {
+        return res.status(400).json({ success: false, error: `Invalid quantity for "${product.name}".` });
+      }
+      pricedItems.push({
+        id: product.id,
+        name: product.name,
+        qty,
+        price: product.price,
+        image: product.image,
+      });
     }
 
-    const parsedDeliveryFee = parseFloat(deliveryFee !== undefined ? deliveryFee : (shippingCost !== undefined ? shippingCost : 0));
-    const parsedSubtotal = parseFloat(subtotal || 0);
-    const parsedTotal = parseFloat(total !== undefined ? total : (parsedSubtotal + parsedDeliveryFee));
+    const delivery = DELIVERY_OPTIONS.find((o) => o.id === deliveryMethodId)
+      || DELIVERY_OPTIONS.find((o) => o.name === deliveryMethod);
+    if (!delivery) {
+      return res.status(400).json({ success: false, error: 'Please choose a valid delivery option.' });
+    }
 
-    const order = await prisma.order.create({
-      data: {
-        orderCode: finalOrderCode,
-        customerName,
-        phone,
-        email: email || (req.user ? req.user.email : null),
-        city: city || 'Accra',
-        address: address || '',
-        deliveryMethod: deliveryMethod || 'Standard Delivery',
-        paymentMethod: paymentMethod || 'Cash on Delivery',
-        paymentStatus: paymentMethod === 'Cash on Delivery' ? 'PENDING' : 'VERIFYING',
-        orderStatus: 'PROCESSING',
-        subtotal: parsedSubtotal,
-        deliveryFee: parsedDeliveryFee,
-        total: parsedTotal,
-        items: items,
-        notes: notes || null,
-        ...(req.user && { userId: req.user.id }),
-      },
+    const subtotal = roundMoney(pricedItems.reduce((sum, i) => sum + i.price * i.qty, 0));
+
+    // Promo codes are re-validated here; an invalid or expired code simply gives no discount.
+    const requestedCode = (req.body.couponCode || req.body.promoCode || '').trim().toUpperCase();
+    const promo = requestedCode ? await evaluateDiscount(requestedCode, subtotal) : null;
+    const promoDiscount = promo?.valid ? roundMoney(promo.discountAmount) : 0;
+
+    // Invited customers get a one-off welcome discount on their first order (not combined with a promo code).
+    const welcomeDiscount = req.user && (await isEligibleForWelcomeDiscount(req.user))
+      ? Math.min(REFERRAL_WELCOME_DISCOUNT, subtotal)
+      : 0;
+    const useWelcome = welcomeDiscount > promoDiscount;
+    const discountAmount = useWelcome ? welcomeDiscount : promoDiscount;
+    const couponCode = useWelcome ? 'REFERRAL-WELCOME' : (promo?.valid ? promo.code : null);
+
+    // Store credit (signed-in customers only), capped at what's left of the product cost.
+    const wantsCredit = Boolean(req.user && req.body.useCredit);
+    const creditUsed = wantsCredit
+      ? roundMoney(Math.min(req.user.creditBalance || 0, Math.max(0, subtotal - discountAmount)))
+      : 0;
+
+    const total = roundMoney(Math.max(0, subtotal - discountAmount - creditUsed + delivery.fee));
+
+    const codePrefix = delivery.id === 'sea_freight' ? 'CHR-SEA' : delivery.id === 'air_cargo' ? 'CHR-AIR' : 'CHR';
+    let orderCode = generateOrderCode(codePrefix);
+    while (await prisma.order.findUnique({ where: { orderCode } })) {
+      orderCode = generateOrderCode(codePrefix);
+    }
+
+    const order = await prisma.$transaction(async (tx) => {
+      if (creditUsed > 0) {
+        // Only deduct if the balance is still there (protects against two orders at once).
+        const { count } = await tx.user.updateMany({
+          where: { id: req.user.id, creditBalance: { gte: creditUsed } },
+          data: { creditBalance: { decrement: creditUsed } },
+        });
+        if (count === 0) throw Object.assign(new Error('Your store credit changed. Please refresh and try again.'), { status: 409 });
+      }
+
+      const created = await tx.order.create({
+        data: {
+          orderCode,
+          customerName,
+          phone,
+          email: email || (req.user ? req.user.email : null),
+          city: city || 'Accra',
+          address: address || '',
+          deliveryMethod: delivery.name,
+          paymentMethod: paymentMethod || 'Cash on Delivery',
+          paymentStatus: paymentMethod === 'Cash on Delivery' ? 'PENDING' : 'VERIFYING',
+          orderStatus: 'PROCESSING',
+          subtotal,
+          deliveryFee: delivery.fee,
+          discountAmount,
+          couponCode,
+          creditUsed,
+          total,
+          items: pricedItems,
+          notes: notes || null,
+          ...(req.user && { userId: req.user.id }),
+        },
+      });
+
+      if (creditUsed > 0) {
+        await tx.creditTransaction.create({
+          data: { userId: req.user.id, amount: -creditUsed, type: 'ORDER_PAYMENT', orderId: created.id, note: `Used on order ${orderCode}` },
+        });
+      }
+      return created;
     });
 
-    console.log(`[Order] New order placed: ${order.orderCode} by ${customerName} (GH₵${parsedTotal.toFixed(2)})`);
+    console.log(`[Order] New order placed: ${order.orderCode} by ${customerName} (GH₵${total.toFixed(2)})`);
 
-    if (req.body.couponCode || req.body.promoCode) {
-      const codeToUpdate = (req.body.couponCode || req.body.promoCode).trim().toUpperCase();
+    if (promo?.valid && !useWelcome) {
       prisma.discount.update({
-        where: { code: codeToUpdate },
+        where: { code: promo.code },
         data: { usedCount: { increment: 1 } }
       }).catch(() => {});
     }
@@ -638,31 +904,31 @@ app.post('/api/orders', optionalAuth, async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating order:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(error.status || 500).json({ success: false, error: error.status ? error.message : 'Could not place your order. Please try again.' });
   }
 });
 
-// GET /api/orders/:code (Track Order)
-app.get('/api/orders/:code', async (req, res) => {
+// GET /api/orders/:code?phone=... (Track Order)
+// Order records hold names, phone numbers and home addresses, so a code alone is not enough:
+// the caller must also supply the phone number on the order, or be its logged-in owner / an admin.
+app.get('/api/orders/:code', trackLimiter, optionalAuth, async (req, res) => {
   try {
-    const { code } = req.params;
-    const cleanCode = code.trim().toUpperCase();
-
-    const order = await prisma.order.findFirst({
-      where: {
-        OR: [
-          { orderCode: cleanCode },
-          { id: code },
-        ],
-      },
+    const cleanCode = req.params.code.trim().toUpperCase();
+    const notFound = () => res.status(404).json({
+      success: false,
+      error: 'No order matches that code and phone number.',
     });
 
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        error: `Order with tracking code "${code}" not found.`,
-      });
-    }
+    const order = await prisma.order.findUnique({ where: { orderCode: cleanCode } });
+    if (!order) return notFound();
+
+    const isAdmin = req.user?.role === 'ADMIN';
+    const isOwner = req.user && order.userId === req.user.id;
+    const suppliedPhone = normalizePhone(req.query.phone);
+    const phoneMatches = suppliedPhone.length === 9 && suppliedPhone === normalizePhone(order.phone);
+
+    // Same response for "wrong phone" and "no such order" so codes can't be probed.
+    if (!isAdmin && !isOwner && !phoneMatches) return notFound();
 
     res.json({ success: true, data: order });
   } catch (error) {
@@ -695,6 +961,9 @@ app.patch('/api/orders/:id/status', authenticateUser, requireAdmin, async (req, 
         ...(paymentStatus && { paymentStatus }),
       },
     });
+
+    await rewardReferrerIfDue(updated);
+    await refundCreditIfCancelled(updated);
 
     res.json({ success: true, data: updated });
   } catch (error) {
@@ -916,6 +1185,36 @@ app.delete('/api/discounts/:id', authenticateUser, requireAdmin, async (req, res
 });
 
 // POST /api/discounts/validate (Public / Customer validate promo code)
+// Shared promo-code rules — used both for the checkout preview and when an order is actually placed.
+async function evaluateDiscount(code, subtotal) {
+  const cleanCode = String(code || '').trim().toUpperCase();
+  const discount = await prisma.discount.findUnique({ where: { code: cleanCode } });
+
+  if (!discount) return { valid: false, status: 404, error: `Promo code "${cleanCode}" is invalid.` };
+  if (!discount.isActive) return { valid: false, status: 400, error: `Promo code "${cleanCode}" is currently inactive.` };
+  if (discount.expiresAt && new Date() > new Date(discount.expiresAt)) {
+    return { valid: false, status: 400, error: `Promo code "${cleanCode}" has expired.` };
+  }
+  if (discount.usageLimit && discount.usedCount >= discount.usageLimit) {
+    return { valid: false, status: 400, error: `Promo code "${cleanCode}" has reached its maximum redemptions.` };
+  }
+
+  const currentSubtotal = Math.max(0, parseFloat(subtotal || 0));
+  if (discount.minOrderAmount && currentSubtotal < discount.minOrderAmount) {
+    return { valid: false, status: 400, error: `Cart subtotal must be at least GH₵${discount.minOrderAmount.toFixed(2)} to use "${cleanCode}".` };
+  }
+
+  let discountAmount;
+  if (discount.type === 'PERCENTAGE') {
+    discountAmount = (currentSubtotal * discount.value) / 100;
+    if (discount.maxDiscount && discountAmount > discount.maxDiscount) discountAmount = discount.maxDiscount;
+  } else {
+    discountAmount = Math.min(discount.value, currentSubtotal);
+  }
+
+  return { valid: true, discount, code: discount.code, discountAmount };
+}
+
 app.post('/api/discounts/validate', async (req, res) => {
   try {
     const { code, subtotal } = req.body;
@@ -923,72 +1222,21 @@ app.post('/api/discounts/validate', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Please enter a promo code.' });
     }
 
-    const cleanCode = code.trim().toUpperCase();
-    const discount = await prisma.discount.findUnique({
-      where: { code: cleanCode }
-    });
-
-    if (!discount) {
-      return res.status(404).json({
-        success: false,
-        error: `Promo code "${cleanCode}" is invalid.`
-      });
+    const result = await evaluateDiscount(code, subtotal);
+    if (!result.valid) {
+      return res.status(result.status).json({ success: false, error: result.error });
     }
 
-    if (!discount.isActive) {
-      return res.status(400).json({
-        success: false,
-        error: `Promo code "${cleanCode}" is currently inactive.`
-      });
-    }
-
-    // Check expiration
-    if (discount.expiresAt && new Date() > new Date(discount.expiresAt)) {
-      return res.status(400).json({
-        success: false,
-        error: `Promo code "${cleanCode}" has expired.`
-      });
-    }
-
-    // Check usage limit
-    if (discount.usageLimit && discount.usedCount >= discount.usageLimit) {
-      return res.status(400).json({
-        success: false,
-        error: `Promo code "${cleanCode}" has reached its maximum redemptions.`
-      });
-    }
-
-    const currentSubtotal = parseFloat(subtotal || 0);
-
-    // Check minimum order amount
-    if (discount.minOrderAmount && currentSubtotal < discount.minOrderAmount) {
-      return res.status(400).json({
-        success: false,
-        error: `Cart subtotal must be at least GH₵${discount.minOrderAmount.toFixed(2)} to use "${cleanCode}".`
-      });
-    }
-
-    // Calculate discount amount
-    let calculatedDiscount = 0;
-    if (discount.type === 'PERCENTAGE') {
-      calculatedDiscount = (currentSubtotal * discount.value) / 100;
-      if (discount.maxDiscount && calculatedDiscount > discount.maxDiscount) {
-        calculatedDiscount = discount.maxDiscount;
-      }
-    } else {
-      // FIXED
-      calculatedDiscount = Math.min(discount.value, currentSubtotal);
-    }
-
+    const { discount, discountAmount } = result;
     res.json({
       success: true,
       valid: true,
       code: discount.code,
       type: discount.type,
       value: discount.value,
-      discountAmount: calculatedDiscount,
+      discountAmount,
       message: discount.type === 'PERCENTAGE'
-        ? `${discount.value}% discount applied! (-GH₵${calculatedDiscount.toFixed(2)})`
+        ? `${discount.value}% discount applied! (-GH₵${discountAmount.toFixed(2)})`
         : `GH₵${discount.value.toFixed(2)} discount applied!`
     });
   } catch (error) {
@@ -1219,12 +1467,28 @@ app.get('/api/reviews', async (req, res) => {
 });
 
 // POST /api/reviews (Submit a verified customer review)
-app.post('/api/reviews', async (req, res) => {
+// Only signed-in customers who have actually ordered the product may review it,
+// so every review on the site is genuinely from a buyer.
+app.post('/api/reviews', authenticateUser, async (req, res) => {
   try {
-    const { productId, userName, userCity, rating, title, comment } = req.body;
+    const { productId, rating, title, comment } = req.body;
 
-    if (!productId || !comment) {
+    if (!productId || !comment || !String(comment).trim()) {
       return res.status(400).json({ success: false, error: 'Product ID and comment are required.' });
+    }
+
+    const product = await prisma.product.findUnique({ where: { id: productId } });
+    if (!product) {
+      return res.status(404).json({ success: false, error: 'Product not found.' });
+    }
+
+    const userOrders = await prisma.order.findMany({
+      where: { OR: [{ userId: req.user.id }, { email: req.user.email }] },
+      select: { items: true },
+    });
+    const hasBought = userOrders.some((o) => Array.isArray(o.items) && o.items.some((i) => i && i.id === productId));
+    if (!hasBought) {
+      return res.status(403).json({ success: false, error: 'Only customers who have ordered this product can review it.' });
     }
 
     const numericRating = Math.min(5, Math.max(1, parseInt(rating, 10) || 5));
@@ -1232,11 +1496,11 @@ app.post('/api/reviews', async (req, res) => {
     const review = await prisma.review.create({
       data: {
         productId,
-        userName: userName ? userName.trim() : 'Verified Buyer',
-        userCity: userCity ? userCity.trim() : 'Accra',
+        userName: req.user.name,
+        userCity: req.user.city || 'Accra',
         rating: numericRating,
-        title: title ? title.trim() : null,
-        comment: comment.trim(),
+        title: title ? String(title).trim().slice(0, 120) : null,
+        comment: String(comment).trim().slice(0, 2000),
         verified: true,
       }
     });
@@ -1264,9 +1528,14 @@ app.post('/api/reviews', async (req, res) => {
 // ---------------------------------------------------------------------------
 const distDir = path.join(__dirname, '../dist');
 if (fs.existsSync(distDir)) {
-  app.use(express.static(distDir));
+  // Built JS/CSS have content hashes in their names, so they can be cached for a year;
+  // index.html must always be re-checked so visitors pick up new deploys.
+  // fallthrough:false → a missing old asset returns 404 instead of index.html, so the app can detect it and reload.
+  app.use('/assets', express.static(path.join(distDir, 'assets'), { immutable: true, maxAge: '1y', fallthrough: false }));
+  app.use(express.static(distDir, { maxAge: '1d', index: false }));
   app.use((req, res, next) => {
     if (req.method === 'GET' && !req.path.startsWith('/api') && !req.path.startsWith('/uploads')) {
+      res.set('Cache-Control', 'no-cache');
       return res.sendFile(path.join(distDir, 'index.html'));
     }
     next();

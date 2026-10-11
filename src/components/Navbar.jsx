@@ -211,6 +211,7 @@ export const Navbar = () => {
           ) : (
             <button
               onClick={() => openAuth('login')}
+              className="navbar-text-btn"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -249,7 +250,7 @@ export const Navbar = () => {
             onClick={() => setCartDrawerOpen(true)}
             className="action-btn"
             title="Cart"
-            style={{ background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)', color: '#ffffff', borderRadius: '10px', boxShadow: '0 4px 12px rgba(37,99,235,0.25)' }}
+            style={{ background: '#2563eb', color: '#ffffff', borderRadius: '10px', boxShadow: '0 4px 12px rgba(37,99,235,0.25)' }}
           >
             <ShoppingBag size={18} />
             {cartCount > 0 && (
@@ -276,8 +277,6 @@ export const Navbar = () => {
             backgroundColor: 'var(--bg-card)',
             borderTop: '1px solid var(--border-light)',
             padding: '14px 20px 24px',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)'
           }}
         >
 

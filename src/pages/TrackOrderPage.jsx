@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useStore } from '../context/StoreContext';
+import { sizedImage } from '../utils/images';
 import { trackOrder as apiTrackOrder } from '../services/api';
 import {
   Package,
@@ -23,164 +24,71 @@ import {
   Scale
 } from 'lucide-react';
 
+// Four plain-language steps that follow the order status set in Admin.
+const STATUS_RANK = { PROCESSING: 0, PENDING: 0, CONFIRMED: 1, SHIPPED: 2, DELIVERED: 3 };
+
+const buildTrackingSteps = (order) => {
+  const status = String(order.orderStatus || order.status || 'PROCESSING').toUpperCase();
+  const rank = STATUS_RANK[status] ?? 0;
+  const placed = order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-GB') : order.date || '';
+  const steps = [
+    { title: 'Order received', note: 'We have your order and will contact you on WhatsApp.', time: placed },
+    { title: 'Confirmed', note: 'Payment checked and your items ordered from the supplier.' },
+    { title: 'Shipped', note: 'On the way to Ghana, then cleared through customs.' },
+    { title: 'Delivered', note: 'Delivered to you or ready for pickup.' },
+  ];
+  return steps.map((step, i) => ({ ...step, done: i <= rank, current: i === rank + 1 && status !== 'DELIVERED' }));
+};
+
+// Turns an order from the server into what this page displays.
+const toTrackedOrder = (liveOrder) => ({
+  ...liveOrder,
+  orderId: liveOrder.orderCode,
+  status: String(liveOrder.orderStatus || 'PROCESSING').toLowerCase(),
+  date: new Date(liveOrder.createdAt).toLocaleDateString('en-GB'),
+  shippingMethod: liveOrder.deliveryMethod,
+  destination: liveOrder.address ? `${liveOrder.address}, ${liveOrder.city}` : liveOrder.city,
+  steps: buildTrackingSteps(liveOrder),
+});
+
 export const TrackOrderPage = () => {
-  const { orders, WHATSAPP_NUMBER, fxRates, pageParams } = useStore();
+  const { orders, WHATSAPP_NUMBER, pageParams } = useStore();
   const [searchInput, setSearchInput] = useState('');
+  const [phoneInput, setPhoneInput] = useState(pageParams?.prefillPhone || '');
   const [searchedOrder, setSearchedOrder] = useState(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [loading, setLoading] = useState(false);
   const [copiedId, setCopiedId] = useState(false);
 
-  // Auto-search if navigated from AccountPage with a prefill order code
+  const lookUp = async (code, phone) => {
+    setLoading(true);
+    try {
+      const liveOrder = await apiTrackOrder(code, phone);
+      setSearchedOrder(liveOrder ? toTrackedOrder(liveOrder) : null);
+    } catch {
+      // Fall back to an order placed from this browser (shown even if the server is asleep).
+      const local = orders[code];
+      setSearchedOrder(local ? { ...local, steps: buildTrackingSteps(local) } : null);
+    } finally {
+      setHasSearched(true);
+      setLoading(false);
+    }
+  };
+
+  // Opened from the account page or right after checkout
   React.useEffect(() => {
     if (!pageParams?.prefillCode) return;
     const code = pageParams.prefillCode.trim().toUpperCase();
     setSearchInput(code);
-    setLoading(true);
-    import('../services/api').then(({ trackOrder: apiTrack }) => {
-      apiTrack(code)
-        .then((liveOrder) => {
-          if (liveOrder) {
-            setSearchedOrder({
-              ...liveOrder,
-              orderId: liveOrder.orderCode,
-              orderCode: liveOrder.orderCode,
-              shippingCost: liveOrder.deliveryFee,
-              deliveryFee: liveOrder.deliveryFee,
-              status: liveOrder.orderStatus ? liveOrder.orderStatus.toLowerCase() : 'processing',
-              customerCity: liveOrder.city,
-              date: new Date(liveOrder.createdAt).toLocaleDateString('en-GB'),
-              shippingMethod: liveOrder.deliveryMethod,
-              destination: liveOrder.address ? `${liveOrder.address}, ${liveOrder.city}` : liveOrder.city,
-              steps: [
-                { title: 'Order Confirmed', time: new Date(liveOrder.createdAt).toLocaleDateString('en-GB'), location: 'Charis Import Office', done: true, note: 'Order registered and recorded.' },
-                { title: 'Supplier Processing & Quality Check', time: 'In Progress', location: 'Overseas Warehouse', done: liveOrder.orderStatus !== 'PENDING', note: 'Goods being prepared and inspected before transit.' },
-                { title: 'In Transit to Ghana', time: 'Pending', location: 'Cargo En Route', done: liveOrder.orderStatus === 'SHIPPED' || liveOrder.orderStatus === 'DELIVERED', note: 'Cargo moving safely to Ghana.' },
-                { title: 'Customs Clearance at Port', time: 'Pending', location: 'Tema Port / Airport', done: liveOrder.orderStatus === 'SHIPPED' || liveOrder.orderStatus === 'DELIVERED', note: 'Customs duties and inspections handled.' },
-                { title: 'Arrived at Accra Hub', time: 'Pending', location: 'Spintex Rd Hub, Accra', done: liveOrder.orderStatus === 'DELIVERED', note: 'Sorted and ready for local dispatch.' },
-                { title: 'Out for Delivery / Ready for Pickup', time: 'Pending', location: liveOrder.city || 'Greater Accra', done: liveOrder.orderStatus === 'DELIVERED', note: 'On the way to your doorstep or ready for collection.' }
-              ]
-            });
-          } else if (orders[code]) {
-            setSearchedOrder(orders[code]);
-          }
-          setHasSearched(true);
-        })
-        .catch(() => {
-          if (orders[code]) setSearchedOrder(orders[code]);
-          setHasSearched(true);
-        })
-        .finally(() => setLoading(false));
-    });
+    lookUp(code, pageParams.prefillPhone || '');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageParams?.prefillCode]);
 
-  const handleSearch = async (e) => {
-
+  const handleSearch = (e) => {
     if (e) e.preventDefault();
-    const query = searchInput.trim().toUpperCase();
-    if (!query) return;
-
-    setLoading(true);
-
-    // 1. Try local memory / cache first (orders placed in this session)
-    if (orders[query]) {
-      setSearchedOrder(orders[query]);
-      setHasSearched(true);
-      setLoading(false);
-      return;
-    }
-
-    // Also handle lowercase lookup for session orders
-    const sessionMatch = Object.values(orders).find(
-      (o) => (o.orderCode || o.orderId || '').toUpperCase() === query
-    );
-    if (sessionMatch) {
-      setSearchedOrder(sessionMatch);
-      setHasSearched(true);
-      setLoading(false);
-      return;
-    }
-
-    // 2. Try fetching from order history
-    try {
-      const liveOrder = await apiTrackOrder(query);
-      if (liveOrder) {
-        setSearchedOrder({
-          ...liveOrder,
-          orderId: liveOrder.orderCode,
-          orderCode: liveOrder.orderCode,
-          shippingCost: liveOrder.deliveryFee,
-          deliveryFee: liveOrder.deliveryFee,
-          status: liveOrder.orderStatus ? liveOrder.orderStatus.toLowerCase() : 'processing',
-          customerCity: liveOrder.city,
-          date: new Date(liveOrder.createdAt).toLocaleDateString('en-GB'),
-          estimatedDelivery: '1 - 3 business days',
-          shippingMethod: liveOrder.deliveryMethod,
-          destination: liveOrder.address ? `${liveOrder.address}, ${liveOrder.city}` : liveOrder.city,
-          steps: [
-            { title: 'Order Confirmed & FX Locked', time: new Date(liveOrder.createdAt).toLocaleDateString('en-GB'), location: 'Accra FX Treasury Hub', done: true, note: 'Payment verified and FX rate snapshot secured.' },
-            { title: 'Factory Batching & QC Inspection', time: 'In Progress', location: 'Fulfillment Consolidation Depot', done: liveOrder.orderStatus !== 'PENDING', note: 'Quality check and batch allocation.' },
-            { title: 'On High Seas / Cargo Transit', time: 'Pending', location: 'International Cargo Corridor', done: liveOrder.orderStatus === 'SHIPPED' || liveOrder.orderStatus === 'DELIVERED', note: 'Vessel transit or dispatch in progress.' },
-            { title: 'Local Customs Clearance', time: 'Pending', location: 'Tema Port / KIA Single Window', done: liveOrder.orderStatus === 'SHIPPED' || liveOrder.orderStatus === 'DELIVERED', note: 'ICUMS customs valuation & duty declaration.' },
-            { title: 'Arrived at Accra Central Distribution Hub', time: 'Pending', location: 'Spintex Rd Fulfillment Hub', done: liveOrder.orderStatus === 'DELIVERED', note: 'Sorting and local dispatch staging.' },
-            { title: 'Out for Delivery / Ready for Collection', time: 'Pending', location: liveOrder.city || 'Greater Accra', done: liveOrder.orderStatus === 'DELIVERED', note: 'Final doorstep delivery or station pickup.' }
-          ]
-        });
-        setHasSearched(true);
-        setLoading(false);
-        return;
-      }
-    } catch {
-      // Fallback
-    }
-
-    // 3. Search by phone number in local memory
-    const found = Object.values(orders).find(
-      (ord) => ord.phone && ord.phone.replace(/\s+/g, '').includes(query.replace(/\s+/g, ''))
-    );
-
-    if (found) {
-      setSearchedOrder(found);
-    } else {
-      setSearchedOrder(null);
-    }
-    setHasSearched(true);
-    setLoading(false);
+    const code = searchInput.trim().toUpperCase();
+    if (code) lookUp(code, phoneInput);
   };
-
-  const loadPreset = (orderId) => {
-    setSearchInput(orderId);
-    if (orders[orderId]) {
-      setSearchedOrder(orders[orderId]);
-      setHasSearched(true);
-    } else {
-      apiTrackOrder(orderId).then((res) => {
-        if (res) {
-          setSearchedOrder({
-            ...res,
-            orderId: res.orderCode,
-            status: res.orderStatus ? res.orderStatus.toLowerCase() : 'processing',
-            customerCity: res.city,
-            shippingMethod: res.deliveryMethod,
-            destination: res.address ? `${res.address}, ${res.city}` : res.city,
-            steps: [
-              { title: 'Order Confirmed & FX Locked', time: new Date(res.createdAt).toLocaleDateString('en-GB'), location: 'Accra FX Treasury Hub', done: true, note: 'Payment verified and FX locked.' },
-              { title: 'Factory Batching & QC Inspection', time: 'In Progress', location: 'Consolidation Center', done: true, note: 'QC inspection cleared.' },
-              { title: 'On High Seas / Cargo Transit', time: 'Underway', location: 'In Transit', done: true, current: true, note: 'Shipment dispatched.' },
-              { title: 'Local Customs Clearance', time: 'Pending', location: 'Tema Port / KIA', done: false, note: 'Duty clearance scheduled.' },
-              { title: 'Arrived at Accra Central Distribution Hub', time: 'Pending', location: 'Spintex Rd Hub', done: false, note: 'Awaiting container arrival.' },
-              { title: 'Out for Delivery / Collection', time: 'Pending', location: res.city, done: false, note: 'Delivery routing pending.' }
-            ]
-          });
-        }
-        setHasSearched(true);
-      }).catch(() => {
-        setHasSearched(true);
-      });
-    }
-  };
-
   const copyTrackingNumber = () => {
     if (searchedOrder?.orderId) {
       navigator.clipboard?.writeText(searchedOrder.orderId);
@@ -194,47 +102,22 @@ export const TrackOrderPage = () => {
   const completedCount = steps.filter((s) => s.done).length;
   const progressPercent = Math.min(100, Math.round((completedCount / Math.max(1, steps.length)) * 100));
 
-  const isSeaFreight = searchedOrder?.freightType === 'SEA_FREIGHT' || searchedOrder?.containerNumber;
-  const isAirFreight = searchedOrder?.freightType === 'AIR_FREIGHT' || searchedOrder?.flightNumber;
 
   return (
     <div className="section" style={{ minHeight: '85vh', paddingTop: '32px' }}>
       <div className="container" style={{ maxWidth: '960px' }}>
         
-        {/* Glassmorphic Search & Header Console */}
-        <div className="glass-panel" style={{ padding: '36px 28px', marginBottom: '28px', textAlign: 'center' }}>
+        {/* Search */}
+        <div className="glass-panel" style={{ padding: 'clamp(22px, 5vw, 36px) clamp(16px, 4vw, 28px)', marginBottom: '28px', textAlign: 'center' }}>
           
           {/* Header Icon */}
-          <div
-            style={{
-              width: '64px',
-              height: '64px',
-              borderRadius: '20px',
-              background: 'linear-gradient(135deg, rgba(212, 175, 55, 0.2), rgba(212, 175, 55, 0.05))',
-              border: '1.5px solid var(--accent-border)',
-              color: 'var(--accent)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '0 auto 16px',
-              boxShadow: '0 8px 24px var(--accent-subtle)'
-            }}
-          >
-            <Package size={32} />
-          </div>
+          
 
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-            <span className="fx-rate-pill">
-              <span className="fx-rate-pill-dot" />
-              Direct International Cargo Tracking
-            </span>
-          </div>
-
-          <h1 style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-primary)', marginBottom: '8px', letterSpacing: '-0.02em' }}>
-            Live Shipment & Pre-Order Tracking
+          <h1 style={{ fontSize: 'clamp(1.6rem, 5vw, 2.2rem)', fontWeight: 900, color: 'var(--text-primary)', marginBottom: '8px', letterSpacing: '-0.02em' }}>
+            Track your order
           </h1>
           <p style={{ fontSize: '0.94rem', color: 'var(--text-muted)', maxWidth: '620px', margin: '0 auto 24px', lineHeight: 1.6 }}>
-            Track international sea freight containers, express air cargo, and domestic bus waybills across all 6 stages of the importation pipeline.
+            Enter your order code and phone number to see where your order is.
           </p>
 
           {/* Search Bar with Glass Glow */}
@@ -242,7 +125,8 @@ export const TrackOrderPage = () => {
             onSubmit={handleSearch}
             style={{
               display: 'flex',
-              maxWidth: '560px',
+              flexWrap: 'wrap',
+              maxWidth: '640px',
               margin: '0 auto',
               gap: '10px',
               alignItems: 'center'
@@ -252,7 +136,7 @@ export const TrackOrderPage = () => {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                flex: 1,
+                flex: '1 1 220px',
                 backgroundColor: 'var(--bg-card)',
                 border: '1.5px solid var(--border-medium)',
                 borderRadius: '14px',
@@ -263,7 +147,8 @@ export const TrackOrderPage = () => {
               <Search size={19} color="var(--text-muted)" />
               <input
                 type="text"
-                placeholder="Enter Tracking / Order ID (e.g. CHR-SEA-8821)"
+                aria-label="Order code"
+                placeholder="Order code (e.g. CHR-SEA-7KQ2MX9P)"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 style={{
@@ -286,6 +171,38 @@ export const TrackOrderPage = () => {
                   ✕
                 </button>
               )}
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                flex: '1 1 180px',
+                backgroundColor: 'var(--bg-card)',
+                border: '1.5px solid var(--border-medium)',
+                borderRadius: '14px',
+                padding: '10px 16px',
+                boxShadow: 'var(--shadow-sm)'
+              }}
+            >
+              <input
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                aria-label="Phone number used at checkout"
+                placeholder="Phone used at checkout"
+                value={phoneInput}
+                onChange={(e) => setPhoneInput(e.target.value)}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                  width: '100%',
+                  fontSize: '0.94rem',
+                  color: 'var(--text-primary)',
+                  outline: 'none',
+                  padding: 0
+                }}
+              />
             </div>
 
             <button
@@ -321,13 +238,13 @@ export const TrackOrderPage = () => {
               flexWrap: 'wrap'
             }}
           >
-            <span>💡 Enter the order code from your WhatsApp or email receipt (e.g. <strong>CHR-2026-...</strong>) or search with your phone number</span>
+            <span>💡 Enter the order code from your WhatsApp receipt together with the phone number you checked out with. Signed in? Your own orders don't need the phone number.</span>
           </div>
         </div>
 
         {/* Results Console */}
         {hasSearched && searchedOrder ? (
-          <div className="glass-panel-elevated" style={{ padding: '32px', marginBottom: '32px' }}>
+          <div className="glass-panel-elevated" style={{ padding: 'clamp(18px, 4vw, 32px)', marginBottom: '32px' }}>
             
             {/* Top Meta Header */}
             <div
@@ -353,26 +270,8 @@ export const TrackOrderPage = () => {
                       color: 'var(--accent)'
                     }}
                   >
-                    Tracking Master Record
+                    Order
                   </span>
-                  {searchedOrder.idempotencyKey && (
-                    <span
-                      style={{
-                        fontSize: '0.68rem',
-                        fontWeight: 700,
-                        backgroundColor: 'rgba(16, 185, 129, 0.12)',
-                        color: '#10b981',
-                        padding: '2px 8px',
-                        borderRadius: '6px',
-                        border: '1px solid rgba(16, 185, 129, 0.25)',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '3px'
-                      }}
-                    >
-                      <ShieldCheck size={11} /> Idempotent Lock
-                    </span>
-                  )}
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -396,7 +295,7 @@ export const TrackOrderPage = () => {
                   {searchedOrder.etaDate && (
                     <>
                       <span>•</span>
-                      <span>Target ETA: <strong style={{ color: '#10b981' }}>{searchedOrder.etaDate}</strong></span>
+                      <span>Expected: <strong style={{ color: '#10b981' }}>{searchedOrder.etaDate}</strong></span>
                     </>
                   )}
                 </div>
@@ -419,7 +318,7 @@ export const TrackOrderPage = () => {
                       searchedOrder.status === 'on_high_seas'
                         ? 'rgba(6, 182, 212, 0.15)'
                         : searchedOrder.status === 'customs_clearance'
-                        ? 'rgba(212, 175, 55, 0.15)'
+                        ? 'rgba(37, 99, 235, 0.15)'
                         : searchedOrder.status === 'delivered'
                         ? 'rgba(16, 185, 129, 0.15)'
                         : 'rgba(59, 130, 246, 0.15)',
@@ -447,88 +346,20 @@ export const TrackOrderPage = () => {
 
                 {searchedOrder.waybillNumber && (
                   <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '8px' }}>
-                    Waybill / BL: <strong style={{ color: 'var(--text-primary)' }}>{searchedOrder.waybillNumber}</strong>
+                    Waybill: <strong style={{ color: 'var(--text-primary)' }}>{searchedOrder.waybillNumber}</strong>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* International Vessel / Flight Details (If applicable) */}
-            {(isSeaFreight || isAirFreight) && (
-              <div
-                style={{
-                  background: 'var(--bg-subtle)',
-                  border: '1px solid var(--border-light)',
-                  borderRadius: '16px',
-                  padding: '20px',
-                  marginBottom: '32px',
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
-                  gap: '16px'
-                }}
-              >
-                <div>
-                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                    {isSeaFreight ? 'Vessel & Maritime Voyage' : 'Cargo Flight & Air Waybill'}
-                  </span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', fontWeight: 800, color: 'var(--text-primary)' }}>
-                    {isSeaFreight ? <Ship size={18} color="#0284c7" /> : <Plane size={18} color="#2563eb" />}
-                    <span>{searchedOrder.vesselName || searchedOrder.flightNumber}</span>
-                  </div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    {searchedOrder.containerType || searchedOrder.airWaybill}
-                  </div>
-                </div>
-
-                <div>
-                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                    Route Corridor
-                  </span>
-                  <div style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '4px' }}>
-                    {searchedOrder.portOfOrigin?.split(',')[0]} → {searchedOrder.portOfDestination?.split('(')[0]}
-                  </div>
-                  <div style={{ fontSize: '0.76rem', color: '#10b981', fontWeight: 600, marginTop: '2px' }}>
-                    MPS Terminal 3 / GRA ICUMS Verified
-                  </div>
-                </div>
-
-                <div>
-                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                    Volumetric Cargo Metrics
-                  </span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', fontSize: '0.84rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                    <Scale size={16} color="var(--accent)" />
-                    <span>
-                      {searchedOrder.volumetricWeight?.cbm} CBM • {searchedOrder.volumetricWeight?.actualKg} KG
-                    </span>
-                  </div>
-                  <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    Volumetric conversion: 1:167 Air / FCL Sea
-                  </div>
-                </div>
-
-                <div>
-                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                    FX Rate Snapshot Locked
-                  </span>
-                  <div style={{ fontSize: '0.84rem', fontWeight: 800, color: '#10b981', marginTop: '4px' }}>
-                    USD/GHS: 15.65 • RMB/GHS: 2.18
-                  </div>
-                  <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    Margin protected against depreciation
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Expressive 6-Stage Timeline Visualizer */}
+            {/* Progress */}
             <div style={{ marginBottom: '36px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
-                  6-Stage Importation Lifecycle
+                  Order progress
                 </h3>
                 <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--accent)' }}>
-                  {progressPercent}% Complete
+                  {completedCount} of {steps.length} steps
                 </span>
               </div>
 
@@ -548,13 +379,7 @@ export const TrackOrderPage = () => {
                       className={`timeline-milestone ${isDone ? 'done' : ''} ${isCurrent ? 'current' : ''}`}
                     >
                       <div className="timeline-milestone-bubble">
-                        {isDone ? (
-                          <CheckCircle2 size={20} />
-                        ) : isCurrent ? (
-                          <Clock size={19} className="animate-spin" />
-                        ) : (
-                          <span>{i + 1}</span>
-                        )}
+                        {isDone ? <Check size={16} /> : <span>{i + 1}</span>}
                       </div>
                       <span className="timeline-milestone-label">
                         {st.title.split('&')[0].trim()}
@@ -602,7 +427,7 @@ export const TrackOrderPage = () => {
                           boxShadow: isCurrent ? '0 0 14px var(--accent-glow)' : 'none'
                         }}
                       >
-                        {isDone ? <Check size={18} /> : isCurrent ? <Clock size={18} /> : <span>{idx + 1}</span>}
+                        {isDone ? <Check size={18} /> : <span>{idx + 1}</span>}
                       </div>
 
                       {/* Content */}
@@ -624,7 +449,7 @@ export const TrackOrderPage = () => {
 
                         {st.location && (
                           <div style={{ fontSize: '0.78rem', color: 'var(--accent)', fontWeight: 600, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <MapPin size={12} /> {st.location}
+                             {st.location}
                           </div>
                         )}
 
@@ -657,8 +482,8 @@ export const TrackOrderPage = () => {
                   Delivery Destination
                 </span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px', fontWeight: 800, color: 'var(--text-primary)' }}>
-                  <MapPin size={18} color="var(--accent)" />
-                  <span>{searchedOrder.destination || 'Accra Central Hub Collection'}</span>
+                  
+                  <span>{searchedOrder.destination || 'Pickup in Accra'}</span>
                 </div>
                 <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px' }}>
                   Fulfillment: {searchedOrder.shippingMethod || 'Standard Importation Logistics'}
@@ -674,7 +499,7 @@ export const TrackOrderPage = () => {
                   {searchedOrder.total?.toFixed(2)}
                 </div>
                 <div style={{ fontSize: '0.8rem', color: '#10b981', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <ShieldCheck size={14} /> Mobile Money / Card Verified
+                   Mobile Money / Card Verified
                 </div>
                 {(searchedOrder.deliveryFee || searchedOrder.shippingCost) && (
                   <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '4px' }}>
@@ -715,7 +540,7 @@ export const TrackOrderPage = () => {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         {it.image && (
                           <img
-                            src={it.image}
+                            src={sizedImage(it.image, 160)}
                             alt={it.name}
                             style={{ width: '42px', height: '42px', objectFit: 'cover', borderRadius: '8px' }}
                           />
@@ -782,12 +607,12 @@ export const TrackOrderPage = () => {
               textAlign: 'center'
             }}
           >
-            <AlertCircle size={44} color="#f59e0b" style={{ margin: '0 auto 14px' }} />
+            
             <h3 style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '8px' }}>
-              No shipment found matching "{searchInput}"
+              No order found for "{searchInput}"
             </h3>
             <p style={{ fontSize: '0.92rem', color: 'var(--text-muted)', marginBottom: '22px', maxWidth: '480px', margin: '0 auto 22px' }}>
-              Please verify your tracking code or the Ghana phone number used during checkout.
+              Check the order code and make sure the phone number is the one you used at checkout.
             </p>
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
               <button

@@ -6,13 +6,13 @@ export const PREORDER_TERMS = [
     icon: CheckCircle2,
     color: '#2563eb',
     title: 'Payment Confirms Your Order',
-    desc: 'Your preorder is confirmed and secured once payment is received via Mobile Money or at pickup.'
+    desc: 'Your pre-order is confirmed once we receive your payment by Mobile Money or at pickup.'
   },
   {
     icon: Clock,
     color: '#3b82f6',
-    title: 'Factory-Direct Pricing',
-    desc: 'We combine orders directly with overseas manufacturers to give you wholesale factory prices.'
+    title: 'Close to factory prices',
+    desc: 'We group orders together to get you lower prices from overseas suppliers.'
   },
   {
     icon: Ship,
@@ -29,7 +29,7 @@ export const PREORDER_TERMS = [
   {
     icon: Scale,
     color: '#10b981',
-    title: 'No Surprise Hidden Fees',
+    title: 'No hidden fees',
     desc: 'Your shipping fee is calculated and clearly shown at checkout so you know exactly what you are paying.'
   },
   {
@@ -41,20 +41,20 @@ export const PREORDER_TERMS = [
   {
     icon: FileCheck,
     color: '#ef4444',
-    title: 'Prompt Production',
-    desc: 'Once your order is confirmed with the factory, manufacturing begins right away and cannot be changed.'
+    title: 'Orders can’t be changed',
+    desc: 'Once we’ve placed your order with the supplier, it can’t be changed or cancelled.'
   },
   {
     icon: AlertCircle,
-    color: '#D4AF37',
+    color: '#2563eb',
     title: 'Realistic Estimates',
-    desc: 'Transit times are good-faith estimates and may occasionally be influenced by carrier schedules, weather, or customs inspections.'
+    desc: 'Delivery times are estimates and can sometimes be delayed by shipping schedules, weather or customs checks.'
   },
   {
     icon: PhoneCall,
     color: '#14b8a6',
-    title: 'Accurate Contact & Delivery Details',
-    desc: 'Please ensure your full name, active WhatsApp number, and delivery city/VIP station are accurate for arrival dispatch.'
+    title: 'Correct contact details',
+    desc: 'Please make sure your name, WhatsApp number and delivery town or bus station are correct.'
   }
 ];
 
@@ -67,10 +67,7 @@ export const PreorderTermsModal = ({ isOpen, onClose }) => {
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(15, 23, 42, 0.72)',
-        backdropFilter: 'blur(16px)',
-        WebkitBackdropFilter: 'blur(16px)',
-        zIndex: 1000,
+        backgroundColor: 'rgba(15, 23, 42, 0.72)',        zIndex: 1000,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -102,18 +99,18 @@ export const PreorderTermsModal = ({ isOpen, onClose }) => {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            background: 'linear-gradient(135deg, rgba(212,175,55,0.06) 0%, rgba(255,255,255,0.8) 100%)'
+            background: 'rgba(37, 99, 235,0.06)'
           }}
         >
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <FileCheck size={20} color="#D4AF37" />
+              
               <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.02em' }}>
                 What to Know Before Ordering
               </h2>
             </div>
             <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', margin: '4px 0 0', fontWeight: 500 }}>
-              Please read our transparent direct-import terms before placing your preorder.
+              Please read these terms before you place a pre-order.
             </p>
           </div>
           <button
@@ -162,22 +159,7 @@ export const PreorderTermsModal = ({ isOpen, onClose }) => {
                   boxShadow: '0 2px 6px rgba(15,23,42,0.03)'
                 }}
               >
-                <div
-                  style={{
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '10px',
-                    backgroundColor: `${item.color}15`,
-                    color: item.color,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                    marginTop: '2px'
-                  }}
-                >
-                  <Icon size={18} />
-                </div>
+                
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '2px' }}>
                     {idx + 1}. {item.title}
@@ -196,7 +178,7 @@ export const PreorderTermsModal = ({ isOpen, onClose }) => {
               marginTop: '10px',
               padding: '16px',
               borderRadius: '14px',
-              background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)',
+              background: '#1e40af',
               color: '#ffffff',
               textAlign: 'center'
             }}
@@ -205,10 +187,10 @@ export const PreorderTermsModal = ({ isOpen, onClose }) => {
               Our Promise
             </div>
             <div style={{ fontSize: '1.05rem', fontWeight: 800, marginTop: '4px' }}>
-              SEE IT. SEND IT. WE’LL SOURCE IT.
+              See it. Send it. We'll source it.
             </div>
             <div style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.85)', marginTop: '4px' }}>
-              Direct factory procurement · Zero warehousing markups · 100% transparent tracking
+              Bought from trusted suppliers · Clear prices in cedis · Track your order online
             </div>
           </div>
         </div>
@@ -230,7 +212,7 @@ export const PreorderTermsModal = ({ isOpen, onClose }) => {
           <button
             onClick={onClose}
             style={{
-              background: 'linear-gradient(135deg, #D4AF37 0%, #B8860B 100%)',
+              background: '#2563eb',
               color: '#ffffff',
               padding: '10px 24px',
               borderRadius: '10px',
@@ -240,7 +222,7 @@ export const PreorderTermsModal = ({ isOpen, onClose }) => {
               cursor: 'pointer'
             }}
           >
-            I Understand &amp; Agree
+            I understand
           </button>
         </div>
       </div>

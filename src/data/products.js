@@ -4,8 +4,16 @@ export const CATEGORIES = [
     name: 'Appliances',
     slug: 'appliances',
     description: 'Smart home electronics, fans, heaters, and home appliances.',
-    image: 'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?w=600&auto=format&fit=crop&q=80',
+    image: 'https://images.pexels.com/photos/35285814/pexels-photo-35285814.jpeg?auto=compress&cs=tinysrgb&w=600',
     itemCount: 24
+  },
+  {
+    id: 'food-snacks',
+    name: 'Food & Snacks',
+    slug: 'food-snacks',
+    description: 'Imported snacks, biscuits, sweets, drinks and pantry foods.',
+    image: 'https://images.unsplash.com/photo-1528751014936-863e6e7a319c?w=600&auto=format&fit=crop&q=80',
+    itemCount: 0
   },
   {
     id: 'furniture',
@@ -36,7 +44,7 @@ export const CATEGORIES = [
     name: 'Kitchen Appliances',
     slug: 'kitchen-appliances',
     description: 'Heavy duty blenders, air fryers, pressure cookers, and juicers.',
-    image: 'https://images.unsplash.com/photo-1585659722983-3a675dabf23d?w=600&auto=format&fit=crop&q=80',
+    image: 'https://images.unsplash.com/photo-1536304447766-da0ed4ce1b73?w=600&auto=format&fit=crop&q=80',
     itemCount: 28
   },
   {
@@ -52,7 +60,7 @@ export const CATEGORIES = [
     name: 'Mannequins',
     slug: 'mannequins',
     description: 'Full body display mannequins, dress forms, and boutique hangers.',
-    image: 'https://images.unsplash.com/photo-1567401893414-76b7b1e5a7a5?w=600&auto=format&fit=crop&q=80',
+    image: 'https://images.unsplash.com/photo-1646004812243-f071fbe69766?w=600&auto=format&fit=crop&q=80',
     itemCount: 15
   },
   {
@@ -68,7 +76,7 @@ export const CATEGORIES = [
     name: 'Perfumes',
     slug: 'perfumes',
     description: 'Long-lasting Arabian oud, French designer fragrances & oils.',
-    image: 'https://images.unsplash.com/photo-1592945403244-b3fbafd7f539?w=600&auto=format&fit=crop&q=80',
+    image: 'https://images.unsplash.com/photo-1709100648536-8c2c36068eb2?w=600&auto=format&fit=crop&q=80',
     itemCount: 29
   },
   {
@@ -76,7 +84,7 @@ export const CATEGORIES = [
     name: 'Underwear',
     slug: 'underwear',
     description: 'Bras, seamless panties, boxers, and shapewear.',
-    image: 'https://images.unsplash.com/photo-1583846783214-7229a91b20ed?w=600&auto=format&fit=crop&q=80',
+    image: 'https://images.unsplash.com/photo-1694290340663-65804773ce7a?w=600&auto=format&fit=crop&q=80',
     itemCount: 39
   }
 ];
@@ -119,8 +127,8 @@ export const PRODUCTS = [
     originalPrice: 80.00,
     inStock: 4500,
     images: [
-      'https://images.unsplash.com/photo-1583846783214-7229a91b20ed?w=800&auto=format&fit=crop&q=80',
-      'https://images.unsplash.com/photo-1596755094514-f87e34085b2c?w=800&auto=format&fit=crop&q=80'
+      'https://images.unsplash.com/photo-1694290340663-65804773ce7a?w=800&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1584061634739-88035e420618?w=800&auto=format&fit=crop&q=80'
     ],
     featured: true,
     trending: true,
@@ -169,8 +177,7 @@ export const PRODUCTS = [
     originalPrice: null,
     inStock: 640,
     images: [
-      'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=800&auto=format&fit=crop&q=80',
-      'https://images.unsplash.com/photo-1503342217505-b0a15ec3261c?w=800&auto=format&fit=crop&q=80'
+      'https://images.unsplash.com/photo-1767392060739-8ae29223816c?w=800&auto=format&fit=crop&q=80'
     ],
     featured: false,
     trending: false,
@@ -194,7 +201,7 @@ export const PRODUCTS = [
     originalPrice: 95.00,
     inStock: 1450,
     images: [
-      'https://images.unsplash.com/photo-1591195853828-11db59a44f6b?w=800&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1566392722006-b3ccec017bec?w=800&auto=format&fit=crop&q=80',
       'https://images.unsplash.com/photo-1552902865-b72c031ac5ea?w=800&auto=format&fit=crop&q=80'
     ],
     featured: true,
@@ -219,8 +226,8 @@ export const PRODUCTS = [
     originalPrice: 80.00,
     inStock: 3200,
     images: [
-      'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=800&auto=format&fit=crop&q=80',
-      'https://images.unsplash.com/photo-1583743814966-8936f5b7be1a?w=800&auto=format&fit=crop&q=80'
+      'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=800&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1581655353564-df123a1eb820?w=800&auto=format&fit=crop&q=80'
     ],
     featured: true,
     trending: true,
@@ -243,8 +250,8 @@ export const PRODUCTS = [
     originalPrice: 85.00,
     inStock: 940,
     images: [
-      'https://images.unsplash.com/photo-1576566588028-4147f3842f27?w=800&auto=format&fit=crop&q=80',
-      'https://images.unsplash.com/photo-1581655353564-df123a1eb820?w=800&auto=format&fit=crop&q=80'
+      'https://images.unsplash.com/photo-1671438118097-479e63198629?w=800&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1720514496161-914011a9ee02?w=800&auto=format&fit=crop&q=80'
     ],
     featured: true,
     trending: true,
@@ -268,7 +275,7 @@ export const PRODUCTS = [
     originalPrice: 110.00,
     inStock: 1200,
     images: [
-      'https://images.unsplash.com/photo-1519238263530-99bdd11df2ea?w=800&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1622290319146-7b63df48a635?w=800&auto=format&fit=crop&q=80',
       'https://images.unsplash.com/photo-1514090458221-65bb69cf63e6?w=800&auto=format&fit=crop&q=80'
     ],
     featured: false,
@@ -316,8 +323,7 @@ export const PRODUCTS = [
     originalPrice: 70.00,
     inStock: 1890,
     images: [
-      'https://images.unsplash.com/photo-1603808033192-082d6919d3e1?w=800&auto=format&fit=crop&q=80',
-      'https://images.unsplash.com/photo-1543163521-1bf539c55dd2?w=800&auto=format&fit=crop&q=80'
+      'https://images.unsplash.com/photo-1620288091141-71640b6cd6f4?w=800&auto=format&fit=crop&q=80'
     ],
     featured: true,
     trending: false,
@@ -340,7 +346,7 @@ export const PRODUCTS = [
     originalPrice: 650.00,
     inStock: 160,
     images: [
-      'https://images.unsplash.com/photo-1567401893414-76b7b1e5a7a5?w=800&auto=format&fit=crop&q=80'
+      'https://images.unsplash.com/photo-1646004812243-f071fbe69766?w=800&auto=format&fit=crop&q=80'
     ],
     featured: true,
     trending: true,
@@ -364,7 +370,8 @@ export const PRODUCTS = [
     originalPrice: 480.00,
     inStock: 240,
     images: [
-      'https://images.unsplash.com/photo-1585659722983-3a675dabf23d?w=800&auto=format&fit=crop&q=80'
+      'https://images.unsplash.com/photo-1536304447766-da0ed4ce1b73?w=800&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1566304088305-44f227da240e?w=800&auto=format&fit=crop&q=80'
     ],
     featured: true,
     trending: true,
@@ -388,7 +395,7 @@ export const PRODUCTS = [
     originalPrice: 150.00,
     inStock: 540,
     images: [
-      'https://images.unsplash.com/photo-1592945403244-b3fbafd7f539?w=800&auto=format&fit=crop&q=80'
+      'https://images.unsplash.com/photo-1709100648536-8c2c36068eb2?w=800&auto=format&fit=crop&q=80'
     ],
     featured: true,
     trending: true,
@@ -412,7 +419,8 @@ export const PRODUCTS = [
     originalPrice: 600.00,
     inStock: 180,
     images: [
-      'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?w=800&auto=format&fit=crop&q=80'
+      'https://images.pexels.com/photos/32928224/pexels-photo-32928224.jpeg?auto=compress&cs=tinysrgb&w=800',
+      'https://images.pexels.com/photos/35285814/pexels-photo-35285814.jpeg?auto=compress&cs=tinysrgb&w=800'
     ],
     featured: false,
     trending: true,

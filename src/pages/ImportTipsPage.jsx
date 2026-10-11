@@ -28,35 +28,35 @@ export const ImportTipsPage = () => {
     {
       num: 2,
       title: 'Request a Quote',
-      desc: 'Send us the link or photo through our quote form or WhatsApp. We will calculate the total cost in Ghanaian Cedi (GH₵) including factory cost, freight, and Tema port clearing duties.',
+      desc: 'Send us the link or photo through our quote form or WhatsApp. We’ll work out the full cost in cedis (GH₵), including the item, shipping and customs.',
       icon: FileSpreadsheet,
       highlight: 'Transparent all-inclusive quote in GH₵'
     },
     {
       num: 3,
       title: 'Payment Transfer',
-      desc: 'Review and accept your transparent quotation. Pay via Mobile Money (MTN MoMo, Telecel Cash, AT Money) or Ghanaian bank transfer to initiate procurement.',
+      desc: 'If you are happy with the price, pay by Mobile Money (MTN, Telecel, AT) or bank transfer and we place the order.',
       icon: CreditCard,
       highlight: 'Secure MoMo & Bank deposit'
     },
     {
       num: 4,
-      title: 'Global Sourcing & Inspection',
-      desc: 'Our procurement agents in Yiwu, Guangzhou (China), Istanbul (Turkey), and the USA visit the factory, inspect sample units for flaws, verify counts, and package them securely for overseas transit.',
+      title: 'We buy and check it',
+      desc: 'Our team buys from the supplier, checks the items for faults, counts them and packs them for shipping.',
       icon: Globe2,
       highlight: 'Pre-shipment factory inspection'
     },
     {
       num: 5,
-      title: 'Transit & Ghana Port Clearing',
-      desc: 'We manage full international freight logistics — handling shipping manifests, bill of lading, and comprehensive Ghana Revenue Authority (Customs Division) Tema Port clearance.',
+      title: 'Shipping and customs',
+      desc: 'We ship your items to Ghana and handle all the customs paperwork at Tema Port.',
       icon: Ship,
       highlight: 'Zero customs headaches for you'
     },
     {
       num: 6,
       title: 'Local Delivery in Ghana',
-      desc: 'Once cleared, pick up free from our Spintex / Accra Central warehouse, or have your consignment dispatched straight to your doorstep or regional VIP/STC parcel bus terminal.',
+      desc: 'Collect for free in Spintex, Accra, or we deliver to your door or your nearest VIP/STC bus station.',
       icon: Truck,
       highlight: 'Nationwide delivery across all 16 regions'
     }
@@ -76,7 +76,7 @@ export const ImportTipsPage = () => {
             textAlign: 'center'
           }}
         >
-          <span className="section-pretitle">CHARI Knowledge Hub</span>
+          <span className="section-pretitle">Buying guide</span>
           <h1
             style={{
               fontSize: 'clamp(1.8rem, 3.5vw, 2.5rem)',
@@ -96,7 +96,7 @@ export const ImportTipsPage = () => {
               margin: '0 auto 20px'
             }}
           >
-            General guidance drawn from our own hands-on experience sourcing, inspecting, and clearing containers into Ghana. We make global importation simple, predictable, and stress-free.
+            A simple guide to how ordering from overseas works with CHARI.
           </p>
 
           <div
@@ -113,18 +113,18 @@ export const ImportTipsPage = () => {
               textAlign: 'left'
             }}
           >
-            <AlertCircle size={18} style={{ flexShrink: 0 }} />
+            
             <span>
               Always verify regulatory compliance with Ghana Revenue Authority (GRA Customs Division) or FDA for regulated items like food and cosmetics.
             </span>
           </div>
         </div>
 
-        {/* The 6-Step Process Cards */}
+        {/* How it works Cards */}
         <div style={{ marginBottom: '56px' }}>
           <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-            <span className="section-pretitle">The 6-Step Process</span>
-            <h2 className="section-title">Simple, clear, and efficient importation</h2>
+            <span className="section-pretitle">How it works</span>
+            <h2 className="section-title">Six simple steps</h2>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -212,9 +212,9 @@ export const ImportTipsPage = () => {
         >
           <div style={{ textAlign: 'center', marginBottom: '28px' }}>
             <span className="section-pretitle">Shipping Methods</span>
-            <h2 className="section-title">Sea Freight vs Air Express to Ghana</h2>
+            <h2 className="section-title">Sea or air shipping?</h2>
             <p className="section-desc" style={{ margin: '6px auto 0' }}>
-              Choose the best transit mode based on weight, urgency, and resale budget.
+              Choose based on how heavy the item is and how soon you need it.
             </p>
           </div>
 
@@ -235,21 +235,21 @@ export const ImportTipsPage = () => {
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
-                <Ship size={24} color="#0284c7" />
-                <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)' }}>Sea Freight (Container Cargo)</h3>
+                
+                <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)' }}>Sea shipping</h3>
               </div>
               <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '0.88rem', color: 'var(--text-secondary)' }}>
                 <li style={{ display: 'flex', gap: '8px' }}>
-                  <CheckCircle2 size={16} color="#10b981" style={{ flexShrink: 0, marginTop: '2px' }} />
-                  <span><strong>Lowest Cost:</strong> Priced by CBM (Cubic Metres). Ideal for heavy goods, mannequins, furniture, and bulk cartons.</span>
+                  
+                  <span><strong>Lowest Cost:</strong> Priced by size. Best for heavy items like mannequins, furniture and bulk orders.</span>
                 </li>
                 <li style={{ display: 'flex', gap: '8px' }}>
-                  <CheckCircle2 size={16} color="#10b981" style={{ flexShrink: 0, marginTop: '2px' }} />
+                  
                   <span><strong>Transit Time:</strong> 35 - 50 days from China port to Tema Harbour.</span>
                 </li>
                 <li style={{ display: 'flex', gap: '8px' }}>
-                  <CheckCircle2 size={16} color="#10b981" style={{ flexShrink: 0, marginTop: '2px' }} />
-                  <span><strong>Port Clearance:</strong> CHARIS handles clearing, duties, and offloading.</span>
+                  
+                  <span><strong>Port Clearance:</strong> We handle customs for you.</span>
                 </li>
               </ul>
             </div>
@@ -264,21 +264,21 @@ export const ImportTipsPage = () => {
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
-                <Plane size={24} color="var(--accent)" />
-                <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)' }}>Air Cargo (Express Freight)</h3>
+                
+                <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)' }}>Air shipping</h3>
               </div>
               <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '0.88rem', color: 'var(--text-secondary)' }}>
                 <li style={{ display: 'flex', gap: '8px' }}>
-                  <CheckCircle2 size={16} color="#10b981" style={{ flexShrink: 0, marginTop: '2px' }} />
+                  
                   <span><strong>Fast Delivery:</strong> 7 - 12 business days to Kotoka Airport, Accra.</span>
                 </li>
                 <li style={{ display: 'flex', gap: '8px' }}>
-                  <CheckCircle2 size={16} color="#10b981" style={{ flexShrink: 0, marginTop: '2px' }} />
-                  <span><strong>Best For:</strong> High-value lightweight goods, sample orders, urgent seasonal fashion, and electronics.</span>
+                  
+                  <span><strong>Best For:</strong> Best for light or urgent items like clothes, samples and electronics.</span>
                 </li>
                 <li style={{ display: 'flex', gap: '8px' }}>
-                  <CheckCircle2 size={16} color="#10b981" style={{ flexShrink: 0, marginTop: '2px' }} />
-                  <span><strong>Pricing:</strong> Calculated per kilogram ($/kg) including airport clearance.</span>
+                  
+                  <span><strong>Pricing:</strong> Priced by weight, including airport customs.</span>
                 </li>
               </ul>
             </div>
@@ -299,14 +299,14 @@ export const ImportTipsPage = () => {
             Have a specific product in mind?
           </h3>
           <p style={{ fontSize: '0.95rem', color: '#cbd5e1', maxWidth: '560px', margin: '0 auto 24px' }}>
-            Message us on WhatsApp or request an itemized quotation. We advise on sourcing, factory vetting, duties, and realistic delivery timelines.
+            Message us on WhatsApp or send a request and we'll give you a price and delivery time.
           </p>
           <div style={{ display: 'flex', justifyContent: 'center', gap: '14px', flexWrap: 'wrap' }}>
             <button
               className="btn btn-primary"
               onClick={() => setQuoteModalOpen(true)}
             >
-              Request Sourcing Quote
+              Request an item
             </button>
             <a
               href={`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(
@@ -316,7 +316,7 @@ export const ImportTipsPage = () => {
               rel="noreferrer"
               className="btn btn-whatsapp"
             >
-              <MessageCircle size={18} /> Chat with Sourcing Agent
+              <MessageCircle size={18} /> Chat on WhatsApp
             </a>
           </div>
         </div>

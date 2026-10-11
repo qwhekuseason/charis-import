@@ -78,7 +78,7 @@ export const AccountPage = () => {
             Account Access
           </h2>
           <p style={{ color: '#64748b', fontSize: '0.95rem', marginBottom: '24px' }}>
-            Sign in to view your order tracking history, saved addresses, and profile details.
+            Sign in to see your orders, saved address and store credit.
           </p>
           <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
             <button
@@ -117,7 +117,7 @@ export const AccountPage = () => {
         {/* User Greeting Banner */}
         <div
           style={{
-            background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)',
+            background: '#1e40af',
             borderRadius: '20px',
             padding: '32px 36px',
             color: '#ffffff',
@@ -136,7 +136,7 @@ export const AccountPage = () => {
                 width: '64px',
                 height: '64px',
                 borderRadius: '50%',
-                background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
+                background: '#f97316',
                 color: '#ffffff',
                 display: 'flex',
                 alignItems: 'center',
@@ -165,7 +165,7 @@ export const AccountPage = () => {
                       letterSpacing: '0.5px'
                     }}
                   >
-                    STORE ADMIN
+                    Admin
                   </span>
                 )}
               </div>
@@ -191,7 +191,7 @@ export const AccountPage = () => {
               cursor: 'pointer'
             }}
           >
-            <LogOut size={16} /> Sign Out
+             Sign Out
           </button>
         </div>
 
@@ -213,8 +213,8 @@ export const AccountPage = () => {
               border: 'none',
               background: 'transparent',
               cursor: 'pointer',
-              color: activeTab === 'orders' ? '#D4AF37' : '#64748b',
-              borderBottom: activeTab === 'orders' ? '3px solid #D4AF37' : '3px solid transparent'
+              color: activeTab === 'orders' ? '#2563eb' : '#64748b',
+              borderBottom: activeTab === 'orders' ? '3px solid #2563eb' : '3px solid transparent'
             }}
           >
             My Orders ({userOrders.length})
@@ -228,8 +228,8 @@ export const AccountPage = () => {
               border: 'none',
               background: 'transparent',
               cursor: 'pointer',
-              color: activeTab === 'profile' ? '#D4AF37' : '#64748b',
-              borderBottom: activeTab === 'profile' ? '3px solid #D4AF37' : '3px solid transparent'
+              color: activeTab === 'profile' ? '#2563eb' : '#64748b',
+              borderBottom: activeTab === 'profile' ? '3px solid #2563eb' : '3px solid transparent'
             }}
           >
             Delivery Profile
@@ -251,7 +251,7 @@ export const AccountPage = () => {
                 gap: '8px'
               }}
             >
-              <Shield size={16} /> Admin Dashboard
+               Admin Dashboard
             </button>
           )}
         </div>
@@ -289,12 +289,12 @@ export const AccountPage = () => {
                   border: '1px solid var(--border-light)'
                 }}
               >
-                <Package size={44} color="#cbd5e1" style={{ margin: '0 auto 16px' }} />
+                
                 <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '8px' }}>
                   No orders placed yet
                 </h3>
                 <p style={{ color: '#64748b', fontSize: '0.92rem', marginBottom: '20px' }}>
-                  Explore our quality catalogue and place your first order.
+                  Browse our products and place your first order.
                 </p>
                 <button onClick={() => navigate('shop')} className="btn btn-primary">
                   Start Shopping <ShoppingBag size={16} />
@@ -326,7 +326,7 @@ export const AccountPage = () => {
                       }}
                     >
                       <div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Order Tracking Code</div>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Order code</div>
                         <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)' }}>
                           #{ord.orderCode}
                         </div>
@@ -339,7 +339,7 @@ export const AccountPage = () => {
                       </div>
                       <div>
                         <div style={{ fontSize: '0.8rem', color: '#64748b' }}>Total</div>
-                        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#D4AF37' }}>
+                        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#2563eb' }}>
                           GH₵{ord.total?.toFixed(2)}
                         </div>
                       </div>
@@ -355,13 +355,13 @@ export const AccountPage = () => {
                                 ? '#dcfce7'
                                 : ord.orderStatus === 'SHIPPED'
                                 ? '#e0f2fe'
-                                : 'rgba(212, 175, 55, 0.12)',
+                                : 'rgba(37, 99, 235, 0.12)',
                             color:
                               ord.orderStatus === 'DELIVERED'
                                 ? '#166534'
                                 : ord.orderStatus === 'SHIPPED'
                                 ? '#0369a1'
-                                : '#B8860B'
+                                : '#1d4ed8'
                           }}
                         >
                           {ord.orderStatus}
@@ -392,7 +392,7 @@ export const AccountPage = () => {
                           cursor: 'pointer'
                         }}
                       >
-                        Track Shipment →
+                        Track order →
                       </button>
                     </div>
                   </div>
@@ -424,8 +424,8 @@ export const AccountPage = () => {
                     display: 'flex',
                     alignItems: 'center',
                     gap: '6px',
-                    backgroundColor: 'rgba(212, 175, 55, 0.12)',
-                    color: '#D4AF37',
+                    backgroundColor: 'rgba(37, 99, 235, 0.12)',
+                    color: '#2563eb',
                     border: 'none',
                     borderRadius: '6px',
                     padding: '6px 12px',
@@ -434,7 +434,7 @@ export const AccountPage = () => {
                     cursor: 'pointer'
                   }}
                 >
-                  <Edit2 size={14} /> Edit Details
+                   Edit Details
                 </button>
               )}
             </div>
@@ -525,7 +525,7 @@ export const AccountPage = () => {
 
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <button type="submit" className="btn btn-primary" style={{ padding: '10px 20px' }}>
-                    <Save size={16} /> Save Changes
+                     Save Changes
                   </button>
                   <button
                     type="button"
@@ -540,21 +540,21 @@ export const AccountPage = () => {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <Mail size={18} color="#64748b" />
+                  
                   <div>
                     <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Email Address</div>
                     <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{user.email}</div>
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <Phone size={18} color="#64748b" />
+                  
                   <div>
                     <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Phone Number</div>
                     <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{user.phone || 'Not set'}</div>
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <MapPin size={18} color="#64748b" />
+                  
                   <div>
                     <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Default Delivery Address</div>
                     <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
@@ -578,31 +578,14 @@ export const AccountPage = () => {
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
-              <Shield size={28} color="#3b82f6" />
+              
               <div>
                 <h3 style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
-                  Store Owner Control Center
+                  Store admin
                 </h3>
                 <p style={{ margin: 0, fontSize: '0.88rem', color: '#64748b' }}>
-                  Manage your store's products, orders, and customer data.
+                  Manage products, orders and customers from the admin dashboard.
                 </p>
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '28px' }}>
-              <div style={{ padding: '20px', borderRadius: '12px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0' }}>
-                <div style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 700 }}>SYSTEM STATUS</div>
-                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#16a34a', marginTop: '4px' }}>
-                  All Systems Operational
-                </div>
-                <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '4px' }}>Orders & products synced</div>
-              </div>
-
-              <div style={{ padding: '20px', borderRadius: '12px', backgroundColor: 'var(--bg-subtle)', border: '1px solid var(--border-light)' }}>
-                <div style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 700 }}>VISUAL DATABASE STUDIO</div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: '6px 0 12px' }}>
-                  Run <code>npm run db:studio</code> in terminal to edit products, prices, and users visually in your browser.
-                </div>
               </div>
             </div>
           </div>

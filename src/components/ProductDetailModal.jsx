@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../context/StoreContext';
+import { sizedImage } from '../utils/images';
+import { productCategorySlug } from '../utils/categories';
 import {
   X,
   ShoppingBag,
@@ -14,11 +16,9 @@ import {
   ArrowRight,
   Package,
   ThumbsUp,
-  Anchor,
+  Ship,
   Plane,
-  Calculator,
-  Lock,
-  Boxes
+  Lock
 } from 'lucide-react';
 
 export const ProductDetailModal = () => {
@@ -36,6 +36,7 @@ export const ProductDetailModal = () => {
     getReviewsForProduct,
     voteHelpfulReview,
     user,
+    openAuth,
     fxRates,
     calculateVolumetricFreight
   } = useStore();
@@ -106,7 +107,7 @@ export const ProductDetailModal = () => {
 
   // Related products in same category
   const relatedProducts = (products || [])
-    .filter((p) => p.categorySlug === selectedProduct.categorySlug && p.id !== selectedProduct.id)
+    .filter((p) => productCategorySlug(p) === productCategorySlug(selectedProduct) && p.id !== selectedProduct.id)
     .slice(0, 3);
 
   // Calculated freight rates
@@ -186,15 +187,12 @@ export const ProductDetailModal = () => {
               />
               {/* Badges */}
               <div style={{ position: 'absolute', top: '12px', left: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <span className="badge-sea">
-                  <Anchor size={11} /> Sea / Air Pre-Order
-                </span>
                 {selectedProduct.justLanded && (
-                  <span className="badge badge-sale">New Arrival</span>
+                  <span className="badge-new">New</span>
                 )}
                 {discount && (
-                  <span className="badge" style={{ background: 'linear-gradient(135deg, #D4AF37 0%, #B8860B 100%)', color: '#fff' }}>
-                    -{discount}% OFF
+                  <span className="badge-sale">
+                    −{discount}%
                   </span>
                 )}
               </div>
@@ -207,9 +205,7 @@ export const ProductDetailModal = () => {
                   right: '12px',
                   backgroundColor: selectedProduct.inStock === false ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)',
                   color: selectedProduct.inStock === false ? '#ef4444' : '#10b981',
-                  border: `1px solid ${selectedProduct.inStock === false ? 'rgba(239, 68, 68, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`,
-                  backdropFilter: 'blur(8px)',
-                  fontSize: '0.74rem',
+                  border: `1px solid ${selectedProduct.inStock === false ? 'rgba(239, 68, 68, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`,                  fontSize: '0.74rem',
                   fontWeight: 700,
                   padding: '4px 10px',
                   borderRadius: '9999px',
@@ -218,8 +214,8 @@ export const ProductDetailModal = () => {
                   gap: '4px'
                 }}
               >
-                <CheckCircle2 size={12} />
-                {selectedProduct.inStock === false ? 'Allocated Wave Closed' : 'Pre-Order Wave Active'}
+                
+                {selectedProduct.inStock === false ? 'Out of stock' : 'Available to order'}
               </div>
             </div>
 
@@ -233,7 +229,7 @@ export const ProductDetailModal = () => {
                     style={{
                       width: '64px', height: '64px',
                       borderRadius: '10px', overflow: 'hidden',
-                      border: activeImageIndex === idx ? '2px solid #D4AF37' : '1px solid var(--border-light)',
+                      border: activeImageIndex === idx ? '2px solid #2563eb' : '1px solid var(--border-light)',
                       padding: '2px', backgroundColor: 'var(--bg-main)',
                       cursor: 'pointer'
                     }}
@@ -263,21 +259,21 @@ export const ProductDetailModal = () => {
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Truck size={16} color="#D4AF37" />
+                
                 <span>
-                  <strong style={{ color: 'var(--text-primary)' }}>Nationwide Delivery in Ghana:</strong> Available via bus stations (VIP/OA) or doorstep delivery across Ghana.
+                  <strong style={{ color: 'var(--text-primary)' }}>Delivery across Ghana:</strong> to your door or your nearest bus station.
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <ShieldCheck size={16} color="#10b981" />
+                
                 <span>
-                  <strong style={{ color: 'var(--text-primary)' }}>Quality Inspected:</strong> Checked and verified before shipping from the factory.
+                  <strong style={{ color: 'var(--text-primary)' }}>Checked before shipping:</strong> we inspect items before they leave the supplier.
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Lock size={16} color="#6366f1" />
+                
                 <span>
-                  <strong style={{ color: 'var(--text-primary)' }}>Price Guaranteed in Cedis:</strong> No hidden price jumps after your order is confirmed.
+                  <strong style={{ color: 'var(--text-primary)' }}>Fixed price in cedis:</strong> the price won't change after you order.
                 </span>
               </div>
             </div>
@@ -287,7 +283,7 @@ export const ProductDetailModal = () => {
           <div style={{ padding: '28px', display: 'flex', flexDirection: 'column', gap: '18px', overflow: 'auto', maxHeight: '90vh' }}>
             {/* Category + Wishlist */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#D4AF37', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                 {selectedProduct.category}
               </span>
               <button
@@ -312,23 +308,23 @@ export const ProductDetailModal = () => {
             {/* Star Rating */}
             {selectedProduct.rating && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                <div style={{ display: 'flex', color: '#D4AF37' }}>
+                <div style={{ display: 'flex', color: '#2563eb' }}>
                   {[...Array(5)].map((_, i) => (
                     <Star
                       key={i}
                       size={16}
-                      fill={i < Math.floor(selectedProduct.rating) ? '#D4AF37' : 'none'}
+                      fill={i < Math.floor(selectedProduct.rating) ? '#2563eb' : 'none'}
                     />
                   ))}
                 </div>
                 <span>
                   <strong style={{ color: 'var(--text-primary)' }}>{selectedProduct.rating}</strong>
-                  {selectedProduct.reviewCount && <span> ({selectedProduct.reviewCount} verified reviews)</span>}
+                  {selectedProduct.reviewCount > 0 && <span> ({selectedProduct.reviewCount} reviews)</span>}
                 </span>
               </div>
             )}
 
-            {/* Price Box with FX Lock Banner */}
+            {/* Price */}
             <div
               className="glass-panel"
               style={{
@@ -343,10 +339,7 @@ export const ProductDetailModal = () => {
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
                   <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase' }}>
-                    Locked Landed Price:
-                  </span>
-                  <span className="badge-fx" style={{ fontSize: '0.7rem' }}>
-                    <Lock size={10} /> FX Margin Locked
+                    Price
                   </span>
                 </div>
                 <div style={{ fontSize: '2.1rem', fontWeight: 900, color: 'var(--text-primary)', lineHeight: 1.1 }}>
@@ -362,7 +355,7 @@ export const ProductDetailModal = () => {
               {discount && (
                 <span
                   style={{
-                    background: 'linear-gradient(135deg, #D4AF37 0%, #B8860B 100%)',
+                    background: '#2563eb',
                     color: '#ffffff',
                     fontWeight: 800,
                     fontSize: '0.95rem',
@@ -388,7 +381,7 @@ export const ProductDetailModal = () => {
             >
               <div>
                 <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px', fontWeight: 600 }}>
-                  Pre-Order Quantity:
+                  Quantity
                 </span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <button
@@ -437,7 +430,7 @@ export const ProductDetailModal = () => {
               </div>
 
               <div style={{ textAlign: 'right' }}>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'block', fontWeight: 600 }}>Total Wave Cost:</span>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'block', fontWeight: 600 }}>Total:</span>
                 <div style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--text-primary)' }}>
                   <span className="currency-ghc">GH₵</span>
                   {totalCost}
@@ -454,7 +447,7 @@ export const ProductDetailModal = () => {
                   disabled={selectedProduct.inStock === false}
                   style={{ width: '100%', borderRadius: '12px' }}
                 >
-                  <ShoppingBag size={18} /> Add to Cart
+                  <ShoppingBag size={18} /> Add to cart
                 </button>
 
                 <button
@@ -463,7 +456,7 @@ export const ProductDetailModal = () => {
                   disabled={selectedProduct.inStock === false}
                   style={{ width: '100%', borderRadius: '12px' }}
                 >
-                  Buy Now <ArrowRight size={18} />
+                  Buy now <ArrowRight size={18} />
                 </button>
               </div>
 
@@ -485,8 +478,8 @@ export const ProductDetailModal = () => {
                   onClick={() => setActiveTab('details')}
                   style={{
                     padding: '10px 0', fontSize: '0.9rem', fontWeight: 800,
-                    color: activeTab === 'details' ? '#D4AF37' : 'var(--text-secondary)',
-                    borderBottom: activeTab === 'details' ? '2px solid #D4AF37' : 'none',
+                    color: activeTab === 'details' ? '#2563eb' : 'var(--text-secondary)',
+                    borderBottom: activeTab === 'details' ? '2px solid #2563eb' : 'none',
                     background: 'none', border: 'none', cursor: 'pointer'
                   }}
                 >
@@ -497,21 +490,21 @@ export const ProductDetailModal = () => {
                   onClick={() => setActiveTab('logistics')}
                   style={{
                     padding: '10px 0', fontSize: '0.9rem', fontWeight: 800,
-                    color: activeTab === 'logistics' ? '#D4AF37' : 'var(--text-secondary)',
-                    borderBottom: activeTab === 'logistics' ? '2px solid #D4AF37' : 'none',
+                    color: activeTab === 'logistics' ? '#2563eb' : 'var(--text-secondary)',
+                    borderBottom: activeTab === 'logistics' ? '2px solid #2563eb' : 'none',
                     background: 'none', border: 'none', cursor: 'pointer',
                     display: 'flex', alignItems: 'center', gap: '6px'
                   }}
                 >
-                  <Calculator size={15} /> Freight & Duty Engine
+                   Delivery
                 </button>
 
                 <button
                   onClick={() => setActiveTab('reviews')}
                   style={{
                     padding: '10px 0', fontSize: '0.9rem', fontWeight: 800,
-                    color: activeTab === 'reviews' ? '#D4AF37' : 'var(--text-secondary)',
-                    borderBottom: activeTab === 'reviews' ? '2px solid #D4AF37' : 'none',
+                    color: activeTab === 'reviews' ? '#2563eb' : 'var(--text-secondary)',
+                    borderBottom: activeTab === 'reviews' ? '2px solid #2563eb' : 'none',
                     background: 'none', border: 'none', cursor: 'pointer'
                   }}
                 >
@@ -549,116 +542,30 @@ export const ProductDetailModal = () => {
                 </div>
               )}
 
-              {/* Tab 2: Volumetric Freight & Duty Engine */}
+              {/* Tab 2: Delivery options (same prices as checkout) */}
               {activeTab === 'logistics' && (
-                <div style={{ paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  <div
-                    className="glass-panel"
-                    style={{
-                      padding: '16px',
-                      borderRadius: '14px',
-                      border: '1px solid var(--border-light)'
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                      <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <Boxes size={16} color="#D4AF37" /> Volumetric Cargo Estimator
-                      </span>
-                      <span className="badge-fx" style={{ fontSize: '0.72rem' }}>
-                        $1 = GH₵{fxRates?.USD_GHS || '15.65'} • Tema Port MPS
-                      </span>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                          CBM Volume (per unit)
-                        </label>
-                        <input
-                          type="number"
-                          step="0.005"
-                          value={customCbm}
-                          onChange={(e) => setCustomCbm(parseFloat(e.target.value) || 0.01)}
-                          style={{
-                            width: '100%', padding: '8px', borderRadius: '8px',
-                            border: '1px solid var(--border-light)', backgroundColor: 'var(--bg-main)',
-                            color: 'var(--text-primary)', fontWeight: 700, fontSize: '0.9rem'
-                          }}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                          Gross Weight (KG per unit)
-                        </label>
-                        <input
-                          type="number"
-                          step="0.5"
-                          value={customKg}
-                          onChange={(e) => setCustomKg(parseFloat(e.target.value) || 1)}
-                          style={{
-                            width: '100%', padding: '8px', borderRadius: '8px',
-                            border: '1px solid var(--border-light)', backgroundColor: 'var(--bg-main)',
-                            color: 'var(--text-primary)', fontWeight: 700, fontSize: '0.9rem'
-                          }}
-                        />
+                <div style={{ paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {[
+                    { icon: Ship, name: 'Sea shipping', time: '35–45 working days', fee: 35, note: 'Cheapest option. Best for heavy or bulk items.' },
+                    { icon: Plane, name: 'Air shipping', time: '7–12 working days', fee: 75, note: 'Faster delivery for urgent orders.' },
+                    { icon: Truck, name: 'Local delivery (Accra)', time: '1–2 working days', fee: 40, note: 'For items already in stock at our Accra hub.' },
+                  ].map((opt) => (
+                    <div key={opt.name} style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '12px 14px', border: '1px solid var(--border-light)', borderRadius: '10px' }}>
+                      
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.92rem' }}>
+                          <span>{opt.name}</span>
+                          <span>GH₵{opt.fee.toFixed(2)}</span>
+                        </div>
+                        <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>{opt.time} · {opt.note}</div>
                       </div>
                     </div>
-
-                    {/* Mode Comparison */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                      {/* Sea Freight Card */}
-                      <div
-                        style={{
-                          padding: '12px', borderRadius: '10px',
-                          border: '1.5px solid rgba(59, 130, 246, 0.4)',
-                          backgroundColor: 'rgba(59, 130, 246, 0.05)'
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#3b82f6', fontWeight: 800, fontSize: '0.85rem' }}>
-                          <Anchor size={14} /> Sea Freight (FCL)
-                        </div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '4px 0' }}>
-                          30–45 Days • Guangzhou to Tema
-                        </div>
-                        <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)' }}>
-                          GH₵{freightCalc.seaFreightGhs}
-                        </div>
-                        <div style={{ fontSize: '0.7rem', color: '#10b981', fontWeight: 700, marginTop: '2px' }}>
-                          ✓ Best for bulk orders
-                        </div>
-                      </div>
-
-                      {/* Air Cargo Card */}
-                      <div
-                        style={{
-                          padding: '12px', borderRadius: '10px',
-                          border: '1.5px solid rgba(212, 175, 55, 0.4)',
-                          backgroundColor: 'rgba(212, 175, 55, 0.05)'
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#D4AF37', fontWeight: 800, fontSize: '0.85rem' }}>
-                          <Plane size={14} /> Air Express Cargo
-                        </div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '4px 0' }}>
-                          7–10 Days • Emirates KIA
-                        </div>
-                        <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)' }}>
-                          GH₵{freightCalc.airFreightGhs}
-                        </div>
-                        <div style={{ fontSize: '0.7rem', color: '#D4AF37', fontWeight: 700, marginTop: '2px' }}>
-                          ✓ Expedited delivery
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{ marginTop: '12px', fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border-light)', paddingTop: '8px' }}>
-                      <span>Estimated Tema Port Customs Duty:</span>
-                      <strong style={{ color: 'var(--text-primary)' }}>GH₵{freightCalc.customsDutyEstimateGhs} (Included in Pre-order)</strong>
-                    </div>
-                  </div>
+                  ))}
+                  <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '4px 0 0' }}>
+                    You choose your delivery option at checkout. Customs clearance is included.
+                  </p>
                 </div>
               )}
-
               {/* Tab 3: Reviews */}
               {activeTab === 'reviews' && (
                 <div style={{ paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -675,10 +582,11 @@ export const ProductDetailModal = () => {
                       percentage: totalReviews > 0 ? (currentReviews.filter((r) => r.rating === s).length / totalReviews) * 100 : 0
                     }));
 
-                    const handleReviewSubmit = (e) => {
+                    const handleReviewSubmit = async (e) => {
                       e.preventDefault();
                       if (!userReview.name || !userReview.comment) return;
-                      addReview(selectedProduct.id, userReview);
+                      const saved = await addReview(selectedProduct.id, userReview);
+                      if (!saved) return;
                       setSubmittedReview(true);
                       setShowReviewForm(false);
                       setUserReview({
@@ -710,23 +618,23 @@ export const ProductDetailModal = () => {
                               {avgRating}
                             </div>
                             <div>
-                              <div style={{ display: 'flex', color: '#D4AF37', marginBottom: '4px' }}>
+                              <div style={{ display: 'flex', color: '#2563eb', marginBottom: '4px' }}>
                                 {[...Array(5)].map((_, i) => (
                                   <Star
                                     key={i}
                                     size={16}
-                                    fill={i < Math.floor(Number(avgRating)) ? '#D4AF37' : 'none'}
+                                    fill={i < Math.floor(Number(avgRating)) ? '#2563eb' : 'none'}
                                   />
                                 ))}
                               </div>
                               <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                                Based on {totalReviews} {totalReviews === 1 ? 'verified review' : 'verified reviews'}
+                                Based on {totalReviews} {totalReviews === 1 ? 'review' : 'reviews'}
                               </span>
                             </div>
                           </div>
 
                           <button
-                            onClick={() => setShowReviewForm(!showReviewForm)}
+                            onClick={() => (user ? setShowReviewForm(!showReviewForm) : openAuth('login'))}
                             className="btn btn-sm"
                             style={{
                               backgroundColor: showReviewForm ? 'var(--bg-main)' : 'var(--text-primary)',
@@ -739,7 +647,7 @@ export const ProductDetailModal = () => {
                               cursor: 'pointer'
                             }}
                           >
-                            {showReviewForm ? 'Cancel Review' : 'Write a Review'}
+                            {showReviewForm ? 'Cancel Review' : user ? 'Write a Review' : 'Sign in to Review'}
                           </button>
                         </div>
 
@@ -750,7 +658,7 @@ export const ProductDetailModal = () => {
                               <div key={star} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 <span style={{ width: '28px', color: 'var(--text-secondary)', fontWeight: 600 }}>{star}★</span>
                                 <div style={{ flex: 1, height: '6px', backgroundColor: 'var(--border-light)', borderRadius: '3px', overflow: 'hidden' }}>
-                                  <div style={{ width: `${percentage}%`, height: '100%', backgroundColor: '#D4AF37', borderRadius: '3px' }} />
+                                  <div style={{ width: `${percentage}%`, height: '100%', backgroundColor: '#2563eb', borderRadius: '3px' }} />
                                 </div>
                                 <span style={{ width: '20px', color: 'var(--text-muted)', textAlign: 'right' }}>{count}</span>
                               </div>
@@ -791,12 +699,12 @@ export const ProductDetailModal = () => {
                                   >
                                     <Star
                                       size={22}
-                                      color="#D4AF37"
-                                      fill={(hoverStar || userReview.rating) >= star ? '#D4AF37' : 'none'}
+                                      color="#2563eb"
+                                      fill={(hoverStar || userReview.rating) >= star ? '#2563eb' : 'none'}
                                     />
                                   </button>
                                 ))}
-                                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#D4AF37', marginLeft: '6px' }}>
+                                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#2563eb', marginLeft: '6px' }}>
                                   {userReview.rating} of 5 Stars
                                 </span>
                               </div>
@@ -855,7 +763,7 @@ export const ProductDetailModal = () => {
                                 className="btn btn-primary btn-sm"
                                 style={{ fontWeight: 700, fontSize: '0.85rem', borderRadius: '8px' }}
                               >
-                                Submit Verified Review
+                                Post review
                               </button>
                               <button
                                 type="button"
@@ -886,8 +794,8 @@ export const ProductDetailModal = () => {
                               gap: '8px'
                             }}
                           >
-                            <CheckCircle2 size={18} />
-                            Thank you! Your verified review has been published.
+                            
+                            Thanks! Your review is now live.
                           </div>
                         )}
 
@@ -927,7 +835,7 @@ export const ProductDetailModal = () => {
                                           borderRadius: '4px'
                                         }}
                                       >
-                                        <CheckCircle2 size={11} /> Verified Buyer
+                                         Bought this item
                                       </span>
                                     )}
                                   </div>
@@ -936,12 +844,12 @@ export const ProductDetailModal = () => {
                                   </span>
                                 </div>
 
-                                <div style={{ display: 'flex', color: '#D4AF37', marginBottom: '6px' }}>
+                                <div style={{ display: 'flex', color: '#2563eb', marginBottom: '6px' }}>
                                   {[...Array(5)].map((_, i) => (
                                     <Star
                                       key={i}
                                       size={13}
-                                      fill={i < rev.rating ? '#D4AF37' : 'none'}
+                                      fill={i < rev.rating ? '#2563eb' : 'none'}
                                     />
                                   ))}
                                 </div>
@@ -972,7 +880,7 @@ export const ProductDetailModal = () => {
                                       borderRadius: '4px'
                                     }}
                                   >
-                                    <ThumbsUp size={12} /> Helpful ({rev.helpfulCount || 0})
+                                     Helpful ({rev.helpfulCount || 0})
                                   </button>
                                 </div>
                               </div>
@@ -990,7 +898,7 @@ export const ProductDetailModal = () => {
             {relatedProducts.length > 0 && (
               <div style={{ marginTop: '8px', paddingTop: '16px', borderTop: '1px solid var(--border-light)' }}>
                 <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '10px', display: 'block' }}>
-                  Related Import Batches
+                  You may also like
                 </span>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
                   {relatedProducts.map((rel) => (
@@ -1005,7 +913,7 @@ export const ProductDetailModal = () => {
                       }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.transform = 'translateY(-2px)';
-                        e.currentTarget.style.borderColor = '#D4AF37';
+                        e.currentTarget.style.borderColor = '#2563eb';
                       }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.transform = 'none';
@@ -1013,14 +921,14 @@ export const ProductDetailModal = () => {
                       }}
                     >
                       <img
-                        src={(rel.images?.[0]) || rel.image || ''}
+                        src={sizedImage((rel.images?.[0]) || rel.image || '', 320)}
                         alt={rel.name}
                         style={{ width: '100%', height: '70px', objectFit: 'cover', borderRadius: '8px', marginBottom: '6px' }}
                       />
                       <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {rel.name}
                       </div>
-                      <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#D4AF37' }}>
+                      <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#2563eb' }}>
                         GH₵{rel.price.toFixed(2)}
                       </div>
                     </div>

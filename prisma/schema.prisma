@@ -37,40 +37,68 @@ model Category {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  name      String
-  email     String   @unique
-  password  String
-  phone     String?
-  role      String   @default("CUSTOMER")
-  address   String?
-  city      String?
-  orders    Order[]
+  id       String  @id @default(cuid())
+  name     String
+  email    String  @unique
+  password String
+  phone    String?
+  role     String  @default("CUSTOMER")
+  address  String?
+  city     String?
+  orders   Order[]
+
+  // Referral programme
+  referralCode  String?             @unique
+  referredById  String?
+  referredBy    User?               @relation("Referrals", fields: [referredById], references: [id])
+  referrals     User[]              @relation("Referrals")
+  creditBalance Float               @default(0)
+  credits       CreditTransaction[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
+// Every change to a customer's store credit, so balances can always be explained.
+model CreditTransaction {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount    Float // positive = credit added, negative = credit spent
+  type      String // "REFERRAL_REWARD" | "ORDER_PAYMENT" | "ORDER_REFUND"
+  orderId   String?
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
 model Order {
-  id             String   @id @default(cuid())
-  orderCode      String   @unique
-  customerName   String
-  email          String?
-  phone          String
-  city           String
-  address        String
-  deliveryMethod String
-  paymentMethod  String
-  paymentStatus  String   @default("PENDING")
-  orderStatus    String   @default("PROCESSING")
-  subtotal       Float
-  deliveryFee    Float
-  total          Float
-  items          Json
-  notes          String?
-  userId         String?
-  user           User?    @relation(fields: [userId], references: [id])
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id               String   @id @default(cuid())
+  orderCode        String   @unique
+  customerName     String
+  email            String?
+  phone            String
+  city             String
+  address          String
+  deliveryMethod   String
+  paymentMethod    String
+  paymentStatus    String   @default("PENDING")
+  orderStatus      String   @default("PROCESSING")
+  subtotal         Float
+  deliveryFee      Float
+  discountAmount   Float    @default(0) // promo code or referral welcome discount
+  couponCode       String?
+  creditUsed       Float    @default(0) // store credit spent on this order
+  referralRewarded Boolean  @default(false) // referrer already paid for this order
+  creditRefunded   Boolean  @default(false)
+  total            Float
+  items            Json
+  notes            String?
+  userId           String?
+  user             User?    @relation(fields: [userId], references: [id])
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 }
 
 model Inquiry {

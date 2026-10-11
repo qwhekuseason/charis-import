@@ -72,7 +72,7 @@ export const ContactPage = () => {
             Contact CHARI
           </h1>
           <p style={{ fontSize: '0.98rem', color: 'var(--text-muted)', maxWidth: '620px', margin: '0 auto' }}>
-            Questions about a product, an order, or importing something specific? Reach out — our Accra team usually replies within a few minutes.
+            Questions about a product, an order or a special request? Our Accra team is happy to help.
           </p>
         </div>
 
@@ -96,29 +96,13 @@ export const ContactPage = () => {
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
-                <div
-                  style={{
-                    width: '46px',
-                    height: '46px',
-                    borderRadius: '50%',
-                    backgroundColor: 'rgba(22, 163, 74, 0.12)',
-                    color: '#16a34a',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                >
-                  <MessageCircle size={24} />
-                </div>
                 <div>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#16a34a', textTransform: 'uppercase' }}>
-                    Fastest Response
-                  </span>
-                  <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)' }}>WhatsApp Hotline</h3>
+                  <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>WhatsApp</h3>
+                  <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Fastest way to reach us</span>
                 </div>
               </div>
               <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginBottom: '16px' }}>
-                Chat directly with our procurement and dispatch managers for instant pricing and order confirmation.
+                Chat with our team for prices, order updates and delivery questions.
               </p>
               <a
                 href={`https://wa.me/${WHATSAPP_NUMBER}`}
@@ -144,21 +128,7 @@ export const ContactPage = () => {
               }}
             >
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
-                <div
-                  style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '8px',
-                    backgroundColor: 'rgba(217, 119, 6, 0.1)',
-                    color: 'var(--accent)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0
-                  }}
-                >
-                  <Phone size={20} />
-                </div>
+                
                 <div>
                   <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>Phone Lines</h4>
                   <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)', fontWeight: 600, marginTop: '2px' }}>
@@ -171,21 +141,7 @@ export const ContactPage = () => {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
-                <div
-                  style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '8px',
-                    backgroundColor: 'var(--bg-subtle)',
-                    color: 'var(--text-secondary)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0
-                  }}
-                >
-                  <Mail size={20} />
-                </div>
+                
                 <div>
                   <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>Email Address</h4>
                   <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)', fontWeight: 600, marginTop: '2px' }}>
@@ -198,23 +154,9 @@ export const ContactPage = () => {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
-                <div
-                  style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '8px',
-                    backgroundColor: 'var(--bg-subtle)',
-                    color: 'var(--text-secondary)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0
-                  }}
-                >
-                  <MapPin size={20} />
-                </div>
+                
                 <div>
-                  <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>Warehouse Hub Location</h4>
+                  <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>Pickup location</h4>
                   <div style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
                     Spintex Road / Accra Central, Greater Accra Region, Ghana
                   </div>
@@ -225,28 +167,14 @@ export const ContactPage = () => {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
-                <div
-                  style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '8px',
-                    backgroundColor: 'var(--bg-subtle)',
-                    color: 'var(--text-secondary)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0
-                  }}
-                >
-                  <Clock size={20} />
-                </div>
+                
                 <div>
                   <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>Working Hours</h4>
                   <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '2px' }}>
                     Monday – Saturday: 8:00 AM – 6:30 PM
                   </div>
                   <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                    WhatsApp Hotline: 24/7 Monitoring
+                    WhatsApp: we reply every day
                   </div>
                 </div>
               </div>
@@ -265,26 +193,12 @@ export const ContactPage = () => {
           >
             {submitted ? (
               <div style={{ textAlign: 'center', padding: '40px 10px' }}>
-                <div
-                  style={{
-                    width: '64px',
-                    height: '64px',
-                    borderRadius: '50%',
-                    backgroundColor: 'rgba(5, 150, 105, 0.12)',
-                    color: '#059669',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    margin: '0 auto 16px'
-                  }}
-                >
-                  <CheckCircle2 size={36} />
-                </div>
+                
                 <h3 style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '8px' }}>
                   Message Received!
                 </h3>
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', marginBottom: '24px' }}>
-                  Thank you for reaching out. A CHARIS customer care representative will contact you on WhatsApp or phone within 2 hours.
+                  Thank you for reaching out. Someone from our team will contact you on WhatsApp or by phone soon.
                 </p>
                 <button
                   className="btn btn-outline"
@@ -296,7 +210,7 @@ export const ContactPage = () => {
             ) : (
               <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <h3 style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                  Send a Direct Message
+                  Send us a message
                 </h3>
 
                 <div>
@@ -360,10 +274,10 @@ export const ContactPage = () => {
                         color: 'var(--text-primary)'
                       }}
                     >
-                      <option value="Wholesale Inquiry">Wholesale Stock Inquiry</option>
-                      <option value="Order Tracking">Order Tracking &amp; Waybill</option>
-                      <option value="Custom Import Quote">Custom Import Sourcing</option>
-                      <option value="Store Pickup">Accra Warehouse Pickup</option>
+                      <option value="Wholesale Inquiry">Bulk / wholesale order</option>
+                      <option value="Order Tracking">Track my order</option>
+                      <option value="Custom Import Quote">Request an item</option>
+                      <option value="Store Pickup">Pickup in Accra</option>
                     </select>
                   </div>
                 </div>
@@ -392,7 +306,7 @@ export const ContactPage = () => {
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                   <button type="submit" className="btn btn-primary">
-                    <Send size={16} /> Send Message
+                     Send Message
                   </button>
                   <button
                     type="button"

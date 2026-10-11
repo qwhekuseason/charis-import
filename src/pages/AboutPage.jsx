@@ -38,7 +38,7 @@ export const AboutPage = () => {
               marginBottom: '16px'
             }}
           >
-            Empowering Ghanaian Retailers with Direct Factory Imports
+            Quality imports, delivered across Ghana
           </h1>
           <p
             style={{
@@ -49,7 +49,7 @@ export const AboutPage = () => {
               margin: '0 auto 28px'
             }}
           >
-            CHARI was founded to bridge the gap between global manufacturing hubs in China, Turkey, and the USA, and local Ghanaian retail entrepreneurs. We eliminate unnecessary middlemen, high shipping markups, and port clearance confusion.
+            CHARI helps shoppers and small businesses in Ghana buy directly from suppliers in China, Turkey and Dubai — without the middlemen, high markups or customs stress.
           </p>
 
           <div
@@ -62,16 +62,16 @@ export const AboutPage = () => {
             }}
           >
             <div>
-              <div style={{ fontSize: '2rem', fontWeight: 900, color: 'var(--accent)' }}>5,000+</div>
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>Happy Customers Served</div>
-            </div>
-            <div>
               <div style={{ fontSize: '2rem', fontWeight: 900, color: 'var(--accent)' }}>16</div>
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>Regions Delivered in Ghana</div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>Regions we deliver to</div>
             </div>
             <div>
-              <div style={{ fontSize: '2rem', fontWeight: 900, color: 'var(--accent)' }}>100%</div>
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>Port Clearing Guarantee</div>
+              <div style={{ fontSize: '2rem', fontWeight: 900, color: 'var(--accent)' }}>3</div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>Countries we buy from</div>
+            </div>
+            <div>
+              <div style={{ fontSize: '2rem', fontWeight: 900, color: 'var(--accent)' }}>Included</div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>Customs clearance</div>
             </div>
           </div>
         </div>
@@ -93,26 +93,12 @@ export const AboutPage = () => {
               border: '1px solid var(--border-light)'
             }}
           >
-            <div
-              style={{
-                width: '52px',
-                height: '52px',
-                borderRadius: '12px',
-                backgroundColor: 'rgba(217, 119, 6, 0.12)',
-                color: 'var(--accent)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '16px'
-              }}
-            >
-              <Globe2 size={28} />
-            </div>
+            
             <h3 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: '8px', color: 'var(--text-primary)' }}>
               Direct Factory Partnerships
             </h3>
             <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-              We partner directly with verified manufacturers in Yiwu, Guangzhou, and Istanbul. No third-party trading markups — you get authentic factory pricing.
+              We buy from trusted suppliers in Yiwu, Guangzhou and Istanbul, so you pay close to factory prices.
             </p>
           </div>
 
@@ -124,26 +110,12 @@ export const AboutPage = () => {
               border: '1px solid var(--border-light)'
             }}
           >
-            <div
-              style={{
-                width: '52px',
-                height: '52px',
-                borderRadius: '12px',
-                backgroundColor: 'rgba(5, 150, 105, 0.12)',
-                color: '#059669',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '16px'
-              }}
-            >
-              <ShieldCheck size={28} />
-            </div>
+            
             <h3 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: '8px', color: 'var(--text-primary)' }}>
               Quality Checked Before Loading
             </h3>
             <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-              Our procurement agents on the ground in China personally open cartons and test items for stitching, motors, and finish before sealing the containers.
+              Our team checks items for quality before they are shipped to Ghana.
             </p>
           </div>
 
@@ -155,26 +127,12 @@ export const AboutPage = () => {
               border: '1px solid var(--border-light)'
             }}
           >
-            <div
-              style={{
-                width: '52px',
-                height: '52px',
-                borderRadius: '12px',
-                backgroundColor: 'rgba(37, 99, 235, 0.12)',
-                color: '#2563eb',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '16px'
-              }}
-            >
-              <Building size={28} />
-            </div>
+            
             <h3 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: '8px', color: 'var(--text-primary)' }}>
-              Accra Warehouse &amp; Pickup Hub
+              Pickup in Accra
             </h3>
             <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-              Inspect and collect your orders free of charge at our Accra hub, or let our logistics team book parcel delivery to your regional bus station.
+              Collect your order for free in Spintex, Accra, or we send it to your nearest bus station.
             </p>
           </div>
         </div>
@@ -193,18 +151,18 @@ export const AboutPage = () => {
             Ready to stock your shop or boutique?
           </h3>
           <p style={{ color: '#cbd5e1', maxWidth: '560px', margin: '0 auto 24px', fontSize: '0.95rem' }}>
-            Explore our curated collection of quality products — shop online with delivery across all 16 regions of Ghana.
+            Shop online and get delivery to all 16 regions of Ghana.
           </p>
           <div style={{ display: 'flex', justifyContent: 'center', gap: '14px', flexWrap: 'wrap' }}>
             <button className="btn btn-primary" onClick={() => navigate('shop')}>
-              Explore Our Shop <ArrowRight size={16} />
+              Shop now <ArrowRight size={16} />
             </button>
             <button
               className="btn btn-outline"
               onClick={() => setQuoteModalOpen(true)}
               style={{ borderColor: 'rgba(255,255,255,0.5)', color: '#fff', backgroundColor: 'transparent' }}
             >
-              Request Custom Quote
+              Request an item
             </button>
           </div>
         </div>

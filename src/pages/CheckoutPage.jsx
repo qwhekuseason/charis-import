@@ -1,5 +1,6 @@
 import React, { useState, useId } from 'react';
 import { useStore } from '../context/StoreContext';
+import { sizedImage } from '../utils/images';
 import { GHANA_REGIONS } from '../data/products';
 import { validateDiscountCode } from '../services/api';
 import {
@@ -40,11 +41,15 @@ export const CheckoutPage = () => {
     setPreorderTermsOpen,
     availableCoupons,
     fxRates,
-    calculateVolumetricFreight
+    calculateVolumetricFreight,
+    referralInfo
   } = useStore();
+  const [useCredit, setUseCredit] = useState(false);
 
-  const [discountAmount, setDiscountAmount] = useState(pageParams?.discountAmount || 0);
-  const [appliedPromo, setAppliedPromo] = useState(pageParams?.appliedPromo || '');
+  // Browser-held wallet credit (WALLET-...) can't be verified by the server, so it isn't carried into checkout.
+  const carriedPromo = pageParams?.appliedPromo && !pageParams.appliedPromo.startsWith('WALLET-') ? pageParams : null;
+  const [discountAmount, setDiscountAmount] = useState(carriedPromo?.discountAmount || 0);
+  const [appliedPromo, setAppliedPromo] = useState(carriedPromo?.appliedPromo || '');
   const [promoInput, setPromoInput] = useState('');
   const [validatingPromo, setValidatingPromo] = useState(false);
 
@@ -62,7 +67,7 @@ export const CheckoutPage = () => {
   const FREIGHT_OPTIONS = [
     {
       id: 'sea_freight',
-      name: 'Sea Shipping (Pre-Order)',
+      name: 'Sea shipping',
       type: 'SEA_FREIGHT',
       icon: Ship,
       cost: 35.00,
@@ -71,7 +76,7 @@ export const CheckoutPage = () => {
     },
     {
       id: 'air_cargo',
-      name: 'Air Cargo (Fast Pre-Order)',
+      name: 'Air shipping',
       type: 'AIR_FREIGHT',
       icon: Plane,
       cost: 75.00,
@@ -80,7 +85,7 @@ export const CheckoutPage = () => {
     },
     {
       id: 'local_express',
-      name: 'Local Delivery (Accra & Nearby)',
+      name: 'Local delivery (Accra)',
       type: 'LOCAL_DISPATCH',
       icon: Truck,
       cost: 40.00,
@@ -157,7 +162,14 @@ export const CheckoutPage = () => {
   };
 
   const shippingCost = selectedShipping.cost;
-  const grandTotal = Math.max(0, cartSubtotal - discountAmount + shippingCost);
+  // Mirrors the server's rules so the total shown here matches what's charged:
+  // the invited-friend welcome discount and a promo code don't combine — the bigger one applies.
+  const welcomeDiscount = referralInfo?.welcomeDiscountAvailable ? Math.min(referralInfo.welcomeDiscount, cartSubtotal) : 0;
+  const usingWelcome = welcomeDiscount > discountAmount;
+  const effectiveDiscount = usingWelcome ? welcomeDiscount : discountAmount;
+  const creditBalance = referralInfo?.creditBalance || 0;
+  const creditUsed = useCredit ? Math.min(creditBalance, Math.max(0, cartSubtotal - effectiveDiscount)) : 0;
+  const grandTotal = Math.max(0, cartSubtotal - effectiveDiscount - creditUsed + shippingCost);
 
   // If cart is empty and not on confirmation
   if (cart.length === 0 && !placedOrderDetails) {
@@ -184,10 +196,10 @@ export const CheckoutPage = () => {
             Your Cart is Empty
           </h2>
           <p style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>
-            Select products or pre-orders from our international catalog before proceeding to checkout.
+            Add some products to your cart first.
           </p>
           <button className="btn btn-primary" onClick={() => navigate('shop')}>
-            Browse Products & Pre-Orders
+            Browse products
           </button>
         </div>
       </div>
@@ -232,8 +244,8 @@ export const CheckoutPage = () => {
         date: new Date().toISOString().split('T')[0],
         status: paymentMethod === 'cash' ? 'order_placed' : 'processing',
         freightType: selectedShipping.type,
-        containerNumber: selectedShipping.type === 'SEA_FREIGHT' ? 'MSKU-882419-7' : null,
-        flightNumber: selectedShipping.type === 'AIR_FREIGHT' ? 'EK-9821 Cargo' : null,
+        containerNumber: null,
+        flightNumber: null,
         volumetricWeight: { cbm: freightCalc.cbm, actualKg: freightCalc.actualKg },
         fxLock: {
           usdRate: fxRates?.USD_GHS || 15.65,
@@ -253,8 +265,10 @@ export const CheckoutPage = () => {
         deliveryFee: shippingCost,
         discountAmount,
         couponCode: appliedPromo || null,
+        useCredit: creditUsed > 0,
         total: grandTotal,
         shippingMethod: selectedShipping.name,
+        shippingMethodId: selectedShipping.id,
         destination: `${formData.address}, ${formData.city} (${formData.region})`,
         city: formData.city,
         address: formData.address,
@@ -262,7 +276,7 @@ export const CheckoutPage = () => {
         paymentMethod:
           paymentMethod === 'momo'
             ? `${momoProvider.toUpperCase()} MoMo Transfer (${momoNumber || formData.phone})`
-            : 'Pay on Collection / Inspection (Spintex Hub)',
+            : 'Pay on collection (Spintex, Accra)',
         waybillNumber: `BL-GH-${orderId}`,
         steps: [
           { title: 'Order Confirmed', time: 'Just Now', location: 'Charis Import Office', done: true, note: 'Order registered and price locked in Cedis.' },
@@ -292,7 +306,7 @@ export const CheckoutPage = () => {
       }
     } catch (err) {
       console.error('Error in handlePlaceOrder:', err);
-      showToast('Could not complete order. Please try again.', 'error');
+      showToast(err.message || 'Could not complete order. Please try again.', 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -311,11 +325,12 @@ export const CheckoutPage = () => {
       `*Phone:* ${order.phone}\n` +
       (order.email ? `*Email:* ${order.email}\n` : '') +
       `*Delivery Address:* ${order.destination || order.city}\n` +
-      `*Logistics / Freight:* ${order.shippingMethod}\n\n` +
+      `*Delivery:* ${order.shippingMethod}\n\n` +
       `*ORDER ITEMS:*\n${itemsList}\n\n` +
       `*Subtotal:* GH₵${(order.subtotal || 0).toFixed(2)}\n` +
       `*Delivery / Shipping:* GH₵${(order.shippingCost || order.deliveryFee || 0).toFixed(2)}\n` +
       (order.discountAmount ? `*Discount:* -GH₵${order.discountAmount.toFixed(2)}\n` : '') +
+      (order.creditUsed ? `*Store credit:* -GH₵${order.creditUsed.toFixed(2)}\n` : '') +
       `*TOTAL PAYABLE:* GH₵${(order.total || 0).toFixed(2)}\n\n` +
       `*Payment Method:* ${order.paymentMethod}\n` +
       `*Payment MoMo Account:* 059 144 0934 (CHARIS IMPORT)\n\n` +
@@ -328,36 +343,6 @@ export const CheckoutPage = () => {
     <div className="section" style={{ minHeight: '85vh', paddingTop: '28px' }}>
       <div className="container" style={{ maxWidth: '1080px' }}>
         
-        {/* Exchange Rate & Guarantee Banner */}
-        <div
-          className="glass-panel"
-          style={{
-            padding: '12px 20px',
-            marginBottom: '24px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: '12px'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span className="fx-rate-pill-dot" />
-            <span style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-              Guaranteed Exchange Rate: 1 USD = GH₵{fxRates?.USD_GHS || '15.65'} • 1 RMB = GH₵{fxRates?.RMB_GHS || '2.18'}
-            </span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.76rem', color: 'var(--text-muted)' }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#10b981', fontWeight: 700 }}>
-              <ShieldCheck size={14} /> 100% Safe &amp; Verified Order
-            </span>
-            <span>•</span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-              <Clock size={13} /> Price Locked
-            </span>
-          </div>
-        </div>
-
         {/* Step Indicator */}
         <div
           style={{
@@ -469,22 +454,7 @@ export const CheckoutPage = () => {
           >
             {/* Header / Success Indicator */}
             <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-              <div
-                style={{
-                  width: '76px',
-                  height: '76px',
-                  borderRadius: '50%',
-                  backgroundColor: 'rgba(16, 185, 129, 0.12)',
-                  color: '#10b981',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  margin: '0 auto 16px',
-                  border: '2px solid rgba(16, 185, 129, 0.3)'
-                }}
-              >
-                <CheckCircle2 size={44} />
-              </div>
+              
 
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#059669', padding: '4px 12px', borderRadius: '20px', fontSize: '0.78rem', fontWeight: 800, marginBottom: '10px' }}>
                 <Check size={14} /> ORDER CONFIRMED &bull; AWAITING MOMO TRANSFER
@@ -535,7 +505,7 @@ export const CheckoutPage = () => {
                   FREIGHT / ROUTE
                 </div>
                 <div style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: '4px' }}>
-                  {placedOrderDetails.freightType === 'SEA_FREIGHT' ? 'Sea Shipping (Pre-Order)' : placedOrderDetails.freightType === 'AIR_FREIGHT' ? 'Air Cargo (Express)' : 'Local Delivery'}
+                  {placedOrderDetails.freightType === 'SEA_FREIGHT' ? 'Sea shipping' : placedOrderDetails.freightType === 'AIR_FREIGHT' ? 'Air shipping (Express)' : 'Local Delivery'}
                 </div>
               </div>
             </div>
@@ -769,7 +739,7 @@ export const CheckoutPage = () => {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '6px' }}>
                 <button
                   className="btn btn-outline"
-                  onClick={() => navigate('track-order', { prefillCode: placedOrderDetails.orderCode || placedOrderDetails.orderId })}
+                  onClick={() => navigate('track-order', { prefillCode: placedOrderDetails.orderCode || placedOrderDetails.orderId, prefillPhone: placedOrderDetails.phone })}
                   style={{ borderRadius: '12px' }}
                 >
                   Track My Order
@@ -913,15 +883,12 @@ export const CheckoutPage = () => {
                     />
                   </div>
 
-                  {/* Freight Corridor Engine Selector */}
+                  {/* Delivery option */}
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                       <label style={{ fontSize: '0.84rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                        Select Shipping Method
+                        Choose delivery
                       </label>
-                      <span style={{ fontSize: '0.72rem', color: 'var(--accent)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '3px' }}>
-                        <Scale size={12} /> Est. Weight: {freightCalc.actualKg} KG
-                      </span>
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -957,7 +924,7 @@ export const CheckoutPage = () => {
                             <div style={{ flex: 1 }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: '0.92rem', color: 'var(--text-primary)' }}>
                                 <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <Icon size={16} color="var(--accent)" />
+                                  
                                   {method.name}
                                 </span>
                                 <span style={{ color: 'var(--accent)' }}>
@@ -1152,10 +1119,10 @@ export const CheckoutPage = () => {
                       />
                       <div>
                         <span style={{ fontWeight: 800, fontSize: '0.96rem', color: 'var(--text-primary)' }}>
-                          Pay on Inspection / Store Collection (Accra Hub)
+                          Pay when you collect (Accra)
                         </span>
                         <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                          Inspect stock in person at our Spintex / Accra warehouse hub before final settlement.
+                          Check your items at our Spintex, Accra pickup point, then pay.
                         </p>
                       </div>
                     </label>
@@ -1200,9 +1167,9 @@ export const CheckoutPage = () => {
                             padding: 0
                           }}
                         >
-                          Preorder Terms &amp; Conditions
+                          pre-order terms
                         </button>
-                        . I understand that today's price is locked in Cedis, shipping takes the estimated days shown, and Charis Import handles the full delivery.
+                        . I understand pre-orders are paid in full, the price is fixed in cedis, and delivery takes the time shown above.
                       </span>
                     </label>
                   </div>
@@ -1215,7 +1182,7 @@ export const CheckoutPage = () => {
                   >
                     {isSubmitting
                       ? 'Placing Order & Connecting WhatsApp...'
-                      : `Confirm Order & View Transfer Details (GH₵${grandTotal.toFixed(2)})`}
+                      : `Place order · GH₵${grandTotal.toFixed(2)}`}
                   </button>
                 </div>
               )}
@@ -1258,7 +1225,7 @@ export const CheckoutPage = () => {
                     }}
                   >
                     <img
-                      src={item.product.images ? item.product.images[0] : (item.product.image || '')}
+                      src={sizedImage(item.product.images ? item.product.images[0] : (item.product.image || ''), 160)}
                       alt={item.product.name}
                       style={{
                         width: '48px',
@@ -1292,15 +1259,30 @@ export const CheckoutPage = () => {
                 ))}
               </div>
 
+              {/* Store credit (from referrals) */}
+              {creditBalance > 0 && (
+                <label className="shop-check" style={{ marginBottom: '12px', padding: '10px 12px', border: '1px solid var(--border-light)', borderRadius: '10px' }}>
+                  <input type="checkbox" checked={useCredit} onChange={(e) => setUseCredit(e.target.checked)} />
+                  Use my store credit (GH₵{creditBalance.toFixed(2)} available)
+                </label>
+              )}
+
+              {usingWelcome && (
+                <div style={{ padding: '8px 12px', borderRadius: '8px', background: 'rgba(16, 185, 129, 0.1)', color: '#047857', fontSize: '0.84rem', fontWeight: 600, marginBottom: '12px' }}>
+                  Welcome discount from your invite: −GH₵{welcomeDiscount.toFixed(2)}
+                </div>
+              )}
+
               {/* Promo Input */}
               <form onSubmit={handleApplyPromo} style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
                 <input
                   type="text"
-                  placeholder="Promo Code (e.g. CHARI10)"
+                  placeholder="Promo code"
+                  aria-label="Promo code"
                   value={promoInput}
                   onChange={(e) => setPromoInput(e.target.value)}
                   className="glass-input"
-                  style={{ flex: 1, padding: '8px 12px', fontSize: '0.84rem' }}
+                  style={{ flex: 1, minWidth: 0, padding: '8px 12px', fontSize: '0.84rem' }}
                 />
                 <button
                   type="submit"
@@ -1338,19 +1320,26 @@ export const CheckoutPage = () => {
               {/* Price Breakdown */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid var(--border-light)', paddingTop: '14px', fontSize: '0.88rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)' }}>
-                  <span>Product Subtotal:</span>
+                  <span>Items</span>
                   <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>GH₵{cartSubtotal.toFixed(2)}</span>
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)' }}>
-                  <span>Logistics ({selectedShipping.type === 'SEA_FREIGHT' ? 'Sea' : selectedShipping.type === 'AIR_FREIGHT' ? 'Air' : 'Local'}):</span>
+                  <span>Delivery</span>
                   <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>GH₵{shippingCost.toFixed(2)}</span>
                 </div>
 
-                {discountAmount > 0 && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#10b981' }}>
-                    <span>Discount Applied:</span>
-                    <span style={{ fontWeight: 700 }}>-GH₵{discountAmount.toFixed(2)}</span>
+                {effectiveDiscount > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669' }}>
+                    <span>{usingWelcome ? 'Welcome discount' : 'Discount'}</span>
+                    <span style={{ fontWeight: 700 }}>−GH₵{effectiveDiscount.toFixed(2)}</span>
+                  </div>
+                )}
+
+                {creditUsed > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669' }}>
+                    <span>Store credit</span>
+                    <span style={{ fontWeight: 700 }}>−GH₵{creditUsed.toFixed(2)}</span>
                   </div>
                 )}
 
@@ -1366,7 +1355,7 @@ export const CheckoutPage = () => {
                     marginTop: '4px'
                   }}
                 >
-                  <span>Total Amount:</span>
+                  <span>Total</span>
                   <span style={{ color: 'var(--accent)' }}>
                     <span className="currency-ghc">GH₵</span>
                     {grandTotal.toFixed(2)}

@@ -1,5 +1,7 @@
 import React from 'react';
 import { useStore } from '../context/StoreContext';
+import { sizedImage } from '../utils/images';
+import { productCategorySlug } from '../utils/categories';
 import { ArrowRight, Layers } from 'lucide-react';
 
 export const CategoriesPage = () => {
@@ -26,12 +28,12 @@ export const CategoriesPage = () => {
             margin: '0 auto 40px'
           }}
         >
-          <span className="section-pretitle">All Product Collections</span>
+          <span className="section-pretitle">Categories</span>
           <h1 style={{ fontSize: '2.4rem', fontWeight: 900, color: 'var(--text-primary)', marginBottom: '10px' }}>
-            Browse Product Categories
+            Shop by category
           </h1>
           <p style={{ fontSize: '1rem', color: 'var(--text-muted)' }}>
-            Explore all categories — kitchen essentials, electronics, fashion, lifestyle, and home goods with reliable delivery anywhere in Ghana.
+            Find what you need, with delivery anywhere in Ghana.
           </p>
         </div>
 
@@ -71,7 +73,7 @@ export const CategoriesPage = () => {
             >
               <div style={{ position: 'relative', width: '100%', height: '190px' }}>
                 <img
-                  src={cat.image}
+                  src={sizedImage(cat.image, 480)}
                   alt={cat.name}
                   style={{
                     width: '100%',
@@ -85,7 +87,6 @@ export const CategoriesPage = () => {
                     top: '12px',
                     right: '12px',
                     backgroundColor: 'rgba(15, 23, 42, 0.85)',
-                    backdropFilter: 'blur(4px)',
                     color: '#ffffff',
                     fontSize: '0.75rem',
                     fontWeight: 700,
@@ -93,7 +94,10 @@ export const CategoriesPage = () => {
                     borderRadius: '9999px'
                   }}
                 >
-                  {cat.itemCount} Products
+                  {(() => {
+                    const count = (products || []).filter((p) => productCategorySlug(p) === cat.slug).length;
+                    return count === 0 ? 'Coming soon' : `${count} ${count === 1 ? 'product' : 'products'}`;
+                  })()}
                 </div>
               </div>
 

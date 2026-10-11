@@ -39,7 +39,7 @@ export const QuoteModal = () => {
 
   const handleSendViaWhatsApp = () => {
     const text = encodeURIComponent(
-      `Hello CHARI Sourcing Team,\n\n*REQUEST AN ITEM / CUSTOM SOURCING*:\n\nâ€¢ *Name:* ${formData.name || 'Customer'}\nâ€¢ *Phone:* ${formData.phone}\nâ€¢ *Product:* ${formData.productName}\nâ€¢ *Target Budget:* ${formData.budget ? `GHâ‚µ${formData.budget}` : 'Flexible'}\nâ€¢ *Link/Ref:* ${formData.productUrl || 'Will send photo in chat'}\nâ€¢ *Estimated Qty:* ${formData.quantity || '1'}\nâ€¢ *Shipping Mode:* ${formData.shippingPreference === 'sea' ? 'Sea Cargo (30â€“50 Days)' : 'Air Express (7â€“12 Days)'}\nâ€¢ *Destination:* ${formData.city || 'Accra'}\nâ€¢ *Specs/Notes:* ${formData.notes || 'None'}\n\nPlease confirm factory pricing and quote in GHS.`
+      `Hello CHARI Sourcing Team,\n\n*REQUEST AN ITEM / CUSTOM SOURCING*:\n\n• *Name:* ${formData.name || 'Customer'}\n• *Phone:* ${formData.phone}\n• *Product:* ${formData.productName}\n• *Target Budget:* ${formData.budget ? `GH₵${formData.budget}` : 'Flexible'}\n• *Link/Ref:* ${formData.productUrl || 'Will send photo in chat'}\n• *Estimated Qty:* ${formData.quantity || '1'}\n• *Shipping Mode:* ${formData.shippingPreference === 'sea' ? 'Sea Cargo (30–50 Days)' : 'Air Express (7–12 Days)'}\n• *Destination:* ${formData.city || 'Accra'}\n• *Specs/Notes:* ${formData.notes || 'None'}\n\nPlease confirm factory pricing and quote in GHS.`
     );
     window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${text}`, '_blank');
     setQuoteModalOpen(false);
@@ -52,10 +52,7 @@ export const QuoteModal = () => {
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(15, 23, 42, 0.72)',
-        backdropFilter: 'blur(16px)',
-        WebkitBackdropFilter: 'blur(16px)',
-        zIndex: 1000,
+        backgroundColor: 'rgba(15, 23, 42, 0.72)',        zIndex: 1000,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -88,18 +85,18 @@ export const QuoteModal = () => {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            background: 'linear-gradient(135deg, rgba(37,99,235,0.06) 0%, rgba(255,255,255,0.95) 100%)'
+            background: 'rgba(37,99,235,0.06)'
           }}
         >
           <div>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', backgroundColor: 'var(--accent-subtle)', border: '1px solid var(--accent-border)', color: 'var(--accent)', padding: '3px 10px', borderRadius: '12px', fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>
-              <Search size={12} /> CHARI Direct Sourcing
+              <Search size={12} /> Custom order
             </div>
             <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.02em' }}>
-              Request Any Item â€” We Import It For You
+              Request an item
             </h2>
             <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '4px 0 0' }}>
-              Found something on 1688, Amazon, Alibaba, Shein, TikTok, or Instagram? CHARI imports it directly to Ghana!
+              Seen something on 1688, Amazon, Alibaba, Shein, TikTok or Instagram? Send it to us and we'll get it for you.
             </p>
           </div>
           <button
@@ -125,26 +122,12 @@ export const QuoteModal = () => {
         <div style={{ padding: '24px 28px', overflowY: 'auto' }}>
           {submitted ? (
             <div style={{ textAlign: 'center', padding: '32px 10px' }}>
-              <div
-                style={{
-                  width: '72px',
-                  height: '72px',
-                  borderRadius: '50%',
-                  backgroundColor: '#dcfce7',
-                  color: '#16a34a',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  margin: '0 auto 16px'
-                }}
-              >
-                <CheckCircle2 size={40} />
-              </div>
+              
               <h3 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '8px' }}>
-                Sourcing Request Received!
+                Request received
               </h3>
               <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', maxWidth: '440px', margin: '0 auto 24px', lineHeight: 1.6 }}>
-                Our direct overseas procurement team will verify supplier pricing, export packaging, and Tema Port customs clearing. We will respond with an exact GHS quote.
+                We'll check the price with the supplier and send you a full quote in cedis, including shipping and customs.
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <button
@@ -165,7 +148,7 @@ export const QuoteModal = () => {
                     cursor: 'pointer'
                   }}
                 >
-                  <MessageCircle size={18} /> Fast-Track Response on WhatsApp
+                  <MessageCircle size={18} /> Get a faster reply on WhatsApp
                 </button>
                 <button
                   type="button"
@@ -196,15 +179,15 @@ export const QuoteModal = () => {
                   backgroundColor: 'var(--accent-subtle)',
                   borderRadius: '12px',
                   padding: '12px 14px',
-                  border: '1px solid rgba(212,175,55,0.12)',
+                  border: '1px solid rgba(37, 99, 235,0.12)',
                   fontSize: '0.78rem',
                   color: '#92400e',
                   lineHeight: 1.45
                 }}
               >
-                <Scale size={16} color="#D4AF37" style={{ flexShrink: 0, marginTop: '2px' }} />
+                
                 <span>
-                  <strong>Import Rules:</strong> Preorders are paid in full before factory procurement begins. Sea shipping takes <strong>30â€“50 days</strong> (+ 3â€“7 days port clearance). Shipping fees are weighed and paid separately upon arrival in Ghana.
+                  <strong>Good to know:</strong> Pre-orders are paid in full before we order from the supplier. Sea shipping takes <strong>30–50 days</strong> (+ 3–7 days port clearance). Shipping is charged by weight and paid when your item arrives in Ghana.
                 </span>
               </div>
 
@@ -257,7 +240,7 @@ export const QuoteModal = () => {
               {/* Product Name */}
               <div>
                 <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                  What item do you want us to source? *
+                  What item do you want? *
                 </label>
                 <input
                   type="text"
@@ -301,7 +284,7 @@ export const QuoteModal = () => {
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                    Target Qty *
+                    Quantity *
                   </label>
                   <input
                     type="number"
@@ -327,7 +310,7 @@ export const QuoteModal = () => {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                    Target Budget (GHâ‚µ) (Optional)
+                    Budget in GH₵ (optional)
                   </label>
                   <input
                     type="number"
@@ -416,7 +399,7 @@ export const QuoteModal = () => {
                     </div>
                   ) : (
                     <div>
-                      <Upload size={22} color="#D4AF37" style={{ margin: '0 auto 6px' }} />
+                      <Upload size={22} color="#2563eb" style={{ margin: '0 auto 6px' }} />
                       <div style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
                         Upload screenshot from 1688 / Taobao / Instagram
                       </div>
@@ -431,7 +414,7 @@ export const QuoteModal = () => {
               {/* Shipping Preference */}
               <div>
                 <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Shipping Mode Preference:
+                  Shipping preference
                 </label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                   <label
@@ -441,8 +424,8 @@ export const QuoteModal = () => {
                       gap: '8px',
                       padding: '10px 12px',
                       borderRadius: '10px',
-                      border: formData.shippingPreference === 'sea' ? '2px solid #D4AF37' : '1px solid #cbd5e1',
-                      backgroundColor: formData.shippingPreference === 'sea' ? 'rgba(212, 175, 55, 0.08)' : '#ffffff',
+                      border: formData.shippingPreference === 'sea' ? '2px solid #2563eb' : '1px solid #cbd5e1',
+                      backgroundColor: formData.shippingPreference === 'sea' ? 'rgba(37, 99, 235, 0.08)' : '#ffffff',
                       cursor: 'pointer',
                       fontSize: '0.82rem',
                       fontWeight: 600
@@ -454,10 +437,10 @@ export const QuoteModal = () => {
                       checked={formData.shippingPreference === 'sea'}
                       onChange={() => setFormData({ ...formData, shippingPreference: 'sea' })}
                     />
-                    <Ship size={16} color="#D4AF37" />
+                    
                     <div>
                       <div>Sea Freight</div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 500 }}>30â€“50 Days (Cost-effective)</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 500 }}>30–50 Days (Cost-effective)</div>
                     </div>
                   </label>
 
@@ -468,8 +451,8 @@ export const QuoteModal = () => {
                       gap: '8px',
                       padding: '10px 12px',
                       borderRadius: '10px',
-                      border: formData.shippingPreference === 'air' ? '2px solid #D4AF37' : '1px solid #cbd5e1',
-                      backgroundColor: formData.shippingPreference === 'air' ? 'rgba(212, 175, 55, 0.08)' : '#ffffff',
+                      border: formData.shippingPreference === 'air' ? '2px solid #2563eb' : '1px solid #cbd5e1',
+                      backgroundColor: formData.shippingPreference === 'air' ? 'rgba(37, 99, 235, 0.08)' : '#ffffff',
                       cursor: 'pointer',
                       fontSize: '0.82rem',
                       fontWeight: 600
@@ -481,10 +464,10 @@ export const QuoteModal = () => {
                       checked={formData.shippingPreference === 'air'}
                       onChange={() => setFormData({ ...formData, shippingPreference: 'air' })}
                     />
-                    <Plane size={16} color="#0284c7" />
+                    
                     <div>
                       <div>Air Cargo</div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 500 }}>7â€“12 Days (Fast)</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 500 }}>7–12 Days (Fast)</div>
                     </div>
                   </label>
                 </div>
@@ -493,7 +476,7 @@ export const QuoteModal = () => {
               {/* Specs & Notes */}
               <div>
                 <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                  Target Colours, Sizes or Specifications
+                  Colours, sizes or other details
                 </label>
                 <textarea
                   rows={2}
@@ -529,7 +512,7 @@ export const QuoteModal = () => {
                     cursor: 'pointer'
                   }}
                 >
-                  <Send size={16} /> Submit Sourcing
+                   Send request
                 </button>
                 <button
                   type="button"

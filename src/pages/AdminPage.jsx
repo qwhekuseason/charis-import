@@ -436,6 +436,19 @@ export const AdminPage = () => {
     }
   };
 
+  // Marking an order PAID also pays the referrer's GH₵25 reward (handled on the server).
+  const handlePaymentChange = async (orderId, newPaymentStatus) => {
+    try {
+      await updateOrderStatus(orderId, undefined, newPaymentStatus);
+      setOrders((prev) =>
+        prev.map((o) => (o.id === orderId ? { ...o, paymentStatus: newPaymentStatus } : o))
+      );
+      showToast(newPaymentStatus === 'PAID' ? 'Payment confirmed' : `Payment set to ${newPaymentStatus.toLowerCase()}`, 'success');
+    } catch (err) {
+      showToast(err.message || 'Failed to update payment', 'error');
+    }
+  };
+
   // Handle Add Product Submit
   const handleAddProductSubmit = async (e) => {
     e.preventDefault();
@@ -688,7 +701,7 @@ export const AdminPage = () => {
               </span>
             </div>
             <h1 style={{ fontSize: '2rem', fontWeight: 900, color: '#ffffff', margin: 0 }}>
-              CHARIS Store Control Center
+              Admin dashboard
             </h1>
             <p style={{ margin: '6px 0 0', color: 'var(--text-light)', fontSize: '0.92rem' }}>
               Welcome back, {user.name} · Managing orders, inventory & customers across Ghana
@@ -714,7 +727,7 @@ export const AdminPage = () => {
               onClick={() => navigate('home')}
               className="btn btn-primary"
               style={{
-                background: 'linear-gradient(135deg, #D4AF37 0%, #B8860B 100%)',
+                background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
                 padding: '10px 20px',
                 borderRadius: '8px'
               }}
@@ -778,7 +791,7 @@ export const AdminPage = () => {
             <div style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--text-primary)' }}>
               {orders.length}
             </div>
-            <div style={{ fontSize: '0.8rem', color: processingCount > 0 ? '#D4AF37' : 'var(--text-muted)', marginTop: '4px', fontWeight: 600 }}>
+            <div style={{ fontSize: '0.8rem', color: processingCount > 0 ? '#2563eb' : 'var(--text-muted)', marginTop: '4px', fontWeight: 600 }}>
               {processingCount > 0 ? `${processingCount} orders need processing` : 'All caught up!'}
             </div>
           </div>
@@ -796,7 +809,7 @@ export const AdminPage = () => {
               <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
                 Catalog Products
               </span>
-              <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'rgba(212, 175, 55, 0.15)', color: '#D4AF37', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'rgba(37, 99, 235, 0.15)', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <ShoppingBag size={20} />
               </div>
             </div>
@@ -1080,7 +1093,7 @@ export const AdminPage = () => {
                         <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
                           TOTAL
                         </span>
-                        <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#D4AF37' }}>
+                        <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#2563eb' }}>
                           GH₵{ord.total?.toFixed(2)}
                         </div>
                         <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
@@ -1108,13 +1121,13 @@ export const AdminPage = () => {
                                   ? '#dcfce7'
                                   : ord.orderStatus === 'SHIPPED'
                                   ? '#e0f2fe'
-                                  : 'rgba(212, 175, 55, 0.12)',
+                                  : 'rgba(37, 99, 235, 0.12)',
                               color:
                                 ord.orderStatus === 'DELIVERED'
                                   ? '#166534'
                                   : ord.orderStatus === 'SHIPPED'
                                   ? '#0369a1'
-                                  : '#B8860B'
+                                  : '#1d4ed8'
                             }}
                           >
                             <option value="PROCESSING">Processing</option>
@@ -1122,6 +1135,30 @@ export const AdminPage = () => {
                             <option value="SHIPPED">Shipped</option>
                             <option value="DELIVERED">Delivered</option>
                             <option value="CANCELLED">Cancelled</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '4px' }}>
+                            PAYMENT
+                          </label>
+                          <select
+                            value={ord.paymentStatus || 'PENDING'}
+                            onChange={(e) => handlePaymentChange(ord.id, e.target.value)}
+                            style={{
+                              padding: '8px 12px',
+                              borderRadius: '8px',
+                              fontWeight: 700,
+                              fontSize: '0.85rem',
+                              border: '1.5px solid #cbd5e1',
+                              backgroundColor: ord.paymentStatus === 'PAID' ? '#dcfce7' : '#fff7ed',
+                              color: ord.paymentStatus === 'PAID' ? '#166534' : '#9a3412'
+                            }}
+                          >
+                            <option value="PENDING">Not paid</option>
+                            <option value="VERIFYING">Checking payment</option>
+                            <option value="PAID">Paid</option>
+                            <option value="REFUNDED">Refunded</option>
                           </select>
                         </div>
 
@@ -1164,7 +1201,7 @@ export const AdminPage = () => {
                         <span>Details recorded in database</span>
                       )}
                       {ord.notes && (
-                        <div style={{ marginTop: '6px', fontSize: '0.82rem', color: '#D4AF37', fontWeight: 600 }}>
+                        <div style={{ marginTop: '6px', fontSize: '0.82rem', color: '#2563eb', fontWeight: 600 }}>
                           Customer Note: "{ord.notes}"
                         </div>
                       )}
@@ -1202,7 +1239,7 @@ export const AdminPage = () => {
                 onClick={() => setAddProductModalOpen(true)}
                 className="btn btn-primary"
                 style={{
-                  background: 'linear-gradient(135deg, #D4AF37 0%, #B8860B 100%)',
+                  background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
                   padding: '10px 20px',
                   borderRadius: '10px',
                   display: 'flex',
@@ -1285,7 +1322,7 @@ export const AdminPage = () => {
 
                   <div style={{ padding: '16px', flex: 1, display: 'flex', flexDirection: 'column' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', gap: '6px', flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: '0.75rem', color: '#D4AF37', fontWeight: 700, textTransform: 'uppercase' }}>
+                      <span style={{ fontSize: '0.75rem', color: '#2563eb', fontWeight: 700, textTransform: 'uppercase' }}>
                         {prod.category}
                       </span>
                       <div style={{ display: 'flex', gap: '4px' }}>
@@ -1381,7 +1418,7 @@ export const AdminPage = () => {
                         {new Date(inq.createdAt).toLocaleDateString('en-GB')}
                       </span>
                     </div>
-                    <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#D4AF37', marginBottom: '6px' }}>
+                    <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#2563eb', marginBottom: '6px' }}>
                       Subject: {inq.subject}
                     </div>
                     <p style={{ fontSize: '0.92rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
@@ -1466,7 +1503,7 @@ export const AdminPage = () => {
                 onClick={() => setAddDiscountModalOpen(true)}
                 className="btn btn-primary"
                 style={{
-                  background: 'linear-gradient(135deg, #D4AF37 0%, #B8860B 100%)',
+                  background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
                   padding: '10px 20px',
                   borderRadius: '10px',
                   display: 'flex',
@@ -1489,7 +1526,7 @@ export const AdminPage = () => {
                 <button
                   onClick={() => setAddDiscountModalOpen(true)}
                   className="btn btn-primary"
-                  style={{ background: 'linear-gradient(135deg, #D4AF37 0%, #B8860B 100%)' }}
+                  style={{ background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' }}
                 >
                   <Plus size={16} /> Create Promo Code
                 </button>
@@ -1651,7 +1688,7 @@ export const AdminPage = () => {
             >
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Anchor size={20} color="#D4AF37" />
+                  <Anchor size={20} color="#2563eb" />
                   <h3 style={{ fontSize: '1.3rem', fontWeight: 900, color: 'var(--text-primary)', margin: 0 }}>
                     International Pre-Order Batches & Supply Chain Engine
                   </h3>
@@ -1729,7 +1766,7 @@ export const AdminPage = () => {
                         <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
                           Current Milestone
                         </span>
-                        <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#D4AF37' }}>
+                        <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#2563eb' }}>
                           {(batch.status || 'CONFIRMED').replace(/_/g, ' ')}
                         </div>
                         <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 700 }}>
@@ -1755,7 +1792,7 @@ export const AdminPage = () => {
                       <div>
                         <strong>Origin:</strong> {batch.originPort}
                       </div>
-                      <div style={{ color: '#D4AF37', fontWeight: 900 }}>➔</div>
+                      <div style={{ color: '#2563eb', fontWeight: 900 }}>➔</div>
                       <div>
                         <strong>Destination:</strong> {batch.destinationPort}
                       </div>
@@ -1778,7 +1815,7 @@ export const AdminPage = () => {
                           style={{
                             height: '100%',
                             width: `${Math.min(100, fillPercent)}%`,
-                            background: fillPercent > 80 ? 'linear-gradient(90deg, #D4AF37, #10b981)' : '#D4AF37',
+                            background: fillPercent > 80 ? 'linear-gradient(90deg, #2563eb, #10b981)' : '#2563eb',
                             borderRadius: '4px',
                             transition: 'width 0.4s ease'
                           }}
@@ -1849,7 +1886,7 @@ export const AdminPage = () => {
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Boxes size={20} color="#D4AF37" />
+                  <Boxes size={20} color="#2563eb" />
                   <h4 style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)', margin: 0 }}>
                     Volumetric Freight & Customs Duty Margin Engine
                   </h4>
@@ -1938,8 +1975,8 @@ export const AdminPage = () => {
                   </div>
                 </div>
 
-                <div style={{ padding: '16px', borderRadius: '12px', backgroundColor: 'rgba(212, 175, 55, 0.08)', border: '1.5px solid rgba(212, 175, 55, 0.3)' }}>
-                  <div style={{ fontSize: '0.76rem', color: '#D4AF37', fontWeight: 700, textTransform: 'uppercase' }}>
+                <div style={{ padding: '16px', borderRadius: '12px', backgroundColor: 'rgba(37, 99, 235, 0.08)', border: '1.5px solid rgba(37, 99, 235, 0.3)' }}>
+                  <div style={{ fontSize: '0.76rem', color: '#2563eb', fontWeight: 700, textTransform: 'uppercase' }}>
                     Air Cargo Expedited (KG Based)
                   </div>
                   <div style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--text-primary)', margin: '4px 0' }}>
@@ -2013,7 +2050,7 @@ export const AdminPage = () => {
                         <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
                           {log.event}
                         </td>
-                        <td style={{ padding: '10px 12px', fontWeight: 800, color: '#D4AF37' }}>
+                        <td style={{ padding: '10px 12px', fontWeight: 800, color: '#2563eb' }}>
                           #{log.reference}
                         </td>
                         <td style={{ padding: '10px 12px', fontWeight: 800, color: 'var(--text-primary)' }}>
@@ -2076,7 +2113,7 @@ export const AdminPage = () => {
           >
             <div style={{ padding: '22px 28px', backgroundColor: '#0f172a', color: '#ffffff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Tag size={20} style={{ color: '#D4AF37' }} />
+                <Tag size={20} style={{ color: '#2563eb' }} />
                 <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: '#ffffff' }}>Create New Promo Code</h3>
               </div>
               <button onClick={() => setAddDiscountModalOpen(false)} style={{ color: '#ffffff', cursor: 'pointer', background: 'none', border: 'none' }}>
@@ -2210,7 +2247,7 @@ export const AdminPage = () => {
                   id="discountIsActive"
                   checked={newDiscount.isActive}
                   onChange={(e) => setNewDiscount({ ...newDiscount, isActive: e.target.checked })}
-                  style={{ width: '18px', height: '18px', accentColor: '#D4AF37', cursor: 'pointer' }}
+                  style={{ width: '18px', height: '18px', accentColor: '#2563eb', cursor: 'pointer' }}
                 />
                 <label htmlFor="discountIsActive" style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)', cursor: 'pointer' }}>
                   Activate promo code immediately
@@ -2223,7 +2260,7 @@ export const AdminPage = () => {
                 className="btn btn-primary"
                 style={{
                   width: '100%',
-                  background: 'linear-gradient(135deg, #D4AF37 0%, #B8860B 100%)',
+                  background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
                   padding: '12px',
                   borderRadius: '10px',
                   fontSize: '0.98rem',
@@ -2352,26 +2389,6 @@ export const AdminPage = () => {
 
               {/* Product Image Upload */}
               <div style={{ marginBottom: '18px' }}>
-                {/* ⚠️ Ephemeral Upload Warning */}
-                <div style={{
-                  marginBottom: '10px',
-                  padding: '10px 14px',
-                  borderRadius: '10px',
-                  backgroundColor: 'rgba(212, 175, 55, 0.08)',
-                  border: '1px solid rgba(212, 175, 55, 0.3)',
-                  fontSize: '0.78rem',
-                  color: '#B8860B',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '8px',
-                  lineHeight: 1.5
-                }}>
-                  <AlertCircle size={14} style={{ flexShrink: 0, marginTop: '1px' }} />
-                  <span>
-                    <strong>Local uploads are temporary.</strong> Files saved to <code>/public/uploads/</code> are wiped on server restart (cloud hosts like Railway/Render). For production, paste an external image URL (Cloudinary, Imgur, Unsplash, etc.) using "Paste link instead" below.
-                  </span>
-                </div>
-
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                   <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', margin: 0 }}>
                     Product Image
@@ -2517,8 +2534,8 @@ export const AdminPage = () => {
                           alignItems: 'center',
                           justifyContent: 'center',
                           padding: '24px 16px',
-                          border: `2px dashed ${dragOver ? '#D4AF37' : '#cbd5e1'}`,
-                          backgroundColor: dragOver ? 'rgba(212, 175, 55, 0.08)' : '#f8fafc',
+                          border: `2px dashed ${dragOver ? '#2563eb' : '#cbd5e1'}`,
+                          backgroundColor: dragOver ? 'rgba(37, 99, 235, 0.08)' : '#f8fafc',
                           borderRadius: '12px',
                           cursor: uploadingImage ? 'not-allowed' : 'pointer',
                           transition: 'all 0.2s ease',
@@ -2539,7 +2556,7 @@ export const AdminPage = () => {
 
                         {uploadingImage ? (
                           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-                            <Loader2 size={30} className="animate-spin" style={{ color: '#D4AF37' }} />
+                            <Loader2 size={30} className="animate-spin" style={{ color: '#2563eb' }} />
                             <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                               Uploading image to server...
                             </span>
@@ -2552,8 +2569,8 @@ export const AdminPage = () => {
                                 width: '44px',
                                 height: '44px',
                                 borderRadius: '10px',
-                                backgroundColor: 'rgba(212, 175, 55, 0.15)',
-                                color: '#D4AF37',
+                                backgroundColor: 'rgba(37, 99, 235, 0.15)',
+                                color: '#2563eb',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
@@ -2595,7 +2612,7 @@ export const AdminPage = () => {
                 className="btn btn-primary"
                 style={{
                   width: '100%',
-                  background: 'linear-gradient(135deg, #D4AF37 0%, #B8860B 100%)',
+                  background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
                   padding: '12px',
                   borderRadius: '10px',
                   fontSize: '0.98rem',
@@ -2640,7 +2657,7 @@ export const AdminPage = () => {
           >
             <div style={{ padding: '22px 28px', backgroundColor: '#0f172a', color: '#ffffff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Edit2 size={20} color="#D4AF37" />
+                <Edit2 size={20} color="#2563eb" />
                 <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: '#ffffff' }}>
                   Edit Product Details
                 </h3>
@@ -2743,7 +2760,7 @@ export const AdminPage = () => {
                         fontSize: '0.78rem',
                         fontWeight: 600,
                         border: '1px solid var(--border-medium)',
-                        backgroundColor: (editingProduct.badge || '') === b ? '#D4AF37' : 'var(--bg-subtle)',
+                        backgroundColor: (editingProduct.badge || '') === b ? '#2563eb' : 'var(--bg-subtle)',
                         color: (editingProduct.badge || '') === b ? '#ffffff' : 'var(--text-secondary)',
                         cursor: 'pointer'
                       }}
@@ -2908,8 +2925,8 @@ export const AdminPage = () => {
                           alignItems: 'center',
                           justifyContent: 'center',
                           padding: '24px 16px',
-                          border: `2px dashed ${editDragOver ? '#D4AF37' : '#cbd5e1'}`,
-                          backgroundColor: editDragOver ? 'rgba(212, 175, 55, 0.08)' : '#f8fafc',
+                          border: `2px dashed ${editDragOver ? '#2563eb' : '#cbd5e1'}`,
+                          backgroundColor: editDragOver ? 'rgba(37, 99, 235, 0.08)' : '#f8fafc',
                           borderRadius: '12px',
                           cursor: editUploadingImage ? 'not-allowed' : 'pointer',
                           transition: 'all 0.2s ease',
@@ -2930,7 +2947,7 @@ export const AdminPage = () => {
 
                         {editUploadingImage ? (
                           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-                            <Loader2 size={30} className="animate-spin" style={{ color: '#D4AF37' }} />
+                            <Loader2 size={30} className="animate-spin" style={{ color: '#2563eb' }} />
                             <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                               Uploading new image to server...
                             </span>
@@ -2943,8 +2960,8 @@ export const AdminPage = () => {
                                 width: '44px',
                                 height: '44px',
                                 borderRadius: '10px',
-                                backgroundColor: 'rgba(212, 175, 55, 0.15)',
-                                color: '#D4AF37',
+                                backgroundColor: 'rgba(37, 99, 235, 0.15)',
+                                color: '#2563eb',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
@@ -2995,7 +3012,7 @@ export const AdminPage = () => {
                   className="btn btn-primary"
                   style={{
                     flex: 2,
-                    background: 'linear-gradient(135deg, #D4AF37 0%, #B8860B 100%)',
+                    background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
                     padding: '12px',
                     borderRadius: '10px',
                     fontSize: '0.98rem',
@@ -3044,7 +3061,7 @@ export const AdminPage = () => {
           >
             <div style={{ padding: '22px 28px', backgroundColor: '#0f172a', color: '#ffffff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Anchor size={22} color="#D4AF37" />
+                <Anchor size={22} color="#2563eb" />
                 <div>
                   <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: '#ffffff' }}>
                     Register Logistics Batch

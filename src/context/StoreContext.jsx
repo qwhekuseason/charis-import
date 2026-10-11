@@ -13,7 +13,8 @@ import {
   getActiveBatches,
   getActiveDiscounts,
   getReviews,
-  submitReview as apiSubmitReview
+  submitReview as apiSubmitReview,
+  getMyReferrals as apiGetMyReferrals
 } from '../services/api';
 
 const StoreContext = createContext();
@@ -165,29 +166,33 @@ export const StoreProvider = ({ children }) => {
   // Active Promo Discounts (Linked to Neon PostgreSQL)
   const [availableCoupons, setAvailableCoupons] = useState([]);
 
-  // Referral Rewards & Wallet State (Persisted)
-  const [referralWallet, setReferralWallet] = useState(() => {
+  // Referral programme — code, store credit and history all come from the server.
+  const [referralInfo, setReferralInfo] = useState(null);
+
+  // Remember an invite code from a shared link (e.g. ?ref=CHARI-ABC123) until the visitor signs up.
+  const [pendingInviteCode, setPendingInviteCode] = useState(() => {
     try {
-      const saved = localStorage.getItem('chari_referral_wallet');
-      return saved ? parseFloat(saved) : 25.00;
+      const fromUrl = new URLSearchParams(window.location.search).get('ref');
+      if (fromUrl) {
+        localStorage.setItem('chari_invite_code', fromUrl.trim().toUpperCase());
+        return fromUrl.trim().toUpperCase();
+      }
+      return localStorage.getItem('chari_invite_code') || '';
     } catch {
-      return 25.00;
+      return '';
     }
   });
 
-  const [referralStats, setReferralStats] = useState(() => {
-    try {
-      const saved = localStorage.getItem('chari_referral_stats');
-      return saved ? JSON.parse(saved) : { invites: 3, completedOrders: 1 };
-    } catch {
-      return { invites: 3, completedOrders: 1 };
-    }
-  });
+  const refreshReferrals = async () => {
+    const info = await apiGetMyReferrals().catch(() => null);
+    setReferralInfo(info);
+    return info;
+  };
 
-  // Referral code for current user or guest
-  const referralCode = user
-    ? `CHARI-${user.name.replace(/[^a-zA-Z]/g, '').toUpperCase().slice(0, 5)}${user.id ? user.id.slice(-2).toUpperCase() : '26'}`
-    : 'CHARI-VIP26';
+  useEffect(() => {
+    if (user) refreshReferrals();
+    else setReferralInfo(null);
+  }, [user?.id]);
 
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -215,13 +220,6 @@ export const StoreProvider = ({ children }) => {
     localStorage.setItem('chari_reviews', JSON.stringify(reviews));
   }, [reviews]);
 
-  useEffect(() => {
-    localStorage.setItem('chari_referral_wallet', referralWallet.toString());
-  }, [referralWallet]);
-
-  useEffect(() => {
-    localStorage.setItem('chari_referral_stats', JSON.stringify(referralStats));
-  }, [referralStats]);
 
   // Fetch live products and categories from PostgreSQL via REST API
   const refreshProducts = async () => {
@@ -332,6 +330,8 @@ export const StoreProvider = ({ children }) => {
     try {
       const res = await apiRegisterUser(userData);
       if (res && res.user) {
+        try { localStorage.removeItem('chari_invite_code'); } catch {}
+        setPendingInviteCode('');
         setUser(res.user);
         setAuthModalOpen(false);
         showToast(`Account created! Welcome, ${res.user.name.split(' ')[0]}!`, 'success');
@@ -509,25 +509,12 @@ export const StoreProvider = ({ children }) => {
 
       setReviews((prev) => [saved, ...prev]);
       if (refreshProducts) refreshProducts();
-      showToast('Thank you! Your verified review has been published.', 'success');
+      showToast('Thanks! Your review is now live.', 'success');
       return saved;
     } catch (err) {
       console.error('Failed to submit review to database:', err);
-      const fallbackRev = {
-        id: `rev-${Date.now()}`,
-        productId,
-        userName: reviewData.userName?.trim() || 'Verified Buyer',
-        userCity: reviewData.userCity?.trim() || 'Accra',
-        rating: Number(reviewData.rating) || 5,
-        title: reviewData.title?.trim() || 'Great product!',
-        comment: reviewData.comment?.trim() || '',
-        verified: true,
-        createdAt: new Date().toISOString(),
-        helpfulCount: 0
-      };
-      setReviews((prev) => [fallbackRev, ...prev]);
-      showToast('Review submitted!', 'success');
-      return fallbackRev;
+      showToast(err.message || 'Could not submit your review. Please try again.', 'error');
+      return null;
     }
   };
 
@@ -540,17 +527,6 @@ export const StoreProvider = ({ children }) => {
       prev.map((r) => (r.id === reviewId ? { ...r, helpfulCount: (r.helpfulCount || 0) + 1 } : r))
     );
     showToast('Marked review as helpful!', 'info');
-  };
-
-  // Referral credit apply helper
-  const applyReferralCreditToCart = () => {
-    const credit = Math.min(referralWallet, 25);
-    if (credit <= 0) {
-      showToast('No wallet credit available.', 'info');
-      return;
-    }
-    navigate('checkout', { discountAmount: credit, appliedPromo: `WALLET-${referralCode}` });
-    showToast(`GH₵${credit.toFixed(2)} referral credit applied to checkout!`, 'success');
   };
 
   // Add placed order (persisted to Neon PostgreSQL + Local state)
@@ -579,6 +555,7 @@ export const StoreProvider = ({ children }) => {
         city: newOrder.city || newOrder.region || 'Accra',
         address: newOrder.destination || newOrder.deliveryAddress || newOrder.address || '',
         deliveryMethod: newOrder.shippingMethod || newOrder.deliveryMethodTitle || newOrder.deliveryMethod || 'Standard Delivery',
+        deliveryMethodId: newOrder.shippingMethodId || null,
         paymentMethod: newOrder.paymentMethodTitle || newOrder.paymentMethod || 'Cash on Delivery',
         items: newOrder.items || [],
         subtotal: parseFloat(newOrder.subtotal || 0),
@@ -587,7 +564,9 @@ export const StoreProvider = ({ children }) => {
         total: parseFloat(newOrder.total || 0),
         notes: newOrder.deliveryNotes || newOrder.notes || null,
         couponCode: newOrder.couponCode || newOrder.promoCode || null,
+        useCredit: Boolean(newOrder.useCredit),
       });
+      if (user) refreshReferrals(); // balance / welcome discount may have changed
 
       if (res && res.data) {
         console.log('[Order] Created in Neon PostgreSQL:', res.data.orderCode);
@@ -617,7 +596,13 @@ export const StoreProvider = ({ children }) => {
         return confirmedOrder;
       }
     } catch (err) {
-      console.warn('Backend order persistence note:', err.message);
+      // Don't pretend the order went through — the server is the source of truth for prices and stock.
+      setOrders((prev) => {
+        const next = { ...prev };
+        delete next[orderKey];
+        return next;
+      });
+      throw err;
     }
     return newOrder;
   };
@@ -671,11 +656,9 @@ export const StoreProvider = ({ children }) => {
         setQuoteModalOpen,
         referralModalOpen,
         setReferralModalOpen,
-        referralCode,
-        referralWallet,
-        setReferralWallet,
-        referralStats,
-        applyReferralCreditToCart,
+        referralInfo,
+        refreshReferrals,
+        pendingInviteCode,
         reviews,
         addReview,
         getReviewsForProduct,

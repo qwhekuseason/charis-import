@@ -1,16 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useStore } from '../context/StoreContext';
 import { ProductCard } from '../components/ProductCard';
-import {
-  Filter,
-  SlidersHorizontal,
-  ArrowUpDown,
-  X,
-  Search,
-  Grid,
-  List,
-  Check
-} from 'lucide-react';
+import { productCategorySlug } from '../utils/categories';
+import { SlidersHorizontal, X, Search, ChevronDown } from 'lucide-react';
+
+const PRICE_MAX = 5000;
 
 export const ShopPage = () => {
   const {
@@ -21,563 +15,254 @@ export const ShopPage = () => {
     searchQuery,
     setSearchQuery,
     wishlist,
-    pageParams
+    pageParams,
+    setQuoteModalOpen
   } = useStore();
 
-  const [maxPrice, setMaxPrice] = useState(5000);
+  const [maxPrice, setMaxPrice] = useState(PRICE_MAX);
   const [sortBy, setSortBy] = useState('featured');
-  const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false); // phones & tablets only
   const [onlyWishlist, setOnlyWishlist] = useState(pageParams?.filter === 'wishlist');
+  const [onlyDeals, setOnlyDeals] = useState(pageParams?.filter === 'deals');
 
-  // Filtered & Sorted Products
+  // Navbar links like "Deals" or the wishlist heart can open this page while it's already showing.
+  useEffect(() => {
+    setOnlyDeals(pageParams?.filter === 'deals');
+    setOnlyWishlist(pageParams?.filter === 'wishlist');
+  }, [pageParams?.filter]);
+
+  const countFor =(slug) => (products || []).filter((p) => productCategorySlug(p) === slug).length;
+
   const filteredProducts = useMemo(() => {
     return (products || []).filter((product) => {
-      // Category filter
-      if (selectedCategory !== 'all' && product.categorySlug !== selectedCategory) {
-        return false;
-      }
+      if (selectedCategory !== 'all' && productCategorySlug(product) !== selectedCategory) return false;
+      if (onlyWishlist && !wishlist.some((w) => w.id === product.id)) return false;
+      if (onlyDeals && !(product.originalPrice > product.price)) return false;
+      if (product.price > maxPrice) return false;
 
-      // Wishlist filter
-      if (onlyWishlist && !wishlist.some((w) => w.id === product.id)) {
-        return false;
-      }
-
-      // Fresh stock filter
-      if (pageParams?.filter === 'justLanded' && !product.justLanded) {
-        return false;
-      }
-
-      // Max price filter
-      if (product.price > maxPrice) {
-        return false;
-      }
-
-      // Search Query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const matchName = product.name?.toLowerCase().includes(q);
-        const matchCat = product.category?.toLowerCase().includes(q);
-        const matchDesc = product.description?.toLowerCase().includes(q);
-        if (!matchName && !matchCat && !matchDesc) return false;
+        const haystack = `${product.name} ${product.category} ${product.description}`.toLowerCase();
+        if (!haystack.includes(q)) return false;
       }
-
       return true;
     }).sort((a, b) => {
       if (sortBy === 'price-low') return a.price - b.price;
       if (sortBy === 'price-high') return b.price - a.price;
-      if (sortBy === 'newest') return (b.id > a.id ? 1 : -1);
+      if (sortBy === 'newest') return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
       return 0;
     });
-  }, [products, selectedCategory, maxPrice, sortBy, searchQuery, onlyWishlist, wishlist, pageParams]);
+  }, [products, selectedCategory, maxPrice, sortBy, searchQuery, onlyWishlist, onlyDeals, wishlist]);
 
   const resetFilters = () => {
     setSelectedCategory('all');
-    setMaxPrice(5000);
+    setMaxPrice(PRICE_MAX);
     setSearchQuery('');
     setOnlyWishlist(false);
+    setOnlyDeals(false);
   };
 
-  const hasActiveFilters =
-    selectedCategory !== 'all' ||
-    maxPrice < 5000 ||
-    searchQuery.trim() !== '' ||
-    onlyWishlist;
+  const activeFilterCount =
+    (selectedCategory !== 'all' ? 1 : 0) +
+    (maxPrice < PRICE_MAX ? 1 : 0) +
+    (onlyWishlist ? 1 : 0) +
+    (onlyDeals ? 1 : 0);
+
+  const selectedCategoryName = (categories || []).find((c) => c.slug === selectedCategory)?.name;
+
+  const chooseCategory = (slug) => {
+    setSelectedCategory(slug);
+    setFiltersOpen(false); // on phones, close the panel so the products are visible right away
+  };
+
+  const pageTitle = onlyWishlist
+    ? 'Saved Items'
+    : onlyDeals
+    ? 'Deals'
+    : selectedCategory === 'all'
+    ? 'All Products'
+    : selectedCategoryName || 'Products';
 
   return (
-    <div className="section" style={{ minHeight: '80vh' }}>
+    <div className="section shop-page">
       <div className="container">
-        {/* Page Banner */}
-        <div
-          style={{
-            backgroundColor: 'var(--bg-card)',
-            borderRadius: '16px',
-            padding: '32px',
-            marginBottom: '32px',
-            border: '1px solid var(--border-light)',
-            boxShadow: 'var(--shadow-sm)'
-          }}
-        >
-          <div
-            style={{
-              fontSize: '0.8rem',
-              fontWeight: 700,
-              color: 'var(--accent)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.08em',
-              marginBottom: '6px'
-            }}
-          >
-            CHARI Collection
-          </div>
-          <h1 style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-primary)', marginBottom: '8px' }}>
-            {onlyWishlist
-              ? 'Your Saved Wishlist'
-              : selectedCategory === 'all'
-              ? 'Shop All Products'
-              : (categories || []).find((c) => c.slug === selectedCategory)?.name || 'Category'}
-          </h1>
-          <p style={{ fontSize: '0.95rem', color: '#64748b', maxWidth: '700px' }}>
-            Explore our curated collection of premium quality products — kitchen essentials, electronics, mannequins, dresses, and more at unbeatable prices.
+        {/* Header */}
+        <div className="shop-header">
+          <h1 className="shop-title">{pageTitle}</h1>
+          <p className="shop-subtitle">
+            Order from overseas suppliers and we deliver to you anywhere in Ghana.
           </p>
 
-          {/* Dedicated Shop Search Bar */}
-          <div style={{ marginTop: '22px', maxWidth: '640px' }}>
-            <div
-              className="shop-search-bar"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                backgroundColor: 'var(--bg-card)',
-                border: '1.5px solid var(--border-medium)',
-                borderRadius: '14px',
-                padding: '4px 6px 4px 16px',
-                boxShadow: '0 4px 16px rgba(15, 23, 42, 0.04)',
-                transition: 'all 0.2s ease',
-                gap: '10px'
-              }}
-            >
-              <Search size={19} color="var(--accent)" style={{ flexShrink: 0 }} />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search products by name, category, or description..."
-                style={{
-                  flex: 1,
-                  border: 'none',
-                  outline: 'none',
-                  fontSize: '0.95rem',
-                  fontFamily: 'inherit',
-                  color: 'var(--text-primary)',
-                  backgroundColor: 'transparent',
-                  padding: '10px 0'
-                }}
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: '#94a3b8',
-                    cursor: 'pointer',
-                    padding: '6px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    borderRadius: '6px'
-                  }}
-                  title="Clear search"
-                >
-                  <X size={16} />
-                </button>
-              )}
-              <div
-                style={{
-                  backgroundColor: 'var(--bg-subtle)',
-                  padding: '7px 14px',
-                  borderRadius: '10px',
-                  fontSize: '0.8rem',
-                  fontWeight: 700,
-                  color: 'var(--text-secondary)',
-                  whiteSpace: 'nowrap',
-                  border: '1px solid var(--border-light)'
-                }}
-              >
-                {filteredProducts.length} {filteredProducts.length === 1 ? 'item' : 'items'}
-              </div>
-            </div>
-
-            {/* Quick Filter Tag Suggestions */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                marginTop: '12px',
-                flexWrap: 'wrap'
-              }}
-            >
-              <span style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 600 }}>
-                Popular:
-              </span>
-              {[
-                { label: 'Kitchen & Home', slug: 'kitchen-home' },
-                { label: 'Electronics', slug: 'electronics' },
-                { label: 'Display & Store', slug: 'display-props' },
-                { label: 'Fashion & Wear', slug: 'fashion-wear' }
-              ].map((pill) => (
-                <button
-                  key={pill.label}
-                  type="button"
-                  onClick={() => {
-                    setSelectedCategory(pill.slug);
-                    setSearchQuery('');
-                  }}
-                  style={{
-                    padding: '4px 11px',
-                    fontSize: '0.78rem',
-                    fontWeight: selectedCategory === pill.slug ? 700 : 500,
-                    borderRadius: '20px',
-                    backgroundColor: selectedCategory === pill.slug ? 'var(--accent)' : 'var(--bg-card)',
-                    color: selectedCategory === pill.slug ? '#ffffff' : 'var(--text-secondary)',
-                    border: `1px solid ${selectedCategory === pill.slug ? 'var(--accent)' : 'var(--border-light)'}`,
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease'
-                  }}
-                  className="quick-filter-chip"
-                >
-                  {pill.label}
-                </button>
-              ))}
-            </div>
+          <div className="shop-search">
+            <Search size={18} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search products"
+              aria-label="Search products"
+            />
+            {searchQuery && (
+              <button type="button" onClick={() => setSearchQuery('')} aria-label="Clear search" className="shop-search-clear">
+                <X size={16} />
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Layout Grid: Sidebar Filters + Products Grid */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '270px 1fr',
-            gap: '32px',
-            alignItems: 'start'
-          }}
-        >
-          {/* Desktop Filter Sidebar */}
-          <aside
-            style={{
-              backgroundColor: 'var(--bg-card)',
-              borderRadius: '14px',
-              padding: '24px',
-              border: '1px solid var(--border-light)',
-              position: 'sticky',
-              top: '100px'
-            }}
-            className="filter-sidebar"
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                paddingBottom: '16px',
-                borderBottom: '1px solid var(--border-light)',
-                marginBottom: '20px'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700 }}>
-                <SlidersHorizontal size={18} color="var(--accent)" />
-                <span>Filter Catalogue</span>
-              </div>
-              {hasActiveFilters && (
+        <div className="shop-layout">
+          {filtersOpen && <div className="shop-filters-backdrop" onClick={() => setFiltersOpen(false)} aria-hidden="true" />}
+          {/* Filters — sidebar on desktop, slide-up sheet on phones & tablets */}
+          <aside className={`shop-filters ${filtersOpen ? 'is-open' : ''}`} aria-label="Filters">
+            <div className="shop-filters-head">
+              <span className="shop-filters-title">
+                <SlidersHorizontal size={17} /> Filters
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                {activeFilterCount > 0 && (
+                  <button type="button" className="shop-link-btn" onClick={resetFilters}>
+                    Clear all
+                  </button>
+                )}
                 <button
-                  onClick={resetFilters}
-                  style={{ fontSize: '0.78rem', color: '#ef4444', fontWeight: 600 }}
+                  type="button"
+                  className="shop-filters-close"
+                  onClick={() => setFiltersOpen(false)}
+                  aria-label="Close filters"
                 >
-                  Reset All
+                  <X size={20} />
                 </button>
-              )}
+              </div>
             </div>
 
-            {/* Wishlist toggle */}
-            <div style={{ marginBottom: '22px' }}>
-              <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  cursor: 'pointer',
-                  fontSize: '0.9rem',
-                  fontWeight: 600,
-                  color: onlyWishlist ? '#ef4444' : 'var(--text-secondary)'
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={onlyWishlist}
-                  onChange={(e) => setOnlyWishlist(e.target.checked)}
-                />
-                Show Saved Wishlist Items ({wishlist.length})
+            <div className="shop-filter-group">
+              <label className="shop-check">
+                <input type="checkbox" checked={onlyDeals} onChange={(e) => setOnlyDeals(e.target.checked)} />
+                On sale only
+              </label>
+              <label className="shop-check">
+                <input type="checkbox" checked={onlyWishlist} onChange={(e) => setOnlyWishlist(e.target.checked)} />
+                Saved items ({wishlist.length})
               </label>
             </div>
 
-            {/* Categories */}
-            <div style={{ marginBottom: '24px' }}>
-              <h4
-                style={{
-                  fontSize: '0.85rem',
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  color: 'var(--text-muted)',
-                  marginBottom: '12px',
-                  letterSpacing: '0.05em'
-                }}
-              >
-                Categories
-              </h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div className="shop-filter-group">
+              <h4 className="shop-filter-label">Category</h4>
+              <div className="shop-category-list">
                 <button
-                  onClick={() => setSelectedCategory('all')}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '6px 10px',
-                    borderRadius: '6px',
-                    fontSize: '0.88rem',
-                    fontWeight: selectedCategory === 'all' ? 700 : 500,
-                    backgroundColor:
-                      selectedCategory === 'all' ? 'var(--accent-subtle)' : 'transparent',
-                    color: selectedCategory === 'all' ? 'var(--accent)' : 'var(--text-secondary)',
-                    textAlign: 'left'
-                  }}
+                  type="button"
+                  className={`shop-category ${selectedCategory === 'all' ? 'active' : ''}`}
+                  onClick={() => chooseCategory('all')}
                 >
-                  <span>All Products</span>
-                  <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
-                    {products.length}
-                  </span>
+                  <span>All products</span>
+                  <span className="shop-category-count">{products.length}</span>
                 </button>
-
                 {(categories || []).map((cat) => (
                   <button
+                    type="button"
                     key={cat.id}
-                    onClick={() => setSelectedCategory(cat.slug)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '6px 10px',
-                      borderRadius: '6px',
-                      fontSize: '0.88rem',
-                      fontWeight: selectedCategory === cat.slug ? 700 : 500,
-                      backgroundColor:
-                        selectedCategory === cat.slug ? 'var(--accent-subtle)' : 'transparent',
-                      color:
-                        selectedCategory === cat.slug ? 'var(--accent)' : 'var(--text-secondary)',
-                      textAlign: 'left'
-                    }}
+                    className={`shop-category ${selectedCategory === cat.slug ? 'active' : ''}`}
+                    onClick={() => chooseCategory(cat.slug)}
                   >
                     <span>{cat.name}</span>
-                    <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
-                      {cat.itemCount || products.filter(p => p.categorySlug === cat.slug).length}
-                    </span>
+                    <span className="shop-category-count">{countFor(cat.slug)}</span>
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Price Slider */}
-            <div style={{ marginBottom: '24px', paddingTop: '16px', borderTop: '1px solid var(--border-light)' }}>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: '8px'
-                }}
-              >
-                <h4
-                  style={{
-                    fontSize: '0.85rem',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    color: 'var(--text-muted)',
-                    letterSpacing: '0.05em'
-                  }}
-                >
-                  Max Price:
-                </h4>
-                <span style={{ fontWeight: 800, color: 'var(--text-primary)', fontSize: '0.95rem' }}>
-                  GH₵{maxPrice.toLocaleString()}
-                </span>
+            <div className="shop-filter-group">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <h4 className="shop-filter-label" style={{ margin: 0 }}>Max price</h4>
+                <strong style={{ fontSize: '0.92rem' }}>GH₵{maxPrice.toLocaleString()}</strong>
               </div>
               <input
                 type="range"
                 min="20"
-                max="5000"
+                max={PRICE_MAX}
                 step="20"
                 value={maxPrice}
                 onChange={(e) => setMaxPrice(Number(e.target.value))}
+                aria-label="Maximum price"
                 style={{ width: '100%', accentColor: 'var(--accent)' }}
               />
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  fontSize: '0.75rem',
-                  color: '#94a3b8',
-                  marginTop: '4px'
-                }}
-              >
-                <span>GH₵20</span>
-                <span>GH₵5,000</span>
-              </div>
             </div>
+
+            <button type="button" className="btn btn-primary shop-filters-done" onClick={() => setFiltersOpen(false)}>
+              Show {filteredProducts.length} {filteredProducts.length === 1 ? 'product' : 'products'}
+            </button>
           </aside>
 
-          {/* Product Listing Main Column */}
-          <div>
-            {/* Top Toolbar */}
-            <div
-              style={{
-                backgroundColor: 'var(--bg-card)',
-                borderRadius: '12px',
-                padding: '16px 20px',
-                marginBottom: '24px',
-                border: '1px solid var(--border-light)',
-                display: 'flex',
-                flexWrap: 'wrap',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '16px'
-              }}
-            >
-              <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-                Showing{' '}
-                <strong style={{ color: 'var(--text-primary)' }}>{filteredProducts.length}</strong>{' '}
-                of {products.length} products
-              </div>
+          {/* Products */}
+          <div className="shop-results">
+            <div className="shop-toolbar">
+              <button
+                type="button"
+                className="shop-filters-toggle"
+                onClick={() => setFiltersOpen((open) => !open)}
+                aria-expanded={filtersOpen}
+              >
+                <SlidersHorizontal size={16} />
+                Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+                <ChevronDown size={15} style={{ transform: filtersOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+              </button>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <ArrowUpDown size={16} color="#64748b" />
-                  <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 600 }}>
-                    Sort by:
-                  </span>
-                  <select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
-                    style={{
-                      padding: '6px 12px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--border-medium)',
-                      fontSize: '0.85rem',
-                      fontWeight: 600,
-                      backgroundColor: 'var(--bg-card)',
-                      color: 'var(--text-primary)'
-                    }}
-                  >
-                    <option value="featured">Featured</option>
-                    <option value="price-low">Price: Low to High</option>
-                    <option value="price-high">Price: High to Low</option>
-                    <option value="newest">Newest First</option>
-                  </select>
-                </div>
-              </div>
+              <span className="shop-count">
+                {filteredProducts.length} {filteredProducts.length === 1 ? 'product' : 'products'}
+              </span>
+
+              <label className="shop-sort">
+                <span>Sort</span>
+                <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                  <option value="featured">Recommended</option>
+                  <option value="price-low">Price: low to high</option>
+                  <option value="price-high">Price: high to low</option>
+                  <option value="newest">Newest</option>
+                </select>
+              </label>
             </div>
 
-            {/* Active Filter Chips */}
-            {hasActiveFilters && (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  flexWrap: 'wrap',
-                  marginBottom: '20px'
-                }}
-              >
-                <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 600 }}>
-                  Active Filters:
-                </span>
+            {activeFilterCount > 0 && (
+              <div className="shop-chips">
                 {selectedCategory !== 'all' && (
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      padding: '4px 10px',
-                      backgroundColor: 'var(--bg-subtle)',
-                      borderRadius: '9999px',
-                      fontSize: '0.78rem',
-                      fontWeight: 600
-                    }}
-                  >
-                    Category: {(categories || []).find((c) => c.slug === selectedCategory)?.name || selectedCategory}
-                    <X
-                      size={13}
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => setSelectedCategory('all')}
-                    />
-                  </span>
+                  <button type="button" className="shop-chip" onClick={() => setSelectedCategory('all')}>
+                    {selectedCategoryName || selectedCategory} <X size={13} />
+                  </button>
                 )}
-                {maxPrice < 5000 && (
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      padding: '4px 10px',
-                      backgroundColor: 'var(--bg-subtle)',
-                      borderRadius: '9999px',
-                      fontSize: '0.78rem',
-                      fontWeight: 600
-                    }}
-                  >
-                    Max: GH₵{maxPrice}
-                    <X
-                      size={13}
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => setMaxPrice(5000)}
-                    />
-                  </span>
+                {onlyDeals && (
+                  <button type="button" className="shop-chip" onClick={() => setOnlyDeals(false)}>
+                    On sale <X size={13} />
+                  </button>
                 )}
-                {searchQuery && (
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      padding: '4px 10px',
-                      backgroundColor: 'var(--bg-subtle)',
-                      borderRadius: '9999px',
-                      fontSize: '0.78rem',
-                      fontWeight: 600
-                    }}
-                  >
-                    Search: "{searchQuery}"
-                    <X
-                      size={13}
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => setSearchQuery('')}
-                    />
-                  </span>
+                {onlyWishlist && (
+                  <button type="button" className="shop-chip" onClick={() => setOnlyWishlist(false)}>
+                    Saved items <X size={13} />
+                  </button>
                 )}
-                <button
-                  onClick={resetFilters}
-                  style={{
-                    fontSize: '0.78rem',
-                    color: '#ef4444',
-                    fontWeight: 700,
-                    textDecoration: 'underline',
-                    marginLeft: '4px'
-                  }}
-                >
-                  Clear all
-                </button>
+                {maxPrice < PRICE_MAX && (
+                  <button type="button" className="shop-chip" onClick={() => setMaxPrice(PRICE_MAX)}>
+                    Up to GH₵{maxPrice.toLocaleString()} <X size={13} />
+                  </button>
+                )}
               </div>
             )}
 
-            {/* Products Grid */}
             {filteredProducts.length === 0 ? (
-              <div
-                style={{
-                  backgroundColor: 'var(--bg-card)',
-                  borderRadius: '16px',
-                  padding: '60px 20px',
-                  textAlign: 'center',
-                  border: '1px solid var(--border-light)'
-                }}
-              >
-                <h3 style={{ fontSize: '1.25rem', color: 'var(--text-primary)', marginBottom: '8px' }}>
-                  No matching products found
+              <div className="shop-empty">
+                <h3>
+                  {selectedCategory !== 'all' && countFor(selectedCategory) === 0
+                    ? `${selectedCategoryName || 'This category'} is coming soon`
+                    : 'No products found'}
                 </h3>
-                <p style={{ fontSize: '0.9rem', color: '#64748b', marginBottom: '20px' }}>
-                  Try adjusting your price range or clearing your search term.
+                <p>
+                  {selectedCategory !== 'all' && countFor(selectedCategory) === 0
+                    ? "We're adding new stock here. Tell us what you're looking for and we'll source it for you."
+                    : 'Try a different search or clear your filters.'}
                 </p>
-                <button className="btn btn-primary" onClick={resetFilters}>
-                  Clear All Filters
-                </button>
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <button className="btn btn-outline" onClick={resetFilters}>See all products</button>
+                  <button className="btn btn-primary" onClick={() => setQuoteModalOpen(true)}>Request an item</button>
+                </div>
               </div>
             ) : (
               <div className="products-grid">

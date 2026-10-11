@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { CATEGORIES, PRODUCTS } from '../src/data/products.js';
 import { INITIAL_REVIEWS, AVAILABLE_PROMO_CODES } from '../src/data/reviews.js';
 
@@ -106,7 +107,11 @@ async function main() {
 
   // Seed Admin & Demo Customer Users
   console.log('Seeding initial users...');
-  const adminHashedPassword = await bcrypt.hash('admin123456', 10);
+  // Initial passwords come from the environment (or are randomly generated) — never hard-coded.
+  const randomPassword = () => crypto.randomBytes(12).toString('base64url');
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD || randomPassword();
+  const customerPassword = process.env.SEED_CUSTOMER_PASSWORD || randomPassword();
+  const adminHashedPassword = await bcrypt.hash(adminPassword, 10);
   await prisma.user.upsert({
     where: { email: 'admin@charisimport.com' },
     update: {
@@ -125,7 +130,7 @@ async function main() {
     }
   });
 
-  const customerHashedPassword = await bcrypt.hash('customer123456', 10);
+  const customerHashedPassword = await bcrypt.hash(customerPassword, 10);
   await prisma.user.upsert({
     where: { email: 'customer@charisimport.com' },
     update: {
@@ -143,6 +148,9 @@ async function main() {
     }
   });
   console.log('Users seeded: admin@charisimport.com and customer@charisimport.com');
+  if (!process.env.SEED_ADMIN_PASSWORD) {
+    console.log('New accounts got random passwords. Set your own with: npm run set-password -- admin@charisimport.com');
+  }
 
   // Seed Initial Container Batches
   console.log('Seeding initial container & air cargo batches...');

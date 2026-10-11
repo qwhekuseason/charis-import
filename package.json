@@ -8,6 +8,8 @@
     "dev:client": "vite",
     "dev:server": "node server/index.js",
     "seed": "node prisma/seed.js",
+    "sync-images": "node prisma/sync-images.js",
+    "set-password": "node prisma/set-password.js",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "build": "vite build",
@@ -18,6 +20,7 @@
   "dependencies": {
     "@prisma/client": "^6.4.1",
     "bcryptjs": "^3.0.3",
+    "cloudinary": "^2.11.0",
     "cors": "^2.8.6",
     "dotenv": "^18.0.1",
     "express": "^5.2.1",

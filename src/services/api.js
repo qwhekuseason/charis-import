@@ -192,11 +192,15 @@ export async function createOrder(orderPayload) {
 }
 
 /**
- * Track an order by tracking code (e.g. CHR-2026-7841)
+ * Track an order by tracking code + the phone number used at checkout.
+ * Signed-in customers can omit the phone for their own orders.
  */
-export async function trackOrder(orderCode) {
+export async function trackOrder(orderCode, phone = '') {
   try {
-    const res = await fetch(`${API_BASE}/orders/${encodeURIComponent(orderCode.trim())}`);
+    const query = phone ? `?phone=${encodeURIComponent(phone.trim())}` : '';
+    const res = await fetch(`${API_BASE}/orders/${encodeURIComponent(orderCode.trim())}${query}`, {
+      headers: getAuthHeaders(),
+    });
     const data = await res.json();
     if (!res.ok) {
       throw new Error(data.error || 'Order not found');
@@ -542,12 +546,22 @@ export async function getReviews(productId) {
 }
 
 /**
+ * Signed-in customer's referral code, store credit balance and credit history
+ */
+export async function getMyReferrals() {
+  const res = await fetch(`${API_BASE}/referrals/me`, { headers: getAuthHeaders() });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Could not load referral details');
+  return data.data;
+}
+
+/**
  * Submit a customer review (persisted to Neon PostgreSQL)
  */
 export async function submitReview(reviewData) {
   const res = await fetch(`${API_BASE}/reviews`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders(),
     body: JSON.stringify(reviewData),
   });
   const data = await res.json();

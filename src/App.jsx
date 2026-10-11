@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { MessageCircle } from 'lucide-react';
 import { useStore } from './context/StoreContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -6,23 +6,53 @@ import { Navbar } from './components/Navbar';
 import { AnnouncementBar } from './components/AnnouncementBar';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { Footer } from './components/Footer';
-import { CartDrawer } from './components/CartDrawer';
-import { ProductDetailModal } from './components/ProductDetailModal';
-import { QuoteModal } from './components/QuoteModal';
-import { ReferralModal } from './components/ReferralModal';
-import { PreorderTermsModal } from './components/PreorderTermsModal';
-
 import { HomePage } from './pages/HomePage';
-import { ShopPage } from './pages/ShopPage';
-import { CategoriesPage } from './pages/CategoriesPage';
-import { ImportTipsPage } from './pages/ImportTipsPage';
-import { AboutPage } from './pages/AboutPage';
-import { ContactPage } from './pages/ContactPage';
-import { TrackOrderPage } from './pages/TrackOrderPage';
-import { CheckoutPage } from './pages/CheckoutPage';
-import { AccountPage } from './pages/AccountPage';
-import { AdminPage } from './pages/AdminPage';
-import { AuthModal } from './components/AuthModal';
+
+// Everything below is downloaded only when first needed, so shoppers on mobile data
+// don't pay for the admin panel, checkout or modals just to see the homepage.
+// If a visitor had the site open during a redeploy, the old page files no longer exist —
+// reload once to pick up the new version instead of showing an error.
+const named = (loader, name) => lazy(() =>
+  loader()
+    .then((m) => {
+      sessionStorage.removeItem('chari_chunk_reload');
+      return { default: m[name] };
+    })
+    .catch((err) => {
+      if (!sessionStorage.getItem('chari_chunk_reload')) {
+        sessionStorage.setItem('chari_chunk_reload', '1');
+        window.location.reload();
+        return new Promise(() => {});
+      }
+      throw err;
+    })
+);
+
+const ShopPage = named(() => import('./pages/ShopPage'), 'ShopPage');
+const CategoriesPage = named(() => import('./pages/CategoriesPage'), 'CategoriesPage');
+const ImportTipsPage = named(() => import('./pages/ImportTipsPage'), 'ImportTipsPage');
+const AboutPage = named(() => import('./pages/AboutPage'), 'AboutPage');
+const ContactPage = named(() => import('./pages/ContactPage'), 'ContactPage');
+const TrackOrderPage = named(() => import('./pages/TrackOrderPage'), 'TrackOrderPage');
+const CheckoutPage = named(() => import('./pages/CheckoutPage'), 'CheckoutPage');
+const AccountPage = named(() => import('./pages/AccountPage'), 'AccountPage');
+const AdminPage = named(() => import('./pages/AdminPage'), 'AdminPage');
+
+const CartDrawer = named(() => import('./components/CartDrawer'), 'CartDrawer');
+const ProductDetailModal = named(() => import('./components/ProductDetailModal'), 'ProductDetailModal');
+const QuoteModal = named(() => import('./components/QuoteModal'), 'QuoteModal');
+const ReferralModal = named(() => import('./components/ReferralModal'), 'ReferralModal');
+const PreorderTermsModal = named(() => import('./components/PreorderTermsModal'), 'PreorderTermsModal');
+const AuthModal = named(() => import('./components/AuthModal'), 'AuthModal');
+
+// Lightweight placeholder while a page's code downloads.
+const PageLoader = () => (
+  <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div style={{ width: '36px', height: '3px', borderRadius: '2px', background: 'var(--border-medium)', overflow: 'hidden', position: 'relative' }}>
+      <div style={{ position: 'absolute', inset: 0, background: '#2563eb', borderRadius: '2px', animation: 'loadbar 1.2s ease-in-out infinite' }} />
+    </div>
+  </div>
+);
 
 // Full-screen auth loader — shown while JWT session is being validated
 const AuthLoader = () => (
@@ -41,22 +71,6 @@ const AuthLoader = () => (
   >
     <div
       style={{
-        width: '56px',
-        height: '56px',
-        borderRadius: '16px',
-        background: 'linear-gradient(135deg,rgba(37,99,235,0.2),rgba(37,99,235,0.06))',
-        border: '2px solid rgba(37,99,235,0.35)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: '1.6rem',
-        animation: 'pulse 1.6s ease-in-out infinite',
-      }}
-    >
-      🛍
-    </div>
-    <div
-      style={{
         width: '36px',
         height: '3px',
         borderRadius: '2px',
@@ -69,7 +83,7 @@ const AuthLoader = () => (
         style={{
           position: 'absolute',
           inset: 0,
-          background: 'linear-gradient(90deg, #2563eb, #38bdf8)',
+          background: '#2563eb',
           borderRadius: '2px',
           animation: 'loadbar 1.2s ease-in-out infinite',
         }}
@@ -79,7 +93,18 @@ const AuthLoader = () => (
 );
 
 export const App = () => {
-  const { currentPage, toasts, preorderTermsOpen, setPreorderTermsOpen, authLoading } = useStore();
+  const {
+    currentPage,
+    toasts,
+    preorderTermsOpen,
+    setPreorderTermsOpen,
+    authLoading,
+    cartDrawerOpen,
+    selectedProduct,
+    quoteModalOpen,
+    referralModalOpen,
+    authModalOpen,
+  } = useStore();
 
   const renderCurrentPage = () => {
     switch (currentPage) {
@@ -97,8 +122,9 @@ export const App = () => {
     }
   };
 
-  // Show minimal loader while restoring auth session from JWT
-  if (authLoading) return <AuthLoader />;
+  // Only signed-in pages wait for the saved session to be checked — the rest of the
+  // store renders immediately even if the server is slow to wake up.
+  if (authLoading && (currentPage === 'account' || currentPage === 'admin')) return <AuthLoader />;
 
   return (
     <ErrorBoundary>
@@ -108,18 +134,24 @@ export const App = () => {
         <Navbar />
 
         {/* Main Routed Page Content */}
-        <main style={{ flex: 1 }}>{renderCurrentPage()}</main>
+        <main style={{ flex: 1 }}>
+          <Suspense fallback={<PageLoader />}>{renderCurrentPage()}</Suspense>
+        </main>
 
-        {/* Global Modals & Drawers */}
-        <CartDrawer />
-        <ProductDetailModal />
-        <QuoteModal />
-        <ReferralModal />
-        <AuthModal />
-        <PreorderTermsModal
-          isOpen={preorderTermsOpen}
-          onClose={() => setPreorderTermsOpen(false)}
-        />
+        {/* Global Modals & Drawers — each one's code loads the first time it opens */}
+        <Suspense fallback={null}>
+          {cartDrawerOpen && <CartDrawer />}
+          {selectedProduct && <ProductDetailModal />}
+          {quoteModalOpen && <QuoteModal />}
+          {referralModalOpen && <ReferralModal />}
+          {authModalOpen && <AuthModal />}
+          {preorderTermsOpen && (
+            <PreorderTermsModal
+              isOpen={preorderTermsOpen}
+              onClose={() => setPreorderTermsOpen(false)}
+            />
+          )}
+        </Suspense>
 
         {/* Footer */}
         <Footer />

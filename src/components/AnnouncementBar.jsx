@@ -2,15 +2,21 @@ import React, { useState, useEffect } from 'react';
 import { X, Tag } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 
-const MESSAGES = [
-  { text: 'Use code ', bold: 'CHARI10', tail: ' for 10% off your first order' },
-  { text: 'Flash Deals: Save up to ', bold: '35% OFF', tail: ' on selected imports' },
-  { text: 'Refer a friend: ', bold: 'Give GH₵25, Get GH₵25', tail: ' in store credit' },
-  { text: 'Spotted it online? ', bold: 'Request Any Item', tail: ' — we source it for you' },
+// `shortTail` replaces `tail` on phones so the message fits without being cut off.
+const buildMessages = (maxDealPercent) => [
+  { text: 'Use code ', bold: 'CHARI10', tail: ' for 10% off your first order', shortTail: ' = 10% off 1st order' },
+  { text: 'Flash Deals: Save up to ', bold: `${maxDealPercent}% OFF`, tail: ' on selected imports', shortTail: '' },
+  { text: '', bold: 'Invite a friend, earn GH₵25', tail: ' in store credit', shortTail: '' },
+  { text: 'Spotted it online? ', bold: 'Request Any Item', tail: ' — we source it for you', shortTail: '' },
 ];
 
 export const AnnouncementBar = () => {
-  const { navigate } = useStore();
+  const { navigate, products } = useStore();
+  const maxDealPercent = Math.round(
+    Math.max(0, ...products.map((p) => (p.originalPrice > p.price ? (p.originalPrice - p.price) / p.originalPrice : 0))) * 100
+  );
+  // Skip the deals message when nothing is on sale.
+  const MESSAGES = buildMessages(maxDealPercent).filter((m) => maxDealPercent > 0 || !m.text.startsWith('Flash Deals'));
   const [visible, setVisible] = useState(true);
   const [msgIndex, setMsgIndex] = useState(0);
   const [fading, setFading] = useState(false);
@@ -28,12 +34,12 @@ export const AnnouncementBar = () => {
 
   if (!visible) return null;
 
-  const msg = MESSAGES[msgIndex];
+  const msg = MESSAGES[msgIndex % MESSAGES.length];
 
   return (
     <div
       style={{
-        background: 'linear-gradient(90deg, #1d4ed8 0%, #2563eb 50%, #1d4ed8 100%)',
+        background: '#1d4ed8',
         color: '#ffffff',
         fontSize: '0.8rem',
         fontWeight: 500,
@@ -73,7 +79,7 @@ export const AnnouncementBar = () => {
             flexShrink: 0,
           }}
         >
-          <Tag size={8} />
+          
           Deal
         </span>
 
@@ -109,7 +115,8 @@ export const AnnouncementBar = () => {
             >
               {msg.bold}
             </strong>
-            <span style={{ color: 'rgba(255, 255, 255, 0.95)' }}>{msg.tail}</span>
+            <span className="announcement-tail-long" style={{ color: 'rgba(255, 255, 255, 0.95)' }}>{msg.tail}</span>
+            <span className="announcement-tail-short" style={{ color: 'rgba(255, 255, 255, 0.95)' }}>{msg.shortTail}</span>
           </span>
 
           {/* Shop Now — hidden on very small screens */}
