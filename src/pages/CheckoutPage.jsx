@@ -193,7 +193,7 @@ export const CheckoutPage = () => {
             <ShoppingBag size={38} />
           </div>
           <h2 style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--text-primary)', marginBottom: '8px' }}>
-            Your Cart is Empty
+            Your cart is empty
           </h2>
           <p style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>
             Add some products to your cart first.

@@ -17,7 +17,7 @@ export const ContactPage = () => {
     name: '',
     phone: '',
     email: '',
-    subject: 'General Inquiry',
+    subject: 'General question',
     message: ''
   });
   const [submitted, setSubmitted] = useState(false);
@@ -36,11 +36,10 @@ export const ContactPage = () => {
         message: formData.message,
       });
       setSubmitted(true);
-      showToast('Message saved! Our support team will reply via WhatsApp or phone shortly.', 'success');
-    } catch {
-      // Still show success to user if offline
-      setSubmitted(true);
-      showToast('Message sent! Our support team will reply via WhatsApp or phone shortly.', 'success');
+      showToast('Message sent. We will reply on WhatsApp or by phone.', 'success');
+    } catch (err) {
+      // Never pretend it worked — the customer can fix the problem or use WhatsApp instead.
+      showToast(err.message || 'Your message could not be sent. Please try again or use WhatsApp.', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -274,12 +273,27 @@ export const ContactPage = () => {
                         color: 'var(--text-primary)'
                       }}
                     >
-                      <option value="Wholesale Inquiry">Bulk / wholesale order</option>
-                      <option value="Order Tracking">Track my order</option>
-                      <option value="Custom Import Quote">Request an item</option>
-                      <option value="Store Pickup">Pickup in Accra</option>
+                      <option value="General question">General question</option>
+                      <option value="Bulk / wholesale order">Bulk / wholesale order</option>
+                      <option value="Track my order">Track my order</option>
+                      <option value="Request an item">Request an item</option>
+                      <option value="Pickup in Accra">Pickup in Accra</option>
                     </select>
                   </div>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '4px', color: 'var(--text-secondary)' }}>
+                    Email <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(optional)</span>
+                  </label>
+                  <input
+                    type="email"
+                    autoComplete="email"
+                    placeholder="you@example.com"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    className="form-input"
+                  />
                 </div>
 
                 <div>

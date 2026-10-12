@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../context/StoreContext';
-import { getCurrentUser } from '../services/api';
+import { getCurrentUser, changePassword } from '../services/api';
 import {
   User,
   Package,
@@ -18,6 +18,54 @@ import {
   ShoppingBag,
   RefreshCw
 } from 'lucide-react';
+
+// Lets any signed-in user (including the admin) change their password from the website.
+const ChangePasswordForm = () => {
+  const { showToast } = useStore();
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (next !== confirm) { showToast('The new passwords do not match.', 'error'); return; }
+    setSaving(true);
+    try {
+      await changePassword(current, next);
+      setCurrent(''); setNext(''); setConfirm('');
+      showToast('Password changed.', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} style={{ marginTop: '28px', paddingTop: '20px', borderTop: '1px solid var(--border-light)' }}>
+      <h4 style={{ fontSize: '1rem', fontWeight: 800, margin: '0 0 12px', color: 'var(--text-primary)' }}>Change password</h4>
+      <div className="form-row">
+        <label className="form-field">
+          <span className="form-label">Current password</span>
+          <input className="form-input" type="password" autoComplete="current-password" required value={current} onChange={(e) => setCurrent(e.target.value)} />
+        </label>
+        <span />
+      </div>
+      <div className="form-row">
+        <label className="form-field">
+          <span className="form-label">New password</span>
+          <input className="form-input" type="password" autoComplete="new-password" minLength={8} required value={next} onChange={(e) => setNext(e.target.value)} />
+        </label>
+        <label className="form-field">
+          <span className="form-label">Repeat new password</span>
+          <input className="form-input" type="password" autoComplete="new-password" minLength={8} required value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+        </label>
+      </div>
+      <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Change password'}</button>
+    </form>
+  );
+};
 
 export const AccountPage = () => {
   const { user, logout, updateProfile, openAuth, navigate, showToast } = useStore();
@@ -75,7 +123,7 @@ export const AccountPage = () => {
             <User size={36} />
           </div>
           <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '8px' }}>
-            Account Access
+            Your account
           </h2>
           <p style={{ color: '#64748b', fontSize: '0.95rem', marginBottom: '24px' }}>
             Sign in to see your orders, saved address and store credit.
@@ -564,6 +612,7 @@ export const AccountPage = () => {
                 </div>
               </div>
             )}
+            <ChangePasswordForm />
           </div>
         )}
 
@@ -588,6 +637,7 @@ export const AccountPage = () => {
                 </p>
               </div>
             </div>
+            <button type="button" className="btn btn-primary" onClick={() => navigate('admin')}>Open admin dashboard</button>
           </div>
         )}
       </div>

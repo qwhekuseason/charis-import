@@ -213,6 +213,20 @@ export async function trackOrder(orderCode, phone = '') {
 }
 
 /**
+ * Change the signed-in user's password
+ */
+export async function changePassword(currentPassword, newPassword) {
+  const res = await fetch(`${API_BASE}/auth/password`, {
+    method: 'PUT',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Could not change the password.');
+  return data;
+}
+
+/**
  * Submit contact inquiry to PostgreSQL
  */
 export async function submitInquiry(inquiryData) {

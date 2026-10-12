@@ -4,7 +4,6 @@
    Apple-Grade • Premium • Mobile-First
    ========================================================================== */
 
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
 :root {
   /* ── Brand Palette ── */
@@ -84,7 +83,7 @@
   --text-white:     #ffffff;
 
   /* ── Fonts ── */
-  --font-display: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-body: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 
   /* ── Shadows ── */
@@ -2336,3 +2335,98 @@ button:active,
 @media (max-width: 860px) { .site-footer-grid { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 768px) { .site-footer { padding-bottom: 90px; } }
 @media (max-width: 420px) { .site-footer-grid { grid-template-columns: 1fr 1fr; gap: 24px; } .site-footer-grid > div:first-child { grid-column: 1 / -1; } }
+
+/* ══════════════════════════════════════════════════════════
+   Admin
+   ══════════════════════════════════════════════════════════ */
+.adm { background: var(--bg-canvas); }
+.adm-gate { max-width: 460px; text-align: center; padding: 48px 16px; }
+.adm-gate h1 { font-size: 1.6rem; margin: 0 0 8px; }
+.adm-gate p { color: var(--text-muted); margin: 0 0 20px; }
+.adm-head { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
+.adm-head h1 { font-size: clamp(1.5rem, 4vw, 2rem); font-weight: 800; margin: 0; color: #0f172a; }
+.adm-muted { color: var(--text-muted); font-size: 0.86rem; }
+.adm-strong { font-weight: 700; color: var(--text-primary); }
+.adm-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.02em; }
+.adm-inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.adm-inline .form-input { flex: 1; min-width: 160px; }
+
+.adm-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+.adm-stats > * { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 14px 16px; border: 1px solid var(--border-light); border-radius: 12px; background: #fff; }
+.adm-stats strong { font-size: 1.35rem; color: #0f172a; }
+.adm-stats span { font-size: 0.82rem; color: var(--text-muted); }
+.adm-stats button:hover { border-color: var(--accent); }
+
+.adm-tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--border-light); margin-bottom: 18px; scrollbar-width: none; }
+.adm-tabs::-webkit-scrollbar { display: none; }
+.adm-tabs button { flex-shrink: 0; padding: 10px 14px; font-weight: 600; font-size: 0.9rem; color: var(--text-muted); background: none; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.adm-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+.adm-count { margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: var(--bg-subtle); font-size: 0.75rem; color: var(--text-secondary); }
+
+.adm-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.adm-search { flex: 1 1 240px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--border-medium); border-radius: 10px; background: #fff; color: var(--text-muted); }
+.adm-search input { flex: 1; min-width: 0; border: none; outline: none; padding: 10px 0; font: inherit; font-size: 0.92rem; background: transparent; }
+.adm-select { width: auto; min-width: 150px; padding: 9px 10px; }
+.adm-empty { padding: 36px 16px; text-align: center; color: var(--text-muted); border: 1px dashed var(--border-medium); border-radius: 12px; background: #fff; }
+.adm-help { font-size: 0.82rem; color: var(--text-muted); margin: 14px 0 0; line-height: 1.5; }
+
+.adm-list { display: flex; flex-direction: column; gap: 12px; }
+.adm-card { background: #fff; border: 1px solid var(--border-light); border-radius: 14px; padding: 16px; }
+.adm-card.is-saving { opacity: 0.6; }
+.adm-card-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.adm-total { font-size: 1.1rem; color: #0f172a; }
+.adm-order-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; font-size: 0.9rem; }
+.adm-label { font-size: 0.74rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); margin-bottom: 4px; }
+.adm-items { margin: 0; padding-left: 18px; }
+.adm-note { margin: 10px 0 0; padding: 8px 10px; background: #fffbeb; border-radius: 8px; font-size: 0.86rem; color: #92400e; }
+.adm-message { white-space: pre-wrap; margin: 0 0 12px; color: #334155; line-height: 1.6; font-size: 0.92rem; }
+.adm-card-actions { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-light); justify-content: space-between; }
+.adm-mini-field { display: flex; flex-direction: column; gap: 4px; font-size: 0.76rem; font-weight: 600; color: var(--text-muted); }
+.adm-mini-field .form-input { padding: 8px 10px; min-width: 160px; }
+.adm-danger { color: #b91c1c !important; }
+.adm-danger:hover { border-color: #b91c1c !important; background: #fef2f2 !important; }
+
+.adm-table-wrap { overflow-x: auto; border: 1px solid var(--border-light); border-radius: 14px; background: #fff; }
+.adm-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; min-width: 640px; }
+.adm-table th { text-align: left; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); padding: 10px 12px; border-bottom: 1px solid var(--border-light); background: #f8fafc; }
+.adm-table td { padding: 10px 12px; border-bottom: 1px solid var(--border-light); vertical-align: middle; }
+.adm-table tr:last-child td { border-bottom: none; }
+.adm-product-cell { display: flex; align-items: center; gap: 10px; }
+.adm-product-cell img { width: 48px; height: 48px; object-fit: cover; border-radius: 8px; background: #f1f5f9; flex-shrink: 0; }
+.adm-price { width: 110px; padding: 7px 9px; }
+.adm-row-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.adm-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 0.86rem; cursor: pointer; }
+.adm-switch input { width: 18px; height: 18px; accent-color: var(--accent); }
+
+.adm-cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.adm-cat { display: flex; flex-direction: column; gap: 6px; padding: 12px; }
+.adm-cat img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 10px; background: #f1f5f9; }
+.adm-cat .adm-row-actions { justify-content: flex-start; margin-top: 4px; }
+
+.adm-modal { max-width: 620px; }
+.adm-modal-footer { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 24px; border-top: 1px solid var(--border-light); background: #f8fafc; }
+.adm-field { display: block; }
+.adm-checks { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 12px; }
+textarea.form-input { resize: vertical; min-height: 90px; }
+.adm-photos { display: flex; flex-direction: column; gap: 10px; }
+.adm-photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.adm-photo { position: relative; border-radius: 10px; overflow: hidden; border: 1px solid var(--border-light); aspect-ratio: 1; background: #f1f5f9; }
+.adm-photo img { width: 100%; height: 100%; object-fit: cover; }
+.adm-photo-main { position: absolute; left: 6px; top: 6px; padding: 2px 6px; border-radius: 6px; background: #0f172a; color: #fff; font-size: 0.68rem; font-weight: 700; }
+.adm-photo-actions { position: absolute; right: 4px; bottom: 4px; display: flex; gap: 4px; }
+.adm-photo-actions button { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.95); color: #0f172a; border: 1px solid var(--border-light); }
+.adm-photo-add { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; border: 1.5px dashed var(--border-medium); border-radius: 10px; color: var(--text-muted); font-size: 0.78rem; font-weight: 600; cursor: pointer; text-align: center; padding: 6px; }
+.adm-photo-add:hover { border-color: var(--accent); color: var(--accent); }
+.adm-photo-add.is-busy { opacity: 0.6; cursor: progress; }
+
+@media (max-width: 860px) {
+  .adm-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .adm-order-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 480px) {
+  .adm-card-actions > * { flex: 1 1 100%; }
+  .adm-mini-field .form-input { width: 100%; }
+  .adm-modal-footer .btn { flex: 1; }
+  .adm-select { flex: 1 1 100%; }
+}
+.adm-price-cell { display: flex; align-items: center; gap: 6px; }

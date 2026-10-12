@@ -29,7 +29,7 @@ export class ErrorBoundary extends React.Component {
             color: 'var(--text-primary, #f1f5f9)',
             padding: '32px',
             textAlign: 'center',
-            fontFamily: "'Outfit', sans-serif",
+            fontFamily: 'inherit',
           }}
         >
           <div

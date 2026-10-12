@@ -103,6 +103,7 @@ const rateLimit = ({ windowMs, max, message }) => {
 };
 
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: 'Too many attempts. Please wait 15 minutes and try again.' });
+const inquiryLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 8, message: 'Too many messages sent. Please wait a few minutes or chat with us on WhatsApp.' });
 const trackLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: 'Too many tracking lookups. Please wait a few minutes and try again.' });
 
 // Middleware
@@ -386,6 +387,24 @@ app.put('/api/auth/profile', authenticateUser, async (req, res) => {
   }
 });
 
+// PUT /api/auth/password — change your own password (needs the current one)
+app.put('/api/auth/password', authLimiter, authenticateUser, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!newPassword || String(newPassword).length < 8) {
+      return res.status(400).json({ success: false, error: 'New password must be at least 8 characters.' });
+    }
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (!user || !(await bcrypt.compare(String(currentPassword || ''), user.password))) {
+      return res.status(400).json({ success: false, error: 'Your current password is not correct.' });
+    }
+    await prisma.user.update({ where: { id: user.id }, data: { password: await bcrypt.hash(String(newPassword), 10) } });
+    res.json({ success: true, message: 'Password changed.' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Could not change the password.' });
+  }
+});
+
 // GET /api/auth/users (Admin: list registered users)
 app.get('/api/auth/users', authenticateUser, requireAdmin, async (req, res) => {
   try {
@@ -399,7 +418,9 @@ app.get('/api/auth/users', authenticateUser, requireAdmin, async (req, res) => {
         city: true,
         address: true,
         createdAt: true,
-        _count: { select: { orders: true } },
+        creditBalance: true,
+        referralCode: true,
+        _count: { select: { orders: true, referrals: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -457,6 +478,7 @@ app.get('/api/products', async (req, res) => {
       ...p,
       images: p.gallery && p.gallery.length > 0 ? p.gallery : [p.image],
       categorySlug: slugify(p.category),
+      justLanded: p.badge === 'New',
       specifications: p.specs || [],
       reviewCount: p.reviewsCount,
     }));
@@ -488,6 +510,7 @@ app.get('/api/products/:idOrSlug', async (req, res) => {
         ...product,
         images: product.gallery && product.gallery.length > 0 ? product.gallery : [product.image],
         categorySlug: slugify(product.category),
+        justLanded: product.badge === 'New',
         specifications: product.specs || [],
         reviewCount: product.reviewsCount,
       },
@@ -533,61 +556,110 @@ app.post('/api/upload', authenticateUser, requireAdmin, (req, res) => {
   });
 });
 
+// Checks admin product input and turns it into clean database fields.
+// `partial` = an edit, where only the fields sent are changed.
+const parseProductInput = (body, { partial = false } = {}) => {
+  const data = {};
+  const has = (k) => body[k] !== undefined;
+
+  if (!partial || has('name')) {
+    const name = String(body.name || '').trim();
+    if (!name) return { error: 'Please enter a product name.' };
+    if (name.length > 120) return { error: 'Product name is too long (120 characters max).' };
+    data.name = name;
+  }
+  if (!partial || has('category')) {
+    const category = String(body.category || '').trim();
+    if (!category) return { error: 'Please choose a category.' };
+    data.category = category;
+  }
+  if (!partial || has('price')) {
+    const price = Number(body.price);
+    if (!Number.isFinite(price) || price <= 0) return { error: 'Price must be a number above 0.' };
+    data.price = roundMoney(price);
+  }
+  if (has('originalPrice')) {
+    if (body.originalPrice === null || body.originalPrice === '') {
+      data.originalPrice = null;
+    } else {
+      const was = Number(body.originalPrice);
+      if (!Number.isFinite(was) || was <= 0) return { error: '"Was" price must be a number above 0, or left empty.' };
+      data.originalPrice = roundMoney(was);
+    }
+  }
+  if (has('inStock') || !partial) data.inStock = body.inStock === undefined ? true : Boolean(body.inStock);
+  if (has('badge')) data.badge = body.badge ? String(body.badge).trim().slice(0, 30) : null;
+  if (has('description') || !partial) data.description = String(body.description || '').trim();
+  if (has('specs')) data.specs = body.specs || null;
+
+  if (has('gallery') || has('image') || !partial) {
+    const gallery = (Array.isArray(body.gallery) ? body.gallery : [])
+      .map((u) => String(u || '').trim())
+      .filter(Boolean)
+      .slice(0, 8);
+    const main = String(body.image || '').trim() || gallery[0] || '';
+    if (!main && !partial) return { error: 'Please add at least one photo.' };
+    if (main) {
+      data.image = main;
+      data.gallery = [main, ...gallery.filter((u) => u !== main)];
+    }
+  }
+  return { data };
+};
+
+const uniqueProductSlug = async (name, excludeId = null) => {
+  const base = slugify(name) || 'product';
+  let slug = base;
+  for (let n = 2; ; n++) {
+    const clash = await prisma.product.findUnique({ where: { slug } });
+    if (!clash || clash.id === excludeId) return slug;
+    slug = `${base}-${n}`;
+  }
+};
+
+// The "was" price must be higher than the selling price, or the store shows a negative discount.
+const checkWasPrice = (price, originalPrice) =>
+  originalPrice != null && price != null && originalPrice <= price
+    ? '"Was" price must be higher than the selling price (or leave it empty).'
+    : null;
+
 // POST /api/products (Add product — Admin only)
 app.post('/api/products', authenticateUser, requireAdmin, async (req, res) => {
   try {
-    const { name, category, price, originalPrice, inStock, badge, image, gallery, description, specs } = req.body;
-
-    const slug = req.body.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+    const { data, error } = parseProductInput(req.body);
+    if (error) return res.status(400).json({ success: false, error });
+    const wasError = checkWasPrice(data.price, data.originalPrice);
+    if (wasError) return res.status(400).json({ success: false, error: wasError });
 
     const newProduct = await prisma.product.create({
-      data: {
-        name,
-        slug,
-        category,
-        price: parseFloat(price),
-        originalPrice: originalPrice ? parseFloat(originalPrice) : null,
-        inStock: Boolean(inStock ?? true),
-        badge: badge || null,
-        image: image || (gallery && gallery[0]) || '',
-        gallery: gallery || (image ? [image] : []),
-        description: description || '',
-        specs: specs || null,
-      },
+      data: { ...data, slug: await uniqueProductSlug(data.name) },
     });
 
-    res.status(201).json({ success: true, data: newProduct });
+    res.status(201).json({ success: true, data: { ...newProduct, categorySlug: slugify(newProduct.category) } });
   } catch (error) {
     console.error('Error creating product:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Could not save the product. Please try again.' });
   }
 });
 
 // PUT /api/products/:id (Update product — Admin only)
 app.put('/api/products/:id', authenticateUser, requireAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
-    const { name, category, price, originalPrice, inStock, badge, image, gallery, description, specs } = req.body;
+    const existing = await prisma.product.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ success: false, error: 'Product not found.' });
 
-    const updated = await prisma.product.update({
-      where: { id },
-      data: {
-        ...(name && { name }),
-        ...(category && { category }),
-        ...(price !== undefined && { price: parseFloat(price) }),
-        ...(originalPrice !== undefined && { originalPrice: originalPrice ? parseFloat(originalPrice) : null }),
-        ...(inStock !== undefined && { inStock: Boolean(inStock) }),
-        ...(badge !== undefined && { badge }),
-        ...(image && { image }),
-        ...(gallery && { gallery }),
-        ...(description !== undefined && { description }),
-        ...(specs !== undefined && { specs }),
-      },
-    });
+    const { data, error } = parseProductInput(req.body, { partial: true });
+    if (error) return res.status(400).json({ success: false, error });
+    const wasError = checkWasPrice(data.price ?? existing.price, data.originalPrice !== undefined ? data.originalPrice : existing.originalPrice);
+    if (wasError) return res.status(400).json({ success: false, error: wasError });
 
-    res.json({ success: true, data: updated });
+    if (data.name && data.name !== existing.name) data.slug = await uniqueProductSlug(data.name, existing.id);
+
+    const updated = await prisma.product.update({ where: { id: existing.id }, data });
+    res.json({ success: true, data: { ...updated, categorySlug: slugify(updated.category) } });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    console.error('Error updating product:', error);
+    res.status(500).json({ success: false, error: 'Could not update the product. Please try again.' });
   }
 });
 
@@ -595,10 +667,12 @@ app.put('/api/products/:id', authenticateUser, requireAdmin, async (req, res) =>
 app.delete('/api/products/:id', authenticateUser, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+    const existing = await prisma.product.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ success: false, error: 'Product not found.' });
     await prisma.product.delete({ where: { id } });
     res.json({ success: true, message: 'Product deleted successfully' });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Could not delete the product. Please try again.' });
   }
 });
 
@@ -628,6 +702,79 @@ app.get('/api/categories', async (req, res) => {
     res.json({ success: true, data: categoriesWithCount });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/categories (Admin) — { name, image }
+app.post('/api/categories', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const name = String(req.body.name || '').trim();
+    if (!name) return res.status(400).json({ success: false, error: 'Please enter a category name.' });
+    const slug = slugify(name);
+    if (await prisma.category.findUnique({ where: { slug } })) {
+      return res.status(400).json({ success: false, error: `A category called "${name}" already exists.` });
+    }
+    const category = await prisma.category.create({
+      data: { id: slug, name, slug, image: String(req.body.image || '').trim() || null },
+    });
+    res.status(201).json({ success: true, data: { ...category, itemCount: 0 } });
+  } catch (error) {
+    console.error('Error creating category:', error);
+    res.status(500).json({ success: false, error: 'Could not save the category.' });
+  }
+});
+
+// PUT /api/categories/:id (Admin) — rename and/or change photo; products follow a rename.
+app.put('/api/categories/:id', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const existing = await prisma.category.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ success: false, error: 'Category not found.' });
+
+    const data = {};
+    if (req.body.image !== undefined) data.image = String(req.body.image || '').trim() || null;
+    if (req.body.name !== undefined) {
+      const name = String(req.body.name || '').trim();
+      if (!name) return res.status(400).json({ success: false, error: 'Please enter a category name.' });
+      const slug = slugify(name);
+      const clash = await prisma.category.findUnique({ where: { slug } });
+      if (clash && clash.id !== existing.id) {
+        return res.status(400).json({ success: false, error: `A category called "${name}" already exists.` });
+      }
+      data.name = name;
+      data.slug = slug;
+    }
+
+    const oldName = existing.name;
+    const updated = await prisma.$transaction(async (tx) => {
+      const cat = await tx.category.update({ where: { id: existing.id }, data });
+      if (data.name && data.name !== oldName) {
+        await tx.product.updateMany({ where: { category: oldName }, data: { category: data.name } });
+      }
+      return cat;
+    });
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    console.error('Error updating category:', error);
+    res.status(500).json({ success: false, error: 'Could not update the category.' });
+  }
+});
+
+// DELETE /api/categories/:id (Admin) — only when no products use it
+app.delete('/api/categories/:id', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const existing = await prisma.category.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ success: false, error: 'Category not found.' });
+    const inUse = await prisma.product.count({ where: { category: existing.name } });
+    if (inUse > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `${inUse} product${inUse === 1 ? '' : 's'} still use "${existing.name}". Move or delete them first.`,
+      });
+    }
+    await prisma.category.delete({ where: { id: existing.id } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Could not delete the category.' });
   }
 });
 
@@ -953,6 +1100,15 @@ app.patch('/api/orders/:id/status', authenticateUser, requireAdmin, async (req, 
   try {
     const { id } = req.params;
     const { orderStatus, paymentStatus } = req.body;
+    if (orderStatus && !['PROCESSING', 'CONFIRMED', 'SHIPPED', 'DELIVERED', 'CANCELLED'].includes(orderStatus)) {
+      return res.status(400).json({ success: false, error: `Unknown order status "${orderStatus}".` });
+    }
+    if (paymentStatus && !['PENDING', 'VERIFYING', 'PAID', 'REFUNDED'].includes(paymentStatus)) {
+      return res.status(400).json({ success: false, error: `Unknown payment status "${paymentStatus}".` });
+    }
+    if (!(await prisma.order.findUnique({ where: { id } }))) {
+      return res.status(404).json({ success: false, error: 'Order not found.' });
+    }
 
     const updated = await prisma.order.update({
       where: { id },
@@ -976,28 +1132,28 @@ app.patch('/api/orders/:id/status', authenticateUser, requireAdmin, async (req, 
 // ---------------------------------------------------------------------------
 
 // POST /api/inquiries (Contact Form)
-app.post('/api/inquiries', async (req, res) => {
+// Used by the Contact page and the "Request an item" form.
+// Phone (WhatsApp) is required so the team can reply; email is optional.
+app.post('/api/inquiries', inquiryLimiter, async (req, res) => {
   try {
-    const { name, email, phone, subject, message } = req.body;
+    const name = String(req.body.name || '').trim().slice(0, 100);
+    const phone = String(req.body.phone || '').trim().slice(0, 30);
+    const email = String(req.body.email || '').trim().slice(0, 120);
+    const subject = String(req.body.subject || 'General question').trim().slice(0, 80);
+    const message = String(req.body.message || '').trim().slice(0, 4000);
 
-    if (!name || !email || !message) {
-      return res.status(400).json({
-        success: false,
-        error: 'Please provide name, email, and message',
-      });
+    if (!name || !message) {
+      return res.status(400).json({ success: false, error: 'Please enter your name and message.' });
+    }
+    if (normalizePhone(phone).length < 9) {
+      return res.status(400).json({ success: false, error: 'Please enter a valid phone or WhatsApp number so we can reply.' });
     }
 
     const inquiry = await prisma.inquiry.create({
-      data: {
-        name,
-        email,
-        phone: phone || null,
-        subject: subject || 'General Inquiry',
-        message,
-      },
+      data: { name, email, phone, subject, message },
     });
 
-    console.log(`✉️ New contact message received from ${name} (${email})`);
+    console.log(`✉️ New message from ${name} (${phone}): ${subject}`);
 
     res.status(201).json({
       success: true,
@@ -1007,6 +1163,20 @@ app.post('/api/inquiries', async (req, res) => {
   } catch (error) {
     console.error('Error saving inquiry:', error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PATCH /api/inquiries/:id (Admin) — mark a message NEW / REPLIED / CLOSED
+app.patch('/api/inquiries/:id', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const status = String(req.body.status || '').toUpperCase();
+    if (!['NEW', 'REPLIED', 'CLOSED'].includes(status)) {
+      return res.status(400).json({ success: false, error: 'Status must be NEW, REPLIED or CLOSED.' });
+    }
+    const updated = await prisma.inquiry.update({ where: { id: req.params.id }, data: { status } });
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    res.status(404).json({ success: false, error: 'Message not found.' });
   }
 });
 
@@ -1067,6 +1237,9 @@ const seedInitialDiscounts = async () => {
 };
 seedInitialDiscounts();
 
+// A date-only expiry ("2026-12-31") means the code works until the end of that day.
+const endOfDay = (value) => new Date(/^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? `${value}T23:59:59Z` : value);
+
 // GET /api/discounts (Admin list all discount codes)
 app.get('/api/discounts', authenticateUser, requireAdmin, async (req, res) => {
   try {
@@ -1102,6 +1275,13 @@ app.post('/api/discounts', authenticateUser, requireAdmin, async (req, res) => {
     }
 
     const cleanCode = code.trim().toUpperCase();
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue) || numericValue <= 0) {
+      return res.status(400).json({ success: false, error: 'Discount value must be a number above 0.' });
+    }
+    if (type !== 'FIXED' && numericValue > 100) {
+      return res.status(400).json({ success: false, error: 'A percentage discount cannot be more than 100%.' });
+    }
 
     const existing = await prisma.discount.findUnique({
       where: { code: cleanCode }
@@ -1122,7 +1302,7 @@ app.post('/api/discounts', authenticateUser, requireAdmin, async (req, res) => {
         minOrderAmount: minOrderAmount ? parseFloat(minOrderAmount) : 0,
         maxDiscount: maxDiscount ? parseFloat(maxDiscount) : null,
         usageLimit: usageLimit ? parseInt(usageLimit, 10) : null,
-        expiresAt: expiresAt ? new Date(expiresAt) : null,
+        expiresAt: expiresAt ? endOfDay(expiresAt) : null,
         isActive: isActive !== undefined ? Boolean(isActive) : true,
       }
     });
@@ -1159,7 +1339,7 @@ app.put('/api/discounts/:id', authenticateUser, requireAdmin, async (req, res) =
     if (minOrderAmount !== undefined) data.minOrderAmount = minOrderAmount ? parseFloat(minOrderAmount) : 0;
     if (maxDiscount !== undefined) data.maxDiscount = maxDiscount ? parseFloat(maxDiscount) : null;
     if (usageLimit !== undefined) data.usageLimit = usageLimit ? parseInt(usageLimit, 10) : null;
-    if (expiresAt !== undefined) data.expiresAt = expiresAt ? new Date(expiresAt) : null;
+    if (expiresAt !== undefined) data.expiresAt = expiresAt ? endOfDay(expiresAt) : null;
     if (isActive !== undefined) data.isActive = Boolean(isActive);
 
     const updated = await prisma.discount.update({
@@ -1311,6 +1491,9 @@ app.get('/api/batches/active', async (req, res) => {
 });
 
 // POST /api/batches (Admin create new container / air cargo batch)
+// Shipment stages, in order.
+const BATCH_STATUSES = ['CONFIRMED', 'QC_BATCHING', 'HIGH_SEAS', 'CUSTOMS_CLEARANCE', 'ACCRA_HUB', 'DELIVERY_READY'];
+
 app.post('/api/batches', authenticateUser, requireAdmin, async (req, res) => {
   try {
     const {
@@ -1414,9 +1597,19 @@ app.put('/api/batches/:id', authenticateUser, requireAdmin, async (req, res) => 
     if (capacityKg !== undefined) data.capacityKg = capacityKg ? parseFloat(capacityKg) : null;
     if (allocatedKg !== undefined) data.allocatedKg = allocatedKg ? parseFloat(allocatedKg) : 0;
     if (totalOrders !== undefined) data.totalOrders = parseInt(totalOrders, 10);
-    if (status) data.status = status;
-    if (cutoffDate !== undefined) data.cutoffDate = cutoffDate;
-    if (eta !== undefined) data.eta = eta;
+    if (status) {
+      if (!BATCH_STATUSES.includes(status)) {
+        return res.status(400).json({ success: false, error: `Unknown stage "${status}".` });
+      }
+      data.status = status;
+    }
+    if (cutoffDate !== undefined) data.cutoffDate = cutoffDate || null;
+    if (eta !== undefined) data.eta = eta || null;
+    for (const key of ['capacityCbm', 'allocatedCbm', 'capacityKg', 'allocatedKg', 'totalOrders']) {
+      if (data[key] !== undefined && data[key] !== null && !Number.isFinite(data[key])) {
+        return res.status(400).json({ success: false, error: `${key} must be a number.` });
+      }
+    }
     if (lockedFxRate !== undefined) data.lockedFxRate = lockedFxRate ? lockedFxRate.toString() : '15.65';
     if (isActive !== undefined) data.isActive = Boolean(isActive);
 
@@ -1437,8 +1630,9 @@ app.delete('/api/batches/:id', authenticateUser, requireAdmin, async (req, res) 
   try {
     const { id } = req.params;
     await prisma.batch.delete({ where: { id } });
+    res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(404).json({ success: false, error: 'Shipment not found or already deleted.' });
   }
 });
 

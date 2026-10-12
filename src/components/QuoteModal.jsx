@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useStore } from '../context/StoreContext';
+import { submitInquiry } from '../services/api';
 import { X, Send, MessageCircle, CheckCircle2, Upload, Search, Ship, Plane, ShieldCheck, Scale } from 'lucide-react';
 
 export const QuoteModal = () => {
@@ -17,6 +18,7 @@ export const QuoteModal = () => {
   });
   const [imagePreview, setImagePreview] = useState(null);
   const [submitted, setSubmitted] = useState(false);
+  const [sending, setSending] = useState(false);
 
   if (!quoteModalOpen) return null;
 
@@ -31,10 +33,34 @@ export const QuoteModal = () => {
     }
   };
 
-  const handleSubmit = (e) => {
+  // Saved as an Admin message so no request is lost; the photo itself is sent on WhatsApp.
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    setSubmitted(true);
-    showToast('Item sourcing request received! Our team is checking overseas factory rates.', 'success');
+    setSending(true);
+    const lines = [
+      `Item: ${formData.productName}`,
+      `Link: ${formData.productUrl || '—'}`,
+      `Quantity: ${formData.quantity || '1'}`,
+      `Budget: ${formData.budget ? `GH₵${formData.budget}` : 'Flexible'}`,
+      `Shipping: ${formData.shippingPreference === 'air' ? 'Air (7–12 days)' : 'Sea (30–50 days)'}`,
+      `Deliver to: ${formData.city || 'Accra'}`,
+      `Details: ${formData.notes || '—'}`,
+      imagePreview ? 'Customer has a photo — ask them to send it on WhatsApp.' : null,
+    ].filter(Boolean);
+    try {
+      await submitInquiry({
+        name: formData.name,
+        phone: formData.phone,
+        subject: `Item request: ${formData.productName}`.slice(0, 80),
+        message: lines.join('\n'),
+      });
+      setSubmitted(true);
+      showToast('Request sent. We will reply with a price on WhatsApp.', 'success');
+    } catch (err) {
+      showToast(err.message || 'Your request could not be sent. Please try again or use WhatsApp.', 'error');
+    } finally {
+      setSending(false);
+    }
   };
 
   const handleSendViaWhatsApp = () => {
@@ -497,6 +523,7 @@ export const QuoteModal = () => {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '6px' }}>
                 <button
                   type="submit"
+                  disabled={sending}
                   style={{
                     backgroundColor: 'var(--accent)',
                     color: '#ffffff',
@@ -512,7 +539,7 @@ export const QuoteModal = () => {
                     cursor: 'pointer'
                   }}
                 >
-                   Send request
+                   {sending ? 'Sending…' : 'Send request'}
                 </button>
                 <button
                   type="button"

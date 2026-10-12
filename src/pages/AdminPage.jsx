@@ -1,3342 +1,1069 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../context/StoreContext';
-import {
-  getAllOrders,
-  updateOrderStatus,
-  createProduct,
-  updateProduct,
-  deleteProduct,
-  getAllInquiries,
-  getAllUsers,
-  uploadImage,
-  getAllDiscounts,
-  createDiscount,
-  updateDiscount,
-  deleteDiscount,
-  getAllBatches,
-  createBatch,
-  updateBatch,
-  deleteBatch
-} from '../services/api';
-import {
-  Shield,
-  Package,
-  ShoppingBag,
-  Users,
-  MessageCircle,
-  Plus,
-  Trash2,
-  Edit2,
-  ExternalLink,
-  CheckCircle,
-  Clock,
-  Truck,
-  TrendingUp,
-  Search,
-  Filter,
-  RefreshCw,
-  Phone,
-  Mail,
-  MapPin,
-  X,
-  AlertCircle,
-  Upload,
-  Check,
-  Loader2,
-  Tag,
-  Percent,
-  ToggleLeft,
-  ToggleRight,
-  Calendar,
-  Anchor,
-  Plane,
-  Layers,
-  Globe,
-  Activity,
-  FileCheck,
-  Lock,
-  Boxes,
-  Cpu,
-  ArrowUpRight
-} from 'lucide-react';
+import * as admin from '../services/adminApi';
+import { sizedImage } from '../utils/images';
+import { X, Plus, Trash2, RefreshCw, Search, Upload, MessageCircle, ArrowLeft, ArrowRight } from 'lucide-react';
+
+// ---------------------------------------------------------------------------
+// Labels shown to the admin (database values → plain words)
+// ---------------------------------------------------------------------------
+const ORDER_STATUSES = [
+  ['PROCESSING', 'New'],
+  ['CONFIRMED', 'Confirmed'],
+  ['SHIPPED', 'Shipped'],
+  ['DELIVERED', 'Delivered'],
+  ['CANCELLED', 'Cancelled'],
+];
+const PAYMENT_STATUSES = [
+  ['PENDING', 'Not paid'],
+  ['VERIFYING', 'Checking payment'],
+  ['PAID', 'Paid'],
+  ['REFUNDED', 'Refunded'],
+];
+const BATCH_STAGES = [
+  ['CONFIRMED', 'Taking orders'],
+  ['QC_BATCHING', 'Checking & packing'],
+  ['HIGH_SEAS', 'On the way to Ghana'],
+  ['CUSTOMS_CLEARANCE', 'Clearing customs'],
+  ['ACCRA_HUB', 'Arrived in Accra'],
+  ['DELIVERY_READY', 'Out for delivery'],
+];
+const MESSAGE_STATUSES = [
+  ['NEW', 'New'],
+  ['REPLIED', 'Replied'],
+  ['CLOSED', 'Closed'],
+];
+const label = (pairs, value) => (pairs.find(([v]) => v === value) || [value, value || '—'])[1];
+
+const money = (n) => `GH₵${Number(n || 0).toFixed(2)}`;
+const date = (d) => (d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
+const waLink = (phone, text) => {
+  let digits = String(phone || '').replace(/\D/g, '');
+  if (digits.startsWith('0')) digits = `233${digits.slice(1)}`;
+  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+};
+
+// ---------------------------------------------------------------------------
+// Small building blocks
+// ---------------------------------------------------------------------------
+const Modal = ({ title, onClose, children, footer }) => (
+  <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-panel adm-modal" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="modal-header">
+        <h2 className="modal-title">{title}</h2>
+        <button type="button" className="modal-close" onClick={onClose} aria-label="Close"><X size={20} /></button>
+      </div>
+      <div className="modal-body">{children}</div>
+      {footer && <div className="adm-modal-footer">{footer}</div>}
+    </div>
+  </div>
+);
+
+const Field = ({ label: text, hint, children }) => (
+  <label className="form-field adm-field">
+    <span className="form-label">{text}</span>
+    {children}
+    {hint && <span className="form-hint">{hint}</span>}
+  </label>
+);
+
+const Empty = ({ children }) => <div className="adm-empty">{children}</div>;
+
+// Photo picker used for products and categories: upload files or paste links, reorder, remove.
+const PhotoManager = ({ photos, onChange, max = 8, single = false }) => {
+  const { showToast } = useStore();
+  const [uploading, setUploading] = useState(false);
+  const [link, setLink] = useState('');
+
+  const addFiles = async (files) => {
+    const list = Array.from(files || []).filter((f) => f.type.startsWith('image/'));
+    if (!list.length) return;
+    setUploading(true);
+    try {
+      const urls = [];
+      for (const file of list.slice(0, single ? 1 : max - photos.length)) {
+        if (file.size > 15 * 1024 * 1024) { showToast(`${file.name} is over 15 MB`, 'error'); continue; }
+        urls.push(await admin.uploadPhoto(file));
+      }
+      onChange(single ? urls.slice(0, 1) : [...photos, ...urls].slice(0, max));
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const addLink = () => {
+    const url = link.trim();
+    if (!/^https?:\/\//.test(url)) { showToast('Paste a full link starting with https://', 'error'); return; }
+    onChange(single ? [url] : [...photos, url].slice(0, max));
+    setLink('');
+  };
+
+  const move = (i, dir) => {
+    const next = [...photos];
+    [next[i], next[i + dir]] = [next[i + dir], next[i]];
+    onChange(next);
+  };
+
+  return (
+    <div className="adm-photos">
+      <div className="adm-photo-grid">
+        {photos.map((url, i) => (
+          <div key={url + i} className="adm-photo">
+            <img src={sizedImage(url, 200)} alt="" />
+            {i === 0 && !single && <span className="adm-photo-main">Main photo</span>}
+            <div className="adm-photo-actions">
+              {!single && i > 0 && <button type="button" onClick={() => move(i, -1)} aria-label="Move left"><ArrowLeft size={14} /></button>}
+              {!single && i < photos.length - 1 && <button type="button" onClick={() => move(i, 1)} aria-label="Move right"><ArrowRight size={14} /></button>}
+              <button type="button" onClick={() => onChange(photos.filter((_, j) => j !== i))} aria-label="Remove photo"><Trash2 size={14} /></button>
+            </div>
+          </div>
+        ))}
+        {(single ? photos.length === 0 : photos.length < max) && (
+          <label className={`adm-photo-add ${uploading ? 'is-busy' : ''}`}>
+            <input type="file" accept="image/*" multiple={!single} hidden disabled={uploading} onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
+            <Upload size={18} />
+            <span>{uploading ? 'Uploading…' : single ? 'Upload photo' : 'Upload photos'}</span>
+          </label>
+        )}
+      </div>
+      <div className="adm-inline">
+        <input className="form-input" placeholder="…or paste a photo link" value={link} onChange={(e) => setLink(e.target.value)} />
+        <button type="button" className="btn btn-outline" onClick={addLink} disabled={!link.trim()}>Add link</button>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------------
+const OrdersTab = ({ orders, setOrders }) => {
+  const { showToast } = useStore();
+  const [query, setQuery] = useState('');
+  const [status, setStatus] = useState('all');
+  const [payment, setPayment] = useState('all');
+  const [saving, setSaving] = useState(null);
+
+  const shown = orders.filter((o) => {
+    if (status !== 'all' && o.orderStatus !== status) return false;
+    if (payment !== 'all' && o.paymentStatus !== payment) return false;
+    if (!query.trim()) return true;
+    const q = query.toLowerCase();
+    return [o.orderCode, o.customerName, o.phone, o.city, o.email].some((v) => String(v || '').toLowerCase().includes(q));
+  });
+
+  const update = async (order, changes) => {
+    setSaving(order.id);
+    try {
+      const updated = await admin.setOrderStatus(order.id, changes);
+      setOrders((prev) => prev.map((o) => (o.id === order.id ? { ...o, ...updated } : o)));
+      showToast(`Order ${order.orderCode} updated`, 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  return (
+    <>
+      <div className="adm-toolbar">
+        <div className="adm-search"><Search size={16} /><input placeholder="Search code, name, phone or city" value={query} onChange={(e) => setQuery(e.target.value)} /></div>
+        <select className="form-input adm-select" value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Filter by order status">
+          <option value="all">All statuses</option>
+          {ORDER_STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <select className="form-input adm-select" value={payment} onChange={(e) => setPayment(e.target.value)} aria-label="Filter by payment">
+          <option value="all">All payments</option>
+          {PAYMENT_STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+      </div>
+
+      {shown.length === 0 ? <Empty>No orders match.</Empty> : (
+        <div className="adm-list">
+          {shown.map((o) => {
+            const items = Array.isArray(o.items) ? o.items : [];
+            return (
+              <article key={o.id} className={`adm-card ${saving === o.id ? 'is-saving' : ''}`}>
+                <header className="adm-card-head">
+                  <div>
+                    <strong className="adm-code">{o.orderCode}</strong>
+                    <span className="adm-muted"> · {date(o.createdAt)}</span>
+                  </div>
+                  <strong className="adm-total">{money(o.total)}</strong>
+                </header>
+
+                <div className="adm-order-grid">
+                  <div>
+                    <div className="adm-label">Customer</div>
+                    <div>{o.customerName}</div>
+                    <div className="adm-muted">{o.phone}{o.email ? ` · ${o.email}` : ''}</div>
+                    <div className="adm-muted">{[o.address, o.city].filter(Boolean).join(', ')}</div>
+                  </div>
+                  <div>
+                    <div className="adm-label">Items</div>
+                    <ul className="adm-items">
+                      {items.map((it, i) => <li key={i}>{it.qty} × {it.name} <span className="adm-muted">@ {money(it.price)}</span></li>)}
+                    </ul>
+                  </div>
+                  <div>
+                    <div className="adm-label">Money</div>
+                    <div className="adm-muted">Items {money(o.subtotal)} · Delivery {money(o.deliveryFee)}</div>
+                    {o.discountAmount > 0 && <div className="adm-muted">Discount −{money(o.discountAmount)}{o.couponCode ? ` (${o.couponCode})` : ''}</div>}
+                    {o.creditUsed > 0 && <div className="adm-muted">Store credit −{money(o.creditUsed)}</div>}
+                    <div className="adm-muted">{o.deliveryMethod} · {o.paymentMethod}</div>
+                  </div>
+                </div>
+                {o.notes && <p className="adm-note">Note: {o.notes}</p>}
+
+                <footer className="adm-card-actions">
+                  <label className="adm-mini-field">
+                    <span>Order status</span>
+                    <select className="form-input" value={o.orderStatus} disabled={saving === o.id} onChange={(e) => update(o, { orderStatus: e.target.value })}>
+                      {ORDER_STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    </select>
+                  </label>
+                  <label className="adm-mini-field">
+                    <span>Payment</span>
+                    <select className="form-input" value={o.paymentStatus || 'PENDING'} disabled={saving === o.id} onChange={(e) => update(o, { paymentStatus: e.target.value })}>
+                      {PAYMENT_STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    </select>
+                  </label>
+                  <a
+                    className="btn btn-whatsapp"
+                    target="_blank"
+                    rel="noreferrer"
+                    href={waLink(o.phone, `Hello ${o.customerName}, this is CHARI about your order ${o.orderCode} (${money(o.total)}). Status: ${label(ORDER_STATUSES, o.orderStatus)}.`)}
+                  >
+                    <MessageCircle size={16} /> WhatsApp customer
+                  </a>
+                </footer>
+              </article>
+            );
+          })}
+        </div>
+      )}
+      <p className="adm-help">Setting payment to <strong>Paid</strong> also gives the customer who invited this buyer their GH₵25 reward (first order only). Cancelling an order returns any store credit it used.</p>
+    </>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Products
+// ---------------------------------------------------------------------------
+const emptyProduct = (category) => ({ name: '', category, price: '', originalPrice: '', inStock: true, isNew: false, photos: [], description: '' });
+
+const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => {
+  const { showToast } = useStore();
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState('all');
+  const [editing, setEditing] = useState(null); // form state, id = null for a new product
+  const [saving, setSaving] = useState(false);
+  const [priceDrafts, setPriceDrafts] = useState({});
+
+  const shown = products.filter((p) => (category === 'all' || p.category === category) && p.name.toLowerCase().includes(query.toLowerCase()));
+
+  const openNew = () => setEditing({ id: null, ...emptyProduct(categories[0]?.name || '') });
+  const openEdit = (p) => setEditing({
+    id: p.id,
+    name: p.name,
+    category: p.category,
+    price: String(p.price),
+    originalPrice: p.originalPrice ? String(p.originalPrice) : '',
+    inStock: p.inStock !== false,
+    isNew: p.badge === 'New',
+    photos: (p.gallery && p.gallery.length ? p.gallery : [p.image]).filter(Boolean),
+    description: p.description || '',
+  });
+
+  const save = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    const payload = {
+      name: editing.name,
+      category: editing.category,
+      price: editing.price,
+      originalPrice: editing.originalPrice === '' ? null : editing.originalPrice,
+      inStock: editing.inStock,
+      badge: editing.isNew ? 'New' : null,
+      image: editing.photos[0] || '',
+      gallery: editing.photos,
+      description: editing.description,
+    };
+    try {
+      if (editing.id) {
+        const updated = await admin.editProduct(editing.id, payload);
+        setProducts((prev) => prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)));
+        showToast(`"${updated.name}" saved`, 'success');
+      } else {
+        const created = await admin.addProduct(payload);
+        setProducts((prev) => [created, ...prev]);
+        showToast(`"${created.name}" added to the shop`, 'success');
+      }
+      setEditing(null);
+      onCatalogChange();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const quickUpdate = async (p, changes, message) => {
+    try {
+      const updated = await admin.editProduct(p.id, changes);
+      setProducts((prev) => prev.map((x) => (x.id === p.id ? { ...x, ...updated } : x)));
+      showToast(message, 'success');
+      onCatalogChange();
+      return true;
+    } catch (err) {
+      showToast(err.message, 'error');
+      return false;
+    }
+  };
+
+  const savePrice = async (p) => {
+    const draft = priceDrafts[p.id];
+    if (draft === undefined || Number(draft) === p.price) return;
+    if (await quickUpdate(p, { price: draft }, `${p.name}: price now GH₵${Number(draft).toFixed(2)}`)) {
+      setPriceDrafts((prev) => { const next = { ...prev }; delete next[p.id]; return next; });
+    }
+  };
+
+  const remove = async (p) => {
+    if (!window.confirm(`Delete "${p.name}" from the shop? This can't be undone.`)) return;
+    try {
+      await admin.removeProduct(p.id);
+      setProducts((prev) => prev.filter((x) => x.id !== p.id));
+      showToast(`"${p.name}" deleted`, 'info');
+      onCatalogChange();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  return (
+    <>
+      <div className="adm-toolbar">
+        <div className="adm-search"><Search size={16} /><input placeholder="Search products" value={query} onChange={(e) => setQuery(e.target.value)} /></div>
+        <select className="form-input adm-select" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Filter by category">
+          <option value="all">All categories</option>
+          {categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+        </select>
+        <button type="button" className="btn btn-primary" onClick={openNew}><Plus size={16} /> Add product</button>
+      </div>
+
+      {shown.length === 0 ? <Empty>No products found.</Empty> : (
+        <div className="adm-table-wrap">
+          <table className="adm-table">
+            <thead>
+              <tr><th>Product</th><th>Price (GH₵)</th><th>Was</th><th>In stock</th><th /></tr>
+            </thead>
+            <tbody>
+              {shown.map((p) => (
+                <tr key={p.id}>
+                  <td>
+                    <div className="adm-product-cell">
+                      <img src={sizedImage(p.image, 96)} alt="" />
+                      <div>
+                        <div className="adm-strong">{p.name}</div>
+                        <div className="adm-muted">{p.category}{p.badge === 'New' ? ' · New' : ''}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="adm-price-cell">
+                      <input
+                        className="form-input adm-price"
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        aria-label={`Price of ${p.name}`}
+                        value={priceDrafts[p.id] ?? p.price}
+                        onChange={(e) => setPriceDrafts((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                        onKeyDown={(e) => e.key === 'Enter' && savePrice(p)}
+                      />
+                      {priceDrafts[p.id] !== undefined && Number(priceDrafts[p.id]) !== p.price && (
+                        <>
+                          <button type="button" className="btn btn-primary btn-sm" onClick={() => savePrice(p)}>Save</button>
+                          <button
+                            type="button"
+                            className="btn btn-outline btn-sm"
+                            aria-label="Undo price change"
+                            onClick={() => setPriceDrafts((prev) => { const next = { ...prev }; delete next[p.id]; return next; })}
+                          >
+                            <X size={14} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                  <td className="adm-muted">{p.originalPrice ? money(p.originalPrice) : '—'}</td>
+                  <td>
+                    <label className="adm-switch">
+                      <input
+                        type="checkbox"
+                        checked={p.inStock !== false}
+                        onChange={(e) => quickUpdate(p, { inStock: e.target.checked }, `${p.name}: ${e.target.checked ? 'in stock' : 'out of stock'}`)}
+                      />
+                      <span>{p.inStock !== false ? 'Yes' : 'No'}</span>
+                    </label>
+                  </td>
+                  <td className="adm-row-actions">
+                    <button type="button" className="btn btn-outline btn-sm" onClick={() => openEdit(p)}>Edit</button>
+                    <button type="button" className="btn btn-outline btn-sm adm-danger" onClick={() => remove(p)} aria-label={`Delete ${p.name}`}><Trash2 size={14} /></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="adm-help">Change a price in the list, then press Save (or Enter). Out-of-stock products stay visible but can't be ordered.</p>
+
+      {editing && (
+        <Modal
+          title={editing.id ? 'Edit product' : 'Add product'}
+          onClose={() => !saving && setEditing(null)}
+          footer={(
+            <>
+              <button type="button" className="btn btn-outline" onClick={() => setEditing(null)} disabled={saving}>Cancel</button>
+              <button type="submit" form="product-form" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save product'}</button>
+            </>
+          )}
+        >
+          <form id="product-form" onSubmit={save}>
+            <Field label="Name"><input className="form-input" required maxLength={120} value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></Field>
+            <Field label="Category">
+              <select className="form-input" required value={editing.category} onChange={(e) => setEditing({ ...editing, category: e.target.value })}>
+                {!categories.some((c) => c.name === editing.category) && editing.category && <option value={editing.category}>{editing.category}</option>}
+                {categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+              </select>
+            </Field>
+            <div className="form-row">
+              <Field label="Price (GH₵)"><input className="form-input" type="number" min="0.01" step="0.01" required value={editing.price} onChange={(e) => setEditing({ ...editing, price: e.target.value })} /></Field>
+              <Field label="Was price (GH₵)" hint="Optional. Shows a discount when higher than the price."><input className="form-input" type="number" min="0.01" step="0.01" value={editing.originalPrice} onChange={(e) => setEditing({ ...editing, originalPrice: e.target.value })} /></Field>
+            </div>
+            <div className="adm-checks">
+              <label className="shop-check"><input type="checkbox" checked={editing.inStock} onChange={(e) => setEditing({ ...editing, inStock: e.target.checked })} /> In stock</label>
+              <label className="shop-check"><input type="checkbox" checked={editing.isNew} onChange={(e) => setEditing({ ...editing, isNew: e.target.checked })} /> Show "New" label</label>
+            </div>
+            <Field label="Photos" hint="The first photo is the main one. Up to 8."><PhotoManager photos={editing.photos} onChange={(photos) => setEditing({ ...editing, photos })} /></Field>
+            <Field label="Description"><textarea className="form-input" rows={4} value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} /></Field>
+          </form>
+        </Modal>
+      )}
+    </>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Categories
+// ---------------------------------------------------------------------------
+const CategoriesTab = ({ categories, products, onCatalogChange }) => {
+  const { showToast } = useStore();
+  const [editing, setEditing] = useState(null); // { id?, name, photos }
+  const [saving, setSaving] = useState(false);
+  const countFor = (name) => products.filter((p) => p.category === name).length;
+
+  const save = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const body = { name: editing.name, image: editing.photos[0] || '' };
+      if (editing.id) await admin.editCategory(editing.id, body);
+      else await admin.addCategory(body);
+      showToast(`Category "${editing.name}" saved`, 'success');
+      setEditing(null);
+      onCatalogChange();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (c) => {
+    if (!window.confirm(`Delete the "${c.name}" category?`)) return;
+    try {
+      await admin.removeCategory(c.id);
+      showToast(`"${c.name}" deleted`, 'info');
+      onCatalogChange();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  return (
+    <>
+      <div className="adm-toolbar">
+        <span className="adm-muted">{categories.length} categories</span>
+        <button type="button" className="btn btn-primary" onClick={() => setEditing({ name: '', photos: [] })}><Plus size={16} /> Add category</button>
+      </div>
+      <div className="adm-cat-grid">
+        {categories.map((c) => (
+          <div key={c.id} className="adm-card adm-cat">
+            {c.image ? <img src={sizedImage(c.image, 240)} alt="" /> : <div className="img-fallback" style={{ position: 'static', aspectRatio: '1' }}>No photo</div>}
+            <div className="adm-strong">{c.name}</div>
+            <div className="adm-muted">{countFor(c.name)} products</div>
+            <div className="adm-row-actions">
+              <button type="button" className="btn btn-outline btn-sm" onClick={() => setEditing({ id: c.id, name: c.name, photos: c.image ? [c.image] : [] })}>Edit</button>
+              <button type="button" className="btn btn-outline btn-sm adm-danger" onClick={() => remove(c)} aria-label={`Delete ${c.name}`}><Trash2 size={14} /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="adm-help">Renaming a category moves its products along with it. A category can only be deleted when no products use it.</p>
+
+      {editing && (
+        <Modal
+          title={editing.id ? 'Edit category' : 'Add category'}
+          onClose={() => !saving && setEditing(null)}
+          footer={(
+            <>
+              <button type="button" className="btn btn-outline" onClick={() => setEditing(null)} disabled={saving}>Cancel</button>
+              <button type="submit" form="category-form" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save category'}</button>
+            </>
+          )}
+        >
+          <form id="category-form" onSubmit={save}>
+            <Field label="Name"><input className="form-input" required value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></Field>
+            <Field label="Photo"><PhotoManager single photos={editing.photos} onChange={(photos) => setEditing({ ...editing, photos })} /></Field>
+          </form>
+        </Modal>
+      )}
+    </>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Promo codes
+// ---------------------------------------------------------------------------
+const PromoTab = ({ discounts, setDiscounts }) => {
+  const { showToast } = useStore();
+  const blank = { code: '', description: '', type: 'PERCENTAGE', value: '', minOrderAmount: '', maxDiscount: '', usageLimit: '', expiresAt: '' };
+  const [form, setForm] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const save = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const created = await admin.addDiscount({
+        code: form.code.trim().toUpperCase(),
+        description: form.description,
+        type: form.type,
+        value: Number(form.value),
+        minOrderAmount: form.minOrderAmount ? Number(form.minOrderAmount) : 0,
+        maxDiscount: form.maxDiscount ? Number(form.maxDiscount) : null,
+        usageLimit: form.usageLimit ? parseInt(form.usageLimit, 10) : null,
+        expiresAt: form.expiresAt || null,
+        isActive: true,
+      });
+      setDiscounts((prev) => [created, ...prev]);
+      setForm(null);
+      showToast(`Promo code ${created.code} created`, 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggle = async (d) => {
+    try {
+      const updated = await admin.editDiscount(d.id, { isActive: !d.isActive });
+      setDiscounts((prev) => prev.map((x) => (x.id === d.id ? updated : x)));
+      showToast(`${d.code} is now ${updated.isActive ? 'on' : 'off'}`, 'info');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  const remove = async (d) => {
+    if (!window.confirm(`Delete promo code ${d.code}?`)) return;
+    try {
+      await admin.removeDiscount(d.id);
+      setDiscounts((prev) => prev.filter((x) => x.id !== d.id));
+      showToast(`${d.code} deleted`, 'info');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  return (
+    <>
+      <div className="adm-toolbar">
+        <span className="adm-muted">{discounts.length} promo codes</span>
+        <button type="button" className="btn btn-primary" onClick={() => setForm(blank)}><Plus size={16} /> New promo code</button>
+      </div>
+      {discounts.length === 0 ? <Empty>No promo codes yet.</Empty> : (
+        <div className="adm-table-wrap">
+          <table className="adm-table">
+            <thead><tr><th>Code</th><th>Discount</th><th>Rules</th><th>Used</th><th>On</th><th /></tr></thead>
+            <tbody>
+              {discounts.map((d) => (
+                <tr key={d.id}>
+                  <td><div className="adm-strong adm-code">{d.code}</div><div className="adm-muted">{d.description}</div></td>
+                  <td>{d.type === 'PERCENTAGE' ? `${d.value}% off` : `${money(d.value)} off`}{d.maxDiscount ? <div className="adm-muted">max {money(d.maxDiscount)}</div> : null}</td>
+                  <td className="adm-muted">
+                    {d.minOrderAmount ? `Min order ${money(d.minOrderAmount)}` : 'Any order'}
+                    {d.expiresAt ? <div>Ends {date(d.expiresAt)}</div> : null}
+                  </td>
+                  <td>{d.usedCount || 0}{d.usageLimit ? ` / ${d.usageLimit}` : ''}</td>
+                  <td><label className="adm-switch"><input type="checkbox" checked={d.isActive} onChange={() => toggle(d)} /><span>{d.isActive ? 'On' : 'Off'}</span></label></td>
+                  <td className="adm-row-actions"><button type="button" className="btn btn-outline btn-sm adm-danger" onClick={() => remove(d)} aria-label={`Delete ${d.code}`}><Trash2 size={14} /></button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {form && (
+        <Modal
+          title="New promo code"
+          onClose={() => !saving && setForm(null)}
+          footer={(
+            <>
+              <button type="button" className="btn btn-outline" onClick={() => setForm(null)} disabled={saving}>Cancel</button>
+              <button type="submit" form="promo-form" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Create code'}</button>
+            </>
+          )}
+        >
+          <form id="promo-form" onSubmit={save}>
+            <div className="form-row">
+              <Field label="Code"><input className="form-input" required value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase().replace(/\s/g, '') })} placeholder="e.g. EASTER15" /></Field>
+              <Field label="Type">
+                <select className="form-input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+                  <option value="PERCENTAGE">Percentage off</option>
+                  <option value="FIXED">Fixed amount off (GH₵)</option>
+                </select>
+              </Field>
+            </div>
+            <div className="form-row">
+              <Field label={form.type === 'PERCENTAGE' ? 'Percent off' : 'Amount off (GH₵)'}><input className="form-input" type="number" min="0.01" step="0.01" max={form.type === 'PERCENTAGE' ? 100 : undefined} required value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} /></Field>
+              <Field label="Minimum order (GH₵)" hint="Optional"><input className="form-input" type="number" min="0" step="0.01" value={form.minOrderAmount} onChange={(e) => setForm({ ...form, minOrderAmount: e.target.value })} /></Field>
+            </div>
+            <div className="form-row">
+              <Field label="Most it can take off (GH₵)" hint="Optional, for % codes"><input className="form-input" type="number" min="0" step="0.01" value={form.maxDiscount} onChange={(e) => setForm({ ...form, maxDiscount: e.target.value })} /></Field>
+              <Field label="How many times it can be used" hint="Optional"><input className="form-input" type="number" min="1" step="1" value={form.usageLimit} onChange={(e) => setForm({ ...form, usageLimit: e.target.value })} /></Field>
+            </div>
+            <div className="form-row">
+              <Field label="Ends on" hint="Optional"><input className="form-input" type="date" value={form.expiresAt} onChange={(e) => setForm({ ...form, expiresAt: e.target.value })} /></Field>
+              <Field label="Note for yourself" hint="Optional"><input className="form-input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Shipments
+// ---------------------------------------------------------------------------
+const blankBatch = {
+  batchNumber: '', type: 'SEA_FCL', carrier: '', originPort: 'Guangzhou, China', destinationPort: 'Tema Port',
+  capacityCbm: '68', allocatedCbm: '0', capacityKg: '2500', allocatedKg: '0', totalOrders: '0',
+  status: 'CONFIRMED', cutoffDate: '', eta: '', isActive: true,
+};
+
+const ShipmentsTab = ({ batches, setBatches }) => {
+  const { showToast, refreshBatches } = useStore();
+  const [form, setForm] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const afterChange = () => { if (refreshBatches) refreshBatches(); };
+
+  const save = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    const isSea = form.type === 'SEA_FCL';
+    const body = {
+      batchNumber: form.batchNumber,
+      type: form.type,
+      carrier: form.carrier,
+      originPort: form.originPort,
+      destinationPort: form.destinationPort,
+      capacityCbm: isSea ? Number(form.capacityCbm) || null : null,
+      allocatedCbm: isSea ? Number(form.allocatedCbm) || 0 : 0,
+      capacityKg: isSea ? null : Number(form.capacityKg) || null,
+      allocatedKg: isSea ? 0 : Number(form.allocatedKg) || 0,
+      totalOrders: parseInt(form.totalOrders || 0, 10),
+      status: form.status,
+      cutoffDate: form.cutoffDate || null,
+      eta: form.eta || null,
+      isActive: form.isActive,
+    };
+    try {
+      if (form.id) {
+        const updated = await admin.editBatch(form.id, body);
+        setBatches((prev) => prev.map((b) => (b.id === form.id ? updated : b)));
+      } else {
+        const created = await admin.addBatch(body);
+        setBatches((prev) => [created, ...prev]);
+      }
+      showToast(`Shipment ${body.batchNumber.toUpperCase()} saved`, 'success');
+      setForm(null);
+      afterChange();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const quick = async (b, changes, msg) => {
+    try {
+      const updated = await admin.editBatch(b.id, changes);
+      setBatches((prev) => prev.map((x) => (x.id === b.id ? updated : x)));
+      showToast(msg, 'success');
+      afterChange();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  const remove = async (b) => {
+    if (!window.confirm(`Delete shipment ${b.batchNumber}?`)) return;
+    try {
+      await admin.removeBatch(b.id);
+      setBatches((prev) => prev.filter((x) => x.id !== b.id));
+      showToast(`${b.batchNumber} deleted`, 'info');
+      afterChange();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  const toForm = (b) => ({
+    ...blankBatch,
+    ...Object.fromEntries(Object.entries(b).map(([k, v]) => [k, v === null || v === undefined ? '' : typeof v === 'number' ? String(v) : v])),
+    isActive: b.isActive !== false,
+  });
+
+  return (
+    <>
+      <div className="adm-toolbar">
+        <span className="adm-muted">The newest shipment marked "Show on website" appears on the home page.</span>
+        <button type="button" className="btn btn-primary" onClick={() => setForm({ ...blankBatch })}><Plus size={16} /> New shipment</button>
+      </div>
+      {batches.length === 0 ? <Empty>No shipments yet.</Empty> : (
+        <div className="adm-list">
+          {batches.map((b) => {
+            const isSea = b.type === 'SEA_FCL';
+            const cap = isSea ? b.capacityCbm : b.capacityKg;
+            const used = isSea ? b.allocatedCbm : b.allocatedKg;
+            const pct = cap ? Math.min(100, Math.round((used / cap) * 100)) : null;
+            return (
+              <article key={b.id} className="adm-card">
+                <header className="adm-card-head">
+                  <div>
+                    <strong className="adm-code">{b.batchNumber}</strong>
+                    <span className="adm-muted"> · {isSea ? 'Sea' : 'Air'} · {b.carrier}</span>
+                  </div>
+                  <label className="adm-switch">
+                    <input type="checkbox" checked={b.isActive !== false} onChange={(e) => quick(b, { isActive: e.target.checked }, e.target.checked ? 'Shown on website' : 'Hidden from website')} />
+                    <span>Show on website</span>
+                  </label>
+                </header>
+                <div className="adm-order-grid">
+                  <div><div className="adm-label">Route</div><div>{b.originPort} → {b.destinationPort}</div></div>
+                  <div><div className="adm-label">Dates</div><div>Order cut-off: {b.cutoffDate || '—'}</div><div>Arrives: {b.eta || '—'}</div></div>
+                  <div><div className="adm-label">Space used</div><div>{used ?? 0} / {cap ?? '—'} {isSea ? 'CBM' : 'kg'}{pct !== null ? ` (${pct}%)` : ''}</div><div className="adm-muted">{b.totalOrders || 0} orders</div></div>
+                </div>
+                <footer className="adm-card-actions">
+                  <label className="adm-mini-field">
+                    <span>Stage</span>
+                    <select className="form-input" value={b.status} onChange={(e) => quick(b, { status: e.target.value }, `${b.batchNumber}: ${label(BATCH_STAGES, e.target.value)}`)}>
+                      {BATCH_STAGES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    </select>
+                  </label>
+                  <button type="button" className="btn btn-outline" onClick={() => setForm(toForm(b))}>Edit</button>
+                  <button type="button" className="btn btn-outline adm-danger" onClick={() => remove(b)}><Trash2 size={14} /> Delete</button>
+                </footer>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {form && (
+        <Modal
+          title={form.id ? 'Edit shipment' : 'New shipment'}
+          onClose={() => !saving && setForm(null)}
+          footer={(
+            <>
+              <button type="button" className="btn btn-outline" onClick={() => setForm(null)} disabled={saving}>Cancel</button>
+              <button type="submit" form="batch-form" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save shipment'}</button>
+            </>
+          )}
+        >
+          <form id="batch-form" onSubmit={save}>
+            <div className="form-row">
+              <Field label="Shipment number"><input className="form-input" required value={form.batchNumber} onChange={(e) => setForm({ ...form, batchNumber: e.target.value })} placeholder="e.g. CN-GH-2026-FCL05" /></Field>
+              <Field label="Type">
+                <select className="form-input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+                  <option value="SEA_FCL">Sea</option>
+                  <option value="AIR_CARGO">Air</option>
+                </select>
+              </Field>
+            </div>
+            <Field label="Shipping line / airline"><input className="form-input" required value={form.carrier} onChange={(e) => setForm({ ...form, carrier: e.target.value })} /></Field>
+            <div className="form-row">
+              <Field label="From"><input className="form-input" value={form.originPort} onChange={(e) => setForm({ ...form, originPort: e.target.value })} /></Field>
+              <Field label="To"><input className="form-input" value={form.destinationPort} onChange={(e) => setForm({ ...form, destinationPort: e.target.value })} /></Field>
+            </div>
+            <div className="form-row">
+              <Field label="Last day to order"><input className="form-input" type="date" value={form.cutoffDate} onChange={(e) => setForm({ ...form, cutoffDate: e.target.value })} /></Field>
+              <Field label="Expected arrival"><input className="form-input" type="date" value={form.eta} onChange={(e) => setForm({ ...form, eta: e.target.value })} /></Field>
+            </div>
+            {form.type === 'SEA_FCL' ? (
+              <div className="form-row">
+                <Field label="Container space (CBM)"><input className="form-input" type="number" min="0" step="0.1" value={form.capacityCbm} onChange={(e) => setForm({ ...form, capacityCbm: e.target.value })} /></Field>
+                <Field label="Space already used (CBM)"><input className="form-input" type="number" min="0" step="0.1" value={form.allocatedCbm} onChange={(e) => setForm({ ...form, allocatedCbm: e.target.value })} /></Field>
+              </div>
+            ) : (
+              <div className="form-row">
+                <Field label="Weight limit (kg)"><input className="form-input" type="number" min="0" step="1" value={form.capacityKg} onChange={(e) => setForm({ ...form, capacityKg: e.target.value })} /></Field>
+                <Field label="Weight already used (kg)"><input className="form-input" type="number" min="0" step="1" value={form.allocatedKg} onChange={(e) => setForm({ ...form, allocatedKg: e.target.value })} /></Field>
+              </div>
+            )}
+            <div className="form-row">
+              <Field label="Number of orders"><input className="form-input" type="number" min="0" step="1" value={form.totalOrders} onChange={(e) => setForm({ ...form, totalOrders: e.target.value })} /></Field>
+              <Field label="Stage">
+                <select className="form-input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                  {BATCH_STAGES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </Field>
+            </div>
+            <label className="shop-check"><input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} /> Show on website</label>
+          </form>
+        </Modal>
+      )}
+    </>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Messages
+// ---------------------------------------------------------------------------
+const MessagesTab = ({ messages, setMessages }) => {
+  const { showToast } = useStore();
+  const [filter, setFilter] = useState('NEW');
+  const shown = messages.filter((m) => filter === 'all' || (m.status || 'NEW') === filter);
+
+  const setStatus = async (m, status) => {
+    try {
+      const updated = await admin.setMessageStatus(m.id, status);
+      setMessages((prev) => prev.map((x) => (x.id === m.id ? updated : x)));
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  return (
+    <>
+      <div className="adm-toolbar">
+        <div className="segmented segmented-inline" role="tablist">
+          {[['NEW', 'New'], ['REPLIED', 'Replied'], ['CLOSED', 'Closed'], ['all', 'All']].map(([v, l]) => (
+            <button key={v} type="button" role="tab" aria-selected={filter === v} className={filter === v ? 'active' : ''} onClick={() => setFilter(v)}>{l}</button>
+          ))}
+        </div>
+      </div>
+      {shown.length === 0 ? <Empty>No messages here.</Empty> : (
+        <div className="adm-list">
+          {shown.map((m) => (
+            <article key={m.id} className="adm-card">
+              <header className="adm-card-head">
+                <div><strong>{m.subject}</strong><span className="adm-muted"> · {date(m.createdAt)}</span></div>
+                <select className="form-input adm-select" value={m.status || 'NEW'} onChange={(e) => setStatus(m, e.target.value)} aria-label="Message status">
+                  {MESSAGE_STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </header>
+              <p className="adm-message">{m.message}</p>
+              <footer className="adm-card-actions">
+                <span className="adm-muted">{m.name} · {m.phone || 'no phone'}{m.email ? ` · ${m.email}` : ''}</span>
+                {m.phone && (
+                  <a className="btn btn-whatsapp btn-sm" target="_blank" rel="noreferrer" href={waLink(m.phone, `Hello ${m.name}, this is CHARI replying to your message.`)} onClick={() => (m.status || 'NEW') === 'NEW' && setStatus(m, 'REPLIED')}>
+                    <MessageCircle size={14} /> Reply on WhatsApp
+                  </a>
+                )}
+              </footer>
+            </article>
+          ))}
+        </div>
+      )}
+    </>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Customers
+// ---------------------------------------------------------------------------
+const CustomersTab = ({ customers }) => {
+  const [query, setQuery] = useState('');
+  const shown = customers.filter((c) => [c.name, c.email, c.phone, c.city].some((v) => String(v || '').toLowerCase().includes(query.toLowerCase())));
+  return (
+    <>
+      <div className="adm-toolbar">
+        <div className="adm-search"><Search size={16} /><input placeholder="Search name, email, phone or city" value={query} onChange={(e) => setQuery(e.target.value)} /></div>
+      </div>
+      {shown.length === 0 ? <Empty>No customers found.</Empty> : (
+        <div className="adm-table-wrap">
+          <table className="adm-table">
+            <thead><tr><th>Name</th><th>Contact</th><th>City</th><th>Joined</th><th>Orders</th><th>Invited</th><th>Store credit</th></tr></thead>
+            <tbody>
+              {shown.map((c) => (
+                <tr key={c.id}>
+                  <td><div className="adm-strong">{c.name}</div>{c.role === 'ADMIN' && <div className="adm-muted">Admin</div>}</td>
+                  <td><div>{c.email}</div><div className="adm-muted">{c.phone || '—'}</div></td>
+                  <td>{c.city || '—'}</td>
+                  <td>{date(c.createdAt)}</td>
+                  <td>{c._count?.orders ?? 0}</td>
+                  <td>{c._count?.referrals ?? 0}</td>
+                  <td>{money(c.creditBalance)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+const TABS = [
+  ['orders', 'Orders'],
+  ['products', 'Products'],
+  ['categories', 'Categories'],
+  ['promos', 'Promo codes'],
+  ['shipments', 'Shipments'],
+  ['messages', 'Messages'],
+  ['customers', 'Customers'],
+];
 
 export const AdminPage = () => {
-  const { user, openAuth, navigate, showToast, refreshProducts, refreshBatches, categories, login } = useStore();
-
-  const [activeTab, setActiveTab] = useState('orders'); // 'orders' | 'products' | 'discounts' | 'inquiries' | 'users' | 'logistics'
-  const [orders, setOrders] = useState([]);
-  const [productsList, setProductsList] = useState([]);
-  const [inquiries, setInquiries] = useState([]);
-  const [usersList, setUsersList] = useState([]);
-  const [discountsList, setDiscountsList] = useState([]);
+  const { user, openAuth, navigate, showToast, refreshProducts } = useStore();
+  const [tab, setTab] = useState('orders');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [orders, setOrders] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [discounts, setDiscounts] = useState([]);
+  const [batches, setBatches] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [customers, setCustomers] = useState([]);
 
-  // International Pre-Order Batches & Logistics
-  const [batches, setBatches] = useState([
-    {
-      id: 'batch-fcl-04',
-      batchNumber: 'CN-GH-2026-FCL04',
-      type: 'SEA_FCL',
-      containerType: '40ft High Cube Container',
-      carrier: 'MSC Tema Voyager (Vessel MSC-992)',
-      originPort: 'Guangzhou Port, China',
-      destinationPort: 'Port of Tema (MPS Terminal 3)',
-      capacityCbm: 68.0,
-      allocatedCbm: 55.8,
-      totalOrders: 38,
-      status: 'HIGH_SEAS',
-      cutoffDate: '2026-10-05',
-      eta: '2026-10-24',
-      lockedFxRate: '15.65'
-    },
-    {
-      id: 'batch-air-12',
-      batchNumber: 'EK-9821-EXP',
-      type: 'AIR_CARGO',
-      containerType: 'ULD Palletized Air Freight',
-      carrier: 'Emirates SkyCargo Flight EK-9821',
-      originPort: 'Yiwu International Cargo Terminal',
-      destinationPort: 'Kotoka International Airport (KIA), Accra',
-      capacityKg: 2500,
-      allocatedKg: 1850,
-      totalOrders: 19,
-      status: 'CUSTOMS_CLEARANCE',
-      cutoffDate: '2026-10-01',
-      eta: '2026-10-03',
-      lockedFxRate: '15.65'
-    }
-  ]);
-
-  const [simulatedFxRates, setSimulatedFxRates] = useState({
-    usdGhs: '15.65',
-    rmbGhs: '2.18',
-    seaRatePerCbmUsd: '280',
-    airRatePerKgUsd: '12.50'
-  });
-
-  const [simCbm, setSimCbm] = useState(1.5);
-  const [simKg, setSimKg] = useState(65);
-
-  const [webhookLogs] = useState([
-    {
-      id: 'wh-001',
-      provider: 'Paystack MoMo',
-      idempotencyKey: 'idemp_live_99a81c0e-44bc',
-      event: 'charge.success',
-      reference: 'CHR-SEA-8821',
-      amount: 'GH₵3,250.00',
-      status: 'PROCESSED',
-      timestamp: '2026-09-30 20:25:12',
-      replayBlocked: true
-    },
-    {
-      id: 'wh-002',
-      provider: 'Hubtel Ghana',
-      idempotencyKey: 'idemp_live_b722d3e1-11fd',
-      event: 'payment.received',
-      reference: 'CHR-AIR-9402',
-      amount: 'GH₵1,850.00',
-      status: 'PROCESSED',
-      timestamp: '2026-09-30 20:35:40',
-      replayBlocked: true
-    },
-    {
-      id: 'wh-003',
-      provider: 'Flutterwave MoMo',
-      idempotencyKey: 'idemp_live_99a81c0e-44bc',
-      event: 'charge.success (REPLAY)',
-      reference: 'CHR-SEA-8821',
-      amount: 'GH₵3,250.00',
-      status: 'REPLAY_REJECTED (409 Conflict)',
-      timestamp: '2026-09-30 20:36:01',
-      replayBlocked: true
-    }
-  ]);
-
-  const advanceBatchStatus = async (batchId) => {
-    const stageOrder = ['CONFIRMED', 'QC_BATCHING', 'HIGH_SEAS', 'CUSTOMS_CLEARANCE', 'ACCRA_HUB', 'DELIVERY_READY'];
-    const target = batches.find((b) => b.id === batchId);
-    if (!target) return;
-    const curIdx = stageOrder.indexOf(target.status);
-    const nextIdx = (curIdx + 1) % stageOrder.length;
-    const nextStatus = stageOrder[nextIdx];
-
-    try {
-      await updateBatch(batchId, { status: nextStatus });
-      setBatches((prev) =>
-        prev.map((b) => (b.id === batchId ? { ...b, status: nextStatus } : b))
-      );
-      showToast(`Batch ${target.batchNumber} transitioned to: ${nextStatus}`, 'success');
-      if (refreshBatches) refreshBatches();
-    } catch (err) {
-      showToast(err.message || 'Failed to update batch status', 'error');
-    }
-  };
-
-  const handleDeleteBatch = async (batchId, batchNumber) => {
-    if (!window.confirm(`Are you sure you want to delete container batch ${batchNumber}?`)) return;
-    try {
-      await deleteBatch(batchId);
-      setBatches((prev) => prev.filter((b) => b.id !== batchId));
-      showToast(`Batch ${batchNumber} deleted from database`, 'info');
-      if (refreshBatches) refreshBatches();
-    } catch (err) {
-      showToast(err.message || 'Failed to delete batch', 'error');
-    }
-  };
-
-  // Add batch modal state
-  const [addBatchModalOpen, setAddBatchModalOpen] = useState(false);
-  const [submittingBatch, setSubmittingBatch] = useState(false);
-  const [newBatch, setNewBatch] = useState({
-    batchNumber: '',
-    type: 'SEA_FCL',
-    containerType: '40ft High Cube Container',
-    carrier: '',
-    originPort: 'Guangzhou Port, China',
-    destinationPort: 'Port of Tema (MPS Terminal 3)',
-    capacityCbm: 68,
-    allocatedCbm: 0,
-    capacityKg: 2500,
-    allocatedKg: 0,
-    totalOrders: 0,
-    status: 'CONFIRMED',
-    cutoffDate: '',
-    eta: '',
-    lockedFxRate: '15.65'
-  });
-
-  const handleCreateBatchSubmit = async (e) => {
-    e.preventDefault();
-    if (!newBatch.batchNumber || !newBatch.carrier) {
-      showToast('Please provide a batch number and carrier name', 'error');
-      return;
-    }
-
-    setSubmittingBatch(true);
-    try {
-      const created = await createBatch({
-        ...newBatch,
-        capacityCbm: newBatch.type === 'SEA_FCL' ? parseFloat(newBatch.capacityCbm || 68) : null,
-        allocatedCbm: newBatch.type === 'SEA_FCL' ? parseFloat(newBatch.allocatedCbm || 0) : 0,
-        capacityKg: newBatch.type === 'AIR_CARGO' ? parseFloat(newBatch.capacityKg || 2500) : null,
-        allocatedKg: newBatch.type === 'AIR_CARGO' ? parseFloat(newBatch.allocatedKg || 0) : 0,
-        totalOrders: parseInt(newBatch.totalOrders || 0, 10),
-      });
-
-      setBatches((prev) => [created, ...prev]);
-      setAddBatchModalOpen(false);
-      setNewBatch({
-        batchNumber: '',
-        type: 'SEA_FCL',
-        containerType: '40ft High Cube Container',
-        carrier: '',
-        originPort: 'Guangzhou Port, China',
-        destinationPort: 'Port of Tema (MPS Terminal 3)',
-        capacityCbm: 68,
-        allocatedCbm: 0,
-        capacityKg: 2500,
-        allocatedKg: 0,
-        totalOrders: 0,
-        status: 'CONFIRMED',
-        cutoffDate: '',
-        eta: '',
-        lockedFxRate: '15.65'
-      });
-      showToast(`Batch ${created.batchNumber} created in PostgreSQL!`, 'success');
-      if (refreshBatches) refreshBatches();
-    } catch (err) {
-      showToast(err.message || 'Failed to create batch', 'error');
-    } finally {
-      setSubmittingBatch(false);
-    }
-  };
-
-  // Add discount modal state
-  const [addDiscountModalOpen, setAddDiscountModalOpen] = useState(false);
-  const [newDiscount, setNewDiscount] = useState({
-    code: '',
-    description: '',
-    type: 'PERCENTAGE',
-    value: '',
-    minOrderAmount: '',
-    maxDiscount: '',
-    usageLimit: '',
-    expiresAt: '',
-    isActive: true
-  });
-  const [submittingDiscount, setSubmittingDiscount] = useState(false);
-
-  // Orders filter & search
-  const [orderFilter, setOrderFilter] = useState('all');
-  const [orderSearch, setOrderSearch] = useState('');
-
-  // Add product modal state
-  const [addProductModalOpen, setAddProductModalOpen] = useState(false);
-  const [newProduct, setNewProduct] = useState({
-    name: '',
-    category: 'Kitchen Appliances',
-    price: '',
-    originalPrice: '',
-    inStock: true,
-    image: '',
-    description: ''
-  });
-  const [submittingProduct, setSubmittingProduct] = useState(false);
-  const [uploadingImage, setUploadingImage] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
-  const [showUrlFallback, setShowUrlFallback] = useState(false);
-
-  // Edit product modal state
-  const [editProductModalOpen, setEditProductModalOpen] = useState(false);
-  const [editingProduct, setEditingProduct] = useState(null);
-  const [updatingProduct, setUpdatingProduct] = useState(false);
-  const [editUploadingImage, setEditUploadingImage] = useState(false);
-  const [editDragOver, setEditDragOver] = useState(false);
-  const [editShowUrlFallback, setEditShowUrlFallback] = useState(false);
-
-  const handleImageFileUpload = async (file) => {
-    if (!file) return;
-
-    if (!file.type.startsWith('image/')) {
-      showToast('Please select a valid image file (JPG, PNG, WEBP, etc.)', 'error');
-      return;
-    }
-
-    if (file.size > 15 * 1024 * 1024) {
-      showToast('Image file size must be under 15MB', 'error');
-      return;
-    }
-
-    setUploadingImage(true);
-    try {
-      const url = await uploadImage(file);
-      setNewProduct((prev) => ({ ...prev, image: url }));
-      showToast('Image uploaded successfully!', 'success');
-    } catch (err) {
-      showToast(err.message || 'Failed to upload image', 'error');
-    } finally {
-      setUploadingImage(false);
-    }
-  };
-
-  const loadAdminData = async () => {
+  const load = async () => {
     setLoading(true);
+    setLoadError('');
     try {
-      const [ordData, inqData, usrData, prodRes, discData, batchData] = await Promise.all([
-        getAllOrders().catch(() => []),
-        getAllInquiries().catch(() => []),
-        getAllUsers().catch(() => []),
-        fetch('/api/products').then((r) => r.json()).then((d) => d.data || []).catch(() => []),
-        getAllDiscounts().catch(() => []),
-        getAllBatches().catch(() => [])
+      const [o, p, c, d, b, m, u] = await Promise.all([
+        admin.listOrders(), admin.listProducts(), admin.listCategories(), admin.listDiscounts(),
+        admin.listBatches(), admin.listMessages(), admin.listCustomers(),
       ]);
-
-      setOrders(ordData);
-      setInquiries(inqData);
-      setUsersList(usrData);
-      setProductsList(prodRes);
-      setDiscountsList(discData);
-      if (batchData && batchData.length > 0) {
-        setBatches(batchData);
-      }
+      setOrders(o); setProducts(p); setCategories(c); setDiscounts(d); setBatches(b); setMessages(m); setCustomers(u);
     } catch (err) {
-      console.error('Error loading admin data:', err);
+      setLoadError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    if (user?.role === 'ADMIN') {
-      loadAdminData();
+  // Product/category changes also refresh the shop the admin sees.
+  const onCatalogChange = async () => {
+    try {
+      const [p, c] = await Promise.all([admin.listProducts(), admin.listCategories()]);
+      setProducts(p);
+      setCategories(c);
+    } catch (err) {
+      showToast(err.message, 'error');
     }
-  }, [user]);
+    if (refreshProducts) refreshProducts();
+  };
 
-  // If user is not logged in or not an admin
+  useEffect(() => {
+    if (user?.role === 'ADMIN') load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  const stats = useMemo(() => {
+    const live = orders.filter((o) => o.orderStatus !== 'CANCELLED');
+    return {
+      awaitingPayment: live.filter((o) => o.paymentStatus !== 'PAID' && o.paymentStatus !== 'REFUNDED').length,
+      toShip: live.filter((o) => o.paymentStatus === 'PAID' && ['PROCESSING', 'CONFIRMED'].includes(o.orderStatus)).length,
+      paidSales: live.filter((o) => o.paymentStatus === 'PAID').reduce((s, o) => s + (o.total || 0), 0),
+      newMessages: messages.filter((m) => (m.status || 'NEW') === 'NEW').length,
+    };
+  }, [orders, messages]);
+
   if (!user || user.role !== 'ADMIN') {
     return (
-      <div style={{ backgroundColor: 'var(--bg-main)', minHeight: '70vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 16px' }}>
-        <div
-          className="glass-panel"
-          style={{
-            maxWidth: '540px',
-            width: '100%',
-            textAlign: 'center',
-            padding: '40px 32px',
-            borderRadius: '24px',
-            border: '1px solid var(--border-light)',
-            boxShadow: 'var(--glass-shadow)'
-          }}
-        >
-          <div
-            style={{
-              width: '72px',
-              height: '72px',
-              borderRadius: '20px',
-              backgroundColor: 'rgba(239, 68, 68, 0.15)',
-              color: '#ef4444',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '0 auto 20px',
-              border: '1px solid rgba(239, 68, 68, 0.3)'
-            }}
-          >
-            <Shield size={36} />
-          </div>
-          <h2 style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--text-primary)', marginBottom: '8px' }}>
-            Store Admin Access Required
-          </h2>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', marginBottom: '28px', lineHeight: 1.6 }}>
-            This portal manages live container shipments, pre-order batch transitions, FX margin locking, and financial webhooks. Restricted to authorized administrators.
-          </p>
-          <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
-            <button
-              onClick={() => openAuth('login')}
-              className="btn btn-primary"
-              style={{ padding: '12px 24px', borderRadius: '12px', fontWeight: 800 }}
-            >
-              Sign In with Admin Account
-            </button>
-          </div>
+      <div className="section">
+        <div className="container adm-gate">
+          <h1>Admin sign-in</h1>
+          <p>This area is for the store team. Sign in with an admin account to continue.</p>
+          <button type="button" className="btn btn-primary" onClick={() => openAuth('login')}>Sign in</button>
         </div>
       </div>
     );
   }
 
-  // KPI Calculations
-  const totalRevenue = orders.reduce((sum, o) => sum + (o.total || 0), 0);
-  const processingCount = orders.filter((o) => o.orderStatus === 'PROCESSING').length;
-
-  // Filtered orders
-  const filteredOrders = orders.filter((o) => {
-    if (orderFilter !== 'all' && o.orderStatus !== orderFilter) return false;
-    if (orderSearch) {
-      const q = orderSearch.toLowerCase();
-      const code = (o.orderCode || '').toLowerCase();
-      const name = (o.customerName || '').toLowerCase();
-      const phone = (o.phone || '').toLowerCase();
-      const city = (o.city || '').toLowerCase();
-      return code.includes(q) || name.includes(q) || phone.includes(q) || city.includes(q);
-    }
-    return true;
-  });
-
-  // Handle Order Status Change
-  const handleStatusChange = async (orderId, newStatus) => {
-    try {
-      await updateOrderStatus(orderId, newStatus);
-      setOrders((prev) =>
-        prev.map((o) => (o.id === orderId ? { ...o, orderStatus: newStatus } : o))
-      );
-      showToast(`Order status updated to ${newStatus}`, 'success');
-    } catch (err) {
-      showToast(err.message || 'Failed to update order status', 'error');
-    }
-  };
-
-  // Marking an order PAID also pays the referrer's GH₵25 reward (handled on the server).
-  const handlePaymentChange = async (orderId, newPaymentStatus) => {
-    try {
-      await updateOrderStatus(orderId, undefined, newPaymentStatus);
-      setOrders((prev) =>
-        prev.map((o) => (o.id === orderId ? { ...o, paymentStatus: newPaymentStatus } : o))
-      );
-      showToast(newPaymentStatus === 'PAID' ? 'Payment confirmed' : `Payment set to ${newPaymentStatus.toLowerCase()}`, 'success');
-    } catch (err) {
-      showToast(err.message || 'Failed to update payment', 'error');
-    }
-  };
-
-  // Handle Add Product Submit
-  const handleAddProductSubmit = async (e) => {
-    e.preventDefault();
-    if (!newProduct.name || !newProduct.price) {
-      showToast('Please provide product name and price', 'error');
-      return;
-    }
-
-    if (uploadingImage) {
-      showToast('Please wait for the image upload to complete', 'info');
-      return;
-    }
-
-    setSubmittingProduct(true);
-    try {
-      const created = await createProduct({
-        ...newProduct,
-        price: parseFloat(newProduct.price),
-        originalPrice: newProduct.originalPrice ? parseFloat(newProduct.originalPrice) : null,
-        image: newProduct.image || 'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?w=800&auto=format&fit=crop&q=80',
-        gallery: [newProduct.image || 'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?w=800&auto=format&fit=crop&q=80']
-      });
-
-      setProductsList((prev) => [created, ...prev]);
-      setAddProductModalOpen(false);
-      setNewProduct({
-        name: '',
-        category: 'Kitchen Appliances',
-        price: '',
-        originalPrice: '',
-        inStock: true,
-        image: '',
-        description: ''
-      });
-      setShowUrlFallback(false);
-      showToast(`Product "${created.name}" added to the catalogue!`, 'success');
-      refreshProducts();
-    } catch (err) {
-      showToast(err.message || 'Failed to add product', 'error');
-    } finally {
-      setSubmittingProduct(false);
-    }
-  };
-
-  // Handle Delete Product
-  const handleDeleteProduct = async (prodId, prodName) => {
-    if (!window.confirm(`Are you sure you want to delete "${prodName}" from the store catalog?`)) {
-      return;
-    }
-
-    try {
-      await deleteProduct(prodId);
-      setProductsList((prev) => prev.filter((p) => p.id !== prodId));
-      showToast(`Product deleted successfully`, 'info');
-      refreshProducts();
-    } catch (err) {
-      showToast(err.message || 'Failed to delete product', 'error');
-    }
-  };
-
-  // Open Edit Product Modal
-  const handleOpenEditProduct = (prod) => {
-    setEditingProduct({
-      id: prod.id,
-      name: prod.name || '',
-      category: prod.category || 'Kitchen Appliances',
-      price: prod.price !== undefined ? prod.price.toString() : '',
-      originalPrice: prod.originalPrice !== null && prod.originalPrice !== undefined ? prod.originalPrice.toString() : '',
-      inStock: prod.inStock ?? true,
-      badge: prod.badge || '',
-      image: prod.image || (prod.images && prod.images[0]) || '',
-      description: prod.description || ''
-    });
-    setEditShowUrlFallback(false);
-    setEditProductModalOpen(true);
-  };
-
-  // Handle Edit Image File Upload
-  const handleEditImageFileUpload = async (file) => {
-    if (!file) return;
-
-    if (!file.type.startsWith('image/')) {
-      showToast('Please select a valid image file (JPG, PNG, WEBP, etc.)', 'error');
-      return;
-    }
-
-    if (file.size > 15 * 1024 * 1024) {
-      showToast('Image file size must be under 15MB', 'error');
-      return;
-    }
-
-    setEditUploadingImage(true);
-    try {
-      const url = await uploadImage(file);
-      setEditingProduct((prev) => ({ ...prev, image: url }));
-      showToast('Product image uploaded successfully!', 'success');
-    } catch (err) {
-      showToast(err.message || 'Failed to upload image', 'error');
-    } finally {
-      setEditUploadingImage(false);
-    }
-  };
-
-  // Handle Update Product Submit
-  const handleUpdateProductSubmit = async (e) => {
-    e.preventDefault();
-    if (!editingProduct.name || !editingProduct.price) {
-      showToast('Please provide product name and price', 'error');
-      return;
-    }
-
-    if (editUploadingImage) {
-      showToast('Please wait for the image upload to complete', 'info');
-      return;
-    }
-
-    setUpdatingProduct(true);
-    try {
-      const updated = await updateProduct(editingProduct.id, {
-        name: editingProduct.name.trim(),
-        category: editingProduct.category,
-        price: parseFloat(editingProduct.price),
-        originalPrice: editingProduct.originalPrice ? parseFloat(editingProduct.originalPrice) : null,
-        inStock: Boolean(editingProduct.inStock),
-        badge: editingProduct.badge ? editingProduct.badge.trim() : null,
-        image: editingProduct.image,
-        gallery: editingProduct.image ? [editingProduct.image] : [],
-        description: editingProduct.description || ''
-      });
-
-      setProductsList((prev) =>
-        prev.map((p) => (p.id === editingProduct.id ? { ...p, ...updated } : p))
-      );
-      setEditProductModalOpen(false);
-      setEditingProduct(null);
-      showToast(`Product "${updated.name}" updated successfully!`, 'success');
-      refreshProducts();
-    } catch (err) {
-      showToast(err.message || 'Failed to update product', 'error');
-    } finally {
-      setUpdatingProduct(false);
-    }
-  };
-
-  // Handle Add Discount Submit
-  const handleAddDiscountSubmit = async (e) => {
-    e.preventDefault();
-    if (!newDiscount.code || newDiscount.value === '') {
-      showToast('Please provide a discount code and value', 'error');
-      return;
-    }
-
-    setSubmittingDiscount(true);
-    try {
-      const created = await createDiscount({
-        ...newDiscount,
-        code: newDiscount.code.trim().toUpperCase(),
-        value: parseFloat(newDiscount.value),
-        minOrderAmount: newDiscount.minOrderAmount ? parseFloat(newDiscount.minOrderAmount) : 0,
-        maxDiscount: newDiscount.maxDiscount ? parseFloat(newDiscount.maxDiscount) : null,
-        usageLimit: newDiscount.usageLimit ? parseInt(newDiscount.usageLimit, 10) : null,
-        expiresAt: newDiscount.expiresAt ? newDiscount.expiresAt : null
-      });
-
-      setDiscountsList((prev) => [created, ...prev]);
-      setAddDiscountModalOpen(false);
-      setNewDiscount({
-        code: '',
-        description: '',
-        type: 'PERCENTAGE',
-        value: '',
-        minOrderAmount: '',
-        maxDiscount: '',
-        usageLimit: '',
-        expiresAt: '',
-        isActive: true
-      });
-      showToast(`Promo code "${created.code}" created successfully!`, 'success');
-    } catch (err) {
-      showToast(err.message || 'Failed to create promo code', 'error');
-    } finally {
-      setSubmittingDiscount(false);
-    }
-  };
-
-  // Handle Toggle Discount Status
-  const handleToggleDiscount = async (discount) => {
-    try {
-      const updated = await updateDiscount(discount.id, { isActive: !discount.isActive });
-      setDiscountsList((prev) =>
-        prev.map((d) => (d.id === discount.id ? updated : d))
-      );
-      showToast(`Code "${discount.code}" is now ${updated.isActive ? 'Active' : 'Inactive'}`, 'info');
-    } catch (err) {
-      showToast(err.message || 'Failed to update discount status', 'error');
-    }
-  };
-
-  // Handle Delete Discount
-  const handleDeleteDiscount = async (discountId, code) => {
-    if (!window.confirm(`Are you sure you want to permanently delete promo code "${code}"?`)) {
-      return;
-    }
-    try {
-      await deleteDiscount(discountId);
-      setDiscountsList((prev) => prev.filter((d) => d.id !== discountId));
-      showToast(`Promo code "${code}" deleted`, 'info');
-    } catch (err) {
-      showToast(err.message || 'Failed to delete promo code', 'error');
-    }
-  };
+  const counts = { orders: orders.length, products: products.length, categories: categories.length, promos: discounts.length, shipments: batches.length, messages: stats.newMessages, customers: customers.length };
 
   return (
-    <div style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)', minHeight: '100vh', padding: '40px 0 80px' }}>
-      <div className="container" style={{ maxWidth: '1240px' }}>
-        {/* Admin Header */}
-        <div
-          style={{
-            background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
-            borderRadius: '20px',
-            padding: '32px 36px',
-            color: '#ffffff',
-            marginBottom: '32px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: '20px',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            boxShadow: 'var(--glass-shadow)'
-          }}
-        >
+    <div className="section adm">
+      <div className="container">
+        <div className="adm-head">
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-              <span
-                style={{
-                  backgroundColor: '#3b82f6',
-                  color: '#ffffff',
-                  fontSize: '0.75rem',
-                  fontWeight: 800,
-                  padding: '4px 10px',
-                  borderRadius: '6px',
-                  letterSpacing: '0.5px'
-                }}
-              >
-                ADMIN DASHBOARD
-              </span>
-              <span style={{ fontSize: '0.82rem', color: '#10b981', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                ● All Systems Operational
-              </span>
-            </div>
-            <h1 style={{ fontSize: '2rem', fontWeight: 900, color: '#ffffff', margin: 0 }}>
-              Admin dashboard
-            </h1>
-            <p style={{ margin: '6px 0 0', color: 'var(--text-light)', fontSize: '0.92rem' }}>
-              Welcome back, {user.name} · Managing orders, inventory & customers across Ghana
-            </p>
+            <h1>Admin</h1>
+            <p className="adm-muted">Signed in as {user.name}</p>
           </div>
+          <div className="adm-inline">
+            <button type="button" className="btn btn-outline" onClick={load} disabled={loading}><RefreshCw size={15} /> {loading ? 'Loading…' : 'Refresh'}</button>
+            <button type="button" className="btn btn-outline" onClick={() => navigate('home')}>View shop</button>
+          </div>
+        </div>
 
-          <div style={{ display: 'flex', gap: '12px' }}>
-            <button
-              onClick={loadAdminData}
-              className="btn btn-outline"
-              style={{
-                backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                borderColor: 'rgba(255, 255, 255, 0.2)',
-                color: '#ffffff',
-                padding: '10px 18px',
-                borderRadius: '8px'
-              }}
-              title="Refresh data"
-            >
-              <RefreshCw size={16} /> Refresh
+        <div className="adm-stats">
+          <button type="button" onClick={() => setTab('orders')}><strong>{stats.awaitingPayment}</strong><span>Waiting for payment</span></button>
+          <button type="button" onClick={() => setTab('orders')}><strong>{stats.toShip}</strong><span>Paid, not yet shipped</span></button>
+          <div><strong>{money(stats.paidSales)}</strong><span>Paid sales (all time)</span></div>
+          <button type="button" onClick={() => setTab('messages')}><strong>{stats.newMessages}</strong><span>New messages</span></button>
+        </div>
+
+        <nav className="adm-tabs" aria-label="Admin sections">
+          {TABS.map(([id, text]) => (
+            <button key={id} type="button" className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>
+              {text}{counts[id] ? <span className="adm-count">{counts[id]}</span> : null}
             </button>
-            <button
-              onClick={() => navigate('home')}
-              className="btn btn-primary"
-              style={{
-                background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-                padding: '10px 20px',
-                borderRadius: '8px'
-              }}
-            >
-              View Storefront <ExternalLink size={16} />
-            </button>
-          </div>
-        </div>
+          ))}
+        </nav>
 
-        {/* KPI Metrics Cards */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-            gap: '20px',
-            marginBottom: '32px'
-          }}
-        >
-          {/* Revenue */}
-          <div
-            className="glass-panel"
-            style={{
-              borderRadius: '16px',
-              padding: '24px',
-              border: '1px solid var(--border-light)'
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
-                Total Store Revenue
-              </span>
-              <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'rgba(16, 185, 129, 0.15)', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <TrendingUp size={20} />
-              </div>
-            </div>
-            <div style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--text-primary)' }}>
-              GH₵{totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </div>
-            <div style={{ fontSize: '0.8rem', color: '#10b981', marginTop: '4px', fontWeight: 600 }}>
-              Across {orders.length} total orders
-            </div>
-          </div>
-
-          {/* Orders */}
-          <div
-            className="glass-panel"
-            style={{
-              borderRadius: '16px',
-              padding: '24px',
-              border: '1px solid var(--border-light)'
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
-                Customer Orders
-              </span>
-              <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Package size={20} />
-              </div>
-            </div>
-            <div style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--text-primary)' }}>
-              {orders.length}
-            </div>
-            <div style={{ fontSize: '0.8rem', color: processingCount > 0 ? '#2563eb' : 'var(--text-muted)', marginTop: '4px', fontWeight: 600 }}>
-              {processingCount > 0 ? `${processingCount} orders need processing` : 'All caught up!'}
-            </div>
-          </div>
-
-          {/* Products */}
-          <div
-            className="glass-panel"
-            style={{
-              borderRadius: '16px',
-              padding: '24px',
-              border: '1px solid var(--border-light)'
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
-                Catalog Products
-              </span>
-              <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'rgba(37, 99, 235, 0.15)', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <ShoppingBag size={20} />
-              </div>
-            </div>
-            <div style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--text-primary)' }}>
-              {productsList.length}
-            </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-              In {categories.length} active categories
-            </div>
-          </div>
-
-          {/* Users */}
-          <div
-            className="glass-panel"
-            style={{
-              borderRadius: '16px',
-              padding: '24px',
-              border: '1px solid var(--border-light)'
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
-                Registered Users
-              </span>
-              <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'rgba(124, 58, 237, 0.15)', color: '#8b5cf6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Users size={20} />
-              </div>
-            </div>
-            <div style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--text-primary)' }}>
-              {usersList.length}
-            </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-              {inquiries.length} contact messages
-            </div>
-          </div>
-        </div>
-
-        {/* Tab Navigation */}
-        <div
-          style={{
-            display: 'flex',
-            gap: '8px',
-            borderBottom: '2px solid #e2e8f0',
-            marginBottom: '24px'
-          }}
-        >
-          <button
-            onClick={() => setActiveTab('orders')}
-            style={{
-              padding: '12px 24px',
-              fontWeight: 800,
-              fontSize: '0.95rem',
-              border: 'none',
-              background: 'transparent',
-              cursor: 'pointer',
-              color: activeTab === 'orders' ? 'var(--accent)' : '#64748b',
-              borderBottom: activeTab === 'orders' ? '3px solid var(--accent)' : '3px solid transparent',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}
-          >
-            <Package size={17} /> Orders Management ({orders.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('products')}
-            style={{
-              padding: '12px 24px',
-              fontWeight: 800,
-              fontSize: '0.95rem',
-              border: 'none',
-              background: 'transparent',
-              cursor: 'pointer',
-              color: activeTab === 'products' ? 'var(--accent)' : '#64748b',
-              borderBottom: activeTab === 'products' ? '3px solid var(--accent)' : '3px solid transparent',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}
-          >
-            <ShoppingBag size={17} /> Products Catalog ({productsList.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('discounts')}
-            style={{
-              padding: '12px 24px',
-              fontWeight: 800,
-              fontSize: '0.95rem',
-              border: 'none',
-              background: 'transparent',
-              cursor: 'pointer',
-              color: activeTab === 'discounts' ? 'var(--accent)' : '#64748b',
-              borderBottom: activeTab === 'discounts' ? '3px solid var(--accent)' : '3px solid transparent',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}
-          >
-            <Tag size={17} /> Discounts & Coupons ({discountsList.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('inquiries')}
-            style={{
-              padding: '12px 24px',
-              fontWeight: 800,
-              fontSize: '0.95rem',
-              border: 'none',
-              background: 'transparent',
-              cursor: 'pointer',
-              color: activeTab === 'inquiries' ? 'var(--accent)' : '#64748b',
-              borderBottom: activeTab === 'inquiries' ? '3px solid var(--accent)' : '3px solid transparent',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}
-          >
-            <Mail size={17} /> Customer Inquiries ({inquiries.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('users')}
-            style={{
-              padding: '12px 24px',
-              fontWeight: 800,
-              fontSize: '0.95rem',
-              border: 'none',
-              background: 'transparent',
-              cursor: 'pointer',
-              color: activeTab === 'users' ? 'var(--accent)' : 'var(--text-secondary)',
-              borderBottom: activeTab === 'users' ? '3px solid var(--accent)' : '3px solid transparent',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}
-          >
-            <Users size={17} /> Registered Users ({usersList.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('logistics')}
-            style={{
-              padding: '12px 24px',
-              fontWeight: 800,
-              fontSize: '0.95rem',
-              border: 'none',
-              background: 'transparent',
-              cursor: 'pointer',
-              color: activeTab === 'logistics' ? 'var(--accent)' : 'var(--text-secondary)',
-              borderBottom: activeTab === 'logistics' ? '3px solid var(--accent)' : '3px solid transparent',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}
-          >
-            <Anchor size={17} /> Container Batches & FX ({batches.length})
-          </button>
-        </div>
-
-        {/* TAB 1: ORDERS MANAGEMENT */}
-        {activeTab === 'orders' && (
-          <div>
-            {/* Filter & Search Toolbar */}
-            <div
-              style={{
-                backgroundColor: 'var(--bg-card)',
-                borderRadius: '16px',
-                padding: '20px',
-                border: '1px solid var(--border-light)',
-                marginBottom: '20px',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: '16px'
-              }}
-            >
-              {/* Search */}
-              <div style={{ position: 'relative', minWidth: '280px' }}>
-                <Search size={18} color="#94a3b8" style={{ position: 'absolute', left: '12px', top: '12px' }} />
-                <input
-                  type="text"
-                  placeholder="Search order #, customer, phone, city..."
-                  value={orderSearch}
-                  onChange={(e) => setOrderSearch(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 14px 10px 38px',
-                    borderRadius: '8px',
-                    border: '1.5px solid var(--border-medium)',
-                    fontSize: '0.88rem'
-                  }}
-                />
-              </div>
-
-              {/* Status Filter Buttons */}
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                {[
-                  { id: 'all', label: 'All Orders' },
-                  { id: 'PROCESSING', label: 'Processing' },
-                  { id: 'CONFIRMED', label: 'Confirmed' },
-                  { id: 'SHIPPED', label: 'Shipped' },
-                  { id: 'DELIVERED', label: 'Delivered' }
-                ].map((st) => (
-                  <button
-                    key={st.id}
-                    onClick={() => setOrderFilter(st.id)}
-                    style={{
-                      padding: '8px 14px',
-                      borderRadius: '8px',
-                      fontSize: '0.82rem',
-                      fontWeight: 700,
-                      border: 'none',
-                      cursor: 'pointer',
-                      backgroundColor: orderFilter === st.id ? '#0f172a' : '#f1f5f9',
-                      color: orderFilter === st.id ? '#ffffff' : '#475569'
-                    }}
-                  >
-                    {st.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Orders List / Table */}
-            {loading ? (
-              <p style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>Loading orders...</p>
-            ) : filteredOrders.length === 0 ? (
-              <div style={{ backgroundColor: 'var(--bg-card)', borderRadius: '16px', padding: '40px', textAlign: 'center', border: '1px solid var(--border-light)' }}>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>No orders found matching your search.</p>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {filteredOrders.map((ord) => (
-                  <div
-                    key={ord.id || ord.orderCode}
-                    style={{
-                      backgroundColor: 'var(--bg-card)',
-                      borderRadius: '16px',
-                      padding: '24px',
-                      border: '1px solid var(--border-light)',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.02)'
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        flexWrap: 'wrap',
-                        gap: '14px',
-                        borderBottom: '1px solid #f1f5f9',
-                        paddingBottom: '16px',
-                        marginBottom: '16px'
-                      }}
-                    >
-                      <div>
-                        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                          ORDER ID
-                        </span>
-                        <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)' }}>
-                          #{ord.orderCode}
-                        </div>
-                        <span style={{ fontSize: '0.78rem', color: 'var(--text-light)' }}>
-                          {new Date(ord.createdAt).toLocaleDateString('en-GB')} at {new Date(ord.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-
-                      {/* Customer Info */}
-                      <div>
-                        <div style={{ fontWeight: 800, color: 'var(--text-primary)', fontSize: '0.95rem' }}>
-                          {ord.customerName}
-                        </div>
-                        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <Phone size={14} /> {ord.phone}
-                        </div>
-                        <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <MapPin size={14} /> {ord.city} ({ord.address})
-                        </div>
-                      </div>
-
-                      {/* Total */}
-                      <div>
-                        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                          TOTAL
-                        </span>
-                        <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#2563eb' }}>
-                          GH₵{ord.total?.toFixed(2)}
-                        </div>
-                        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                          {ord.paymentMethod}
-                        </span>
-                      </div>
-
-                      {/* Status Selector & WhatsApp */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '4px' }}>
-                            UPDATE STATUS
-                          </label>
-                          <select
-                            value={ord.orderStatus}
-                            onChange={(e) => handleStatusChange(ord.id, e.target.value)}
-                            style={{
-                              padding: '8px 12px',
-                              borderRadius: '8px',
-                              fontWeight: 700,
-                              fontSize: '0.85rem',
-                              border: '1.5px solid #cbd5e1',
-                              backgroundColor:
-                                ord.orderStatus === 'DELIVERED'
-                                  ? '#dcfce7'
-                                  : ord.orderStatus === 'SHIPPED'
-                                  ? '#e0f2fe'
-                                  : 'rgba(37, 99, 235, 0.12)',
-                              color:
-                                ord.orderStatus === 'DELIVERED'
-                                  ? '#166534'
-                                  : ord.orderStatus === 'SHIPPED'
-                                  ? '#0369a1'
-                                  : '#1d4ed8'
-                            }}
-                          >
-                            <option value="PROCESSING">Processing</option>
-                            <option value="CONFIRMED">Confirmed</option>
-                            <option value="SHIPPED">Shipped</option>
-                            <option value="DELIVERED">Delivered</option>
-                            <option value="CANCELLED">Cancelled</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '4px' }}>
-                            PAYMENT
-                          </label>
-                          <select
-                            value={ord.paymentStatus || 'PENDING'}
-                            onChange={(e) => handlePaymentChange(ord.id, e.target.value)}
-                            style={{
-                              padding: '8px 12px',
-                              borderRadius: '8px',
-                              fontWeight: 700,
-                              fontSize: '0.85rem',
-                              border: '1.5px solid #cbd5e1',
-                              backgroundColor: ord.paymentStatus === 'PAID' ? '#dcfce7' : '#fff7ed',
-                              color: ord.paymentStatus === 'PAID' ? '#166534' : '#9a3412'
-                            }}
-                          >
-                            <option value="PENDING">Not paid</option>
-                            <option value="VERIFYING">Checking payment</option>
-                            <option value="PAID">Paid</option>
-                            <option value="REFUNDED">Refunded</option>
-                          </select>
-                        </div>
-
-                        {/* WhatsApp Customer */}
-                        <a
-                          href={`https://wa.me/${(ord.phone || '').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                            `Hello ${ord.customerName},\n\nThis is CHARI regarding your order #${ord.orderCode} (GH₵${ord.total}). Status: ${ord.orderStatus}.\n\nPlease let us know if you have any questions!`
-                          )}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            backgroundColor: '#ecfdf5',
-                            color: '#16a34a',
-                            border: '1px solid #bbf7d0',
-                            borderRadius: '8px',
-                            padding: '10px',
-                            cursor: 'pointer',
-                            marginTop: '16px'
-                          }}
-                          title="Message customer on WhatsApp"
-                        >
-                          <MessageCircle size={18} />
-                        </a>
-                      </div>
-                    </div>
-
-                    {/* Order Items Preview */}
-                    <div style={{ fontSize: '0.88rem', color: 'var(--text-muted)' }}>
-                      <span style={{ fontWeight: 700 }}>Items Ordered: </span>
-                      {ord.items && Array.isArray(ord.items) ? (
-                        ord.items.map((it, idx) => (
-                          <span key={idx} style={{ marginRight: '10px' }}>
-                            • {it.quantity}x {it.name || it.product?.name} (GH₵{it.price || it.unitPrice})
-                          </span>
-                        ))
-                      ) : (
-                        <span>Details recorded in database</span>
-                      )}
-                      {ord.notes && (
-                        <div style={{ marginTop: '6px', fontSize: '0.82rem', color: '#2563eb', fontWeight: 600 }}>
-                          Customer Note: "{ord.notes}"
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* TAB 2: PRODUCTS CATALOG */}
-        {activeTab === 'products' && (
-          <div>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: '20px',
-                flexWrap: 'wrap',
-                gap: '16px'
-              }}
-            >
-              <div>
-                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
-                  Store Products ({productsList.length})
-                </h3>
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
-                  Add, edit prices, or manage your product catalogue.
-                </p>
-              </div>
-
-              <button
-                onClick={() => setAddProductModalOpen(true)}
-                className="btn btn-primary"
-                style={{
-                  background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-                  padding: '10px 20px',
-                  borderRadius: '10px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  fontWeight: 700
-                }}
-              >
-                <Plus size={18} /> Add New Product
-              </button>
-            </div>
-
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-                gap: '20px'
-              }}
-            >
-              {productsList.map((prod) => (
-                <div
-                  key={prod.id}
-                  style={{
-                    backgroundColor: 'var(--bg-card)',
-                    borderRadius: '16px',
-                    border: '1px solid var(--border-light)',
-                    overflow: 'hidden',
-                    display: 'flex',
-                    flexDirection: 'column'
-                  }}
-                >
-                  <div style={{ height: '180px', position: 'relative', overflow: 'hidden' }}>
-                    <img
-                      src={prod.image || (prod.images && prod.images[0])}
-                      alt={prod.name}
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    />
-                    <div style={{ position: 'absolute', top: '10px', right: '10px', display: 'flex', gap: '6px' }}>
-                      <button
-                        onClick={() => handleOpenEditProduct(prod)}
-                        style={{
-                          backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                          color: '#0f172a',
-                          border: 'none',
-                          borderRadius: '50%',
-                          width: '32px',
-                          height: '32px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          cursor: 'pointer',
-                          boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
-                          transition: 'transform 0.15s ease'
-                        }}
-                        title="Edit product"
-                      >
-                        <Edit2 size={15} />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteProduct(prod.id, prod.name)}
-                        style={{
-                          backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                          color: '#ef4444',
-                          border: 'none',
-                          borderRadius: '50%',
-                          width: '32px',
-                          height: '32px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          cursor: 'pointer',
-                          boxShadow: '0 2px 6px rgba(0,0,0,0.15)'
-                        }}
-                        title="Delete product"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div style={{ padding: '16px', flex: 1, display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', gap: '6px', flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: '0.75rem', color: '#2563eb', fontWeight: 700, textTransform: 'uppercase' }}>
-                        {prod.category}
-                      </span>
-                      <div style={{ display: 'flex', gap: '4px' }}>
-                        {prod.inStock === false ? (
-                          <span style={{ fontSize: '0.68rem', color: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.12)', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                            Out of Stock
-                          </span>
-                        ) : (
-                          <span style={{ fontSize: '0.68rem', color: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.12)', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                            In Stock
-                          </span>
-                        )}
-                        {prod.badge && (
-                          <span style={{ fontSize: '0.68rem', color: '#8b5cf6', backgroundColor: 'rgba(139, 92, 246, 0.12)', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                            {prod.badge}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <h4 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-primary)', margin: '4px 0 8px' }}>
-                      {prod.name}
-                    </h4>
-
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: 'auto', marginBottom: '12px' }}>
-                      <span style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)' }}>
-                        GH₵{prod.price?.toFixed(2)}
-                      </span>
-                      {prod.originalPrice && (
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-light)', textDecoration: 'line-through' }}>
-                          GH₵{prod.originalPrice?.toFixed(2)}
-                        </span>
-                      )}
-                    </div>
-
-                    <button
-                      onClick={() => handleOpenEditProduct(prod)}
-                      style={{
-                        width: '100%',
-                        padding: '8px 12px',
-                        borderRadius: '8px',
-                        border: '1px solid var(--border-medium)',
-                        backgroundColor: 'var(--bg-subtle)',
-                        color: 'var(--text-primary)',
-                        fontSize: '0.82rem',
-                        fontWeight: 700,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '6px',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <Edit2 size={13} /> Edit Details & Pricing
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* TAB 3: INQUIRIES */}
-        {activeTab === 'inquiries' && (
-          <div>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '16px' }}>
-              Customer Messages & Sourcing Requests ({inquiries.length})
-            </h3>
-            {inquiries.length === 0 ? (
-              <div style={{ backgroundColor: 'var(--bg-card)', borderRadius: '16px', padding: '40px', textAlign: 'center', border: '1px solid var(--border-light)' }}>
-                <p style={{ color: 'var(--text-muted)' }}>No contact inquiries received yet.</p>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                {inquiries.map((inq) => (
-                  <div
-                    key={inq.id}
-                    style={{
-                      backgroundColor: 'var(--bg-card)',
-                      borderRadius: '16px',
-                      padding: '24px',
-                      border: '1px solid var(--border-light)'
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                      <div>
-                        <span style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--text-primary)' }}>{inq.name}</span>
-                        <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginLeft: '12px' }}>
-                          {inq.email} {inq.phone ? `· ${inq.phone}` : ''}
-                        </span>
-                      </div>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--text-light)' }}>
-                        {new Date(inq.createdAt).toLocaleDateString('en-GB')}
-                      </span>
-                    </div>
-                    <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#2563eb', marginBottom: '6px' }}>
-                      Subject: {inq.subject}
-                    </div>
-                    <p style={{ fontSize: '0.92rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
-                      "{inq.message}"
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* TAB 4: REGISTERED USERS */}
-        {activeTab === 'users' && (
-          <div>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '16px' }}>
-              Registered Shoppers & Accounts ({usersList.length})
-            </h3>
-            <div style={{ backgroundColor: 'var(--bg-card)', borderRadius: '16px', border: '1px solid var(--border-light)', overflow: 'hidden' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1fr 1fr', padding: '16px 20px', backgroundColor: 'var(--bg-subtle)', fontWeight: 800, fontSize: '0.82rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                <div>Name & Role</div>
-                <div>Email & Phone</div>
-                <div>City</div>
-                <div>Joined</div>
-              </div>
-              {usersList.map((u) => (
-                <div
-                  key={u.id}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '2fr 2fr 1fr 1fr',
-                    padding: '16px 20px',
-                    borderTop: '1px solid #f1f5f9',
-                    alignItems: 'center',
-                    fontSize: '0.9rem'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{u.name}</span>
-                    {u.role === 'ADMIN' && (
-                      <span style={{ backgroundColor: '#eff6ff', color: '#2563eb', fontSize: '0.7rem', padding: '2px 6px', borderRadius: '4px', fontWeight: 800 }}>
-                        ADMIN
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ color: 'var(--text-muted)' }}>
-                    {u.email} {u.phone ? `· ${u.phone}` : ''}
-                  </div>
-                  <div style={{ color: 'var(--text-muted)' }}>{u.city || 'Ghana'}</div>
-                  <div style={{ color: 'var(--text-light)', fontSize: '0.82rem' }}>
-                    {new Date(u.createdAt).toLocaleDateString('en-GB')}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* TAB 5: DISCOUNTS & PROMO CODES */}
-        {activeTab === 'discounts' && (
-          <div>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: '20px',
-                flexWrap: 'wrap',
-                gap: '16px'
-              }}
-            >
-              <div>
-                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
-                  Store Discounts & Promo Codes ({discountsList.length})
-                </h3>
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
-                  Create and control customer coupon codes with percentage or fixed GH₵ savings.
-                </p>
-              </div>
-
-              <button
-                onClick={() => setAddDiscountModalOpen(true)}
-                className="btn btn-primary"
-                style={{
-                  background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-                  padding: '10px 20px',
-                  borderRadius: '10px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  fontWeight: 700
-                }}
-              >
-                <Plus size={18} /> Create Promo Code
-              </button>
-            </div>
-
-            {loading ? (
-              <p style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>Loading discount codes...</p>
-            ) : discountsList.length === 0 ? (
-              <div style={{ backgroundColor: 'var(--bg-card)', borderRadius: '16px', padding: '48px', textAlign: 'center', border: '1px solid var(--border-light)' }}>
-                <Tag size={40} style={{ color: '#cbd5e1', margin: '0 auto 12px' }} />
-                <h4 style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '6px' }}>No discount codes created yet</h4>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '16px' }}>Create your first discount code to offer savings to shoppers.</p>
-                <button
-                  onClick={() => setAddDiscountModalOpen(true)}
-                  className="btn btn-primary"
-                  style={{ background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' }}
-                >
-                  <Plus size={16} /> Create Promo Code
-                </button>
-              </div>
-            ) : (
-              <div style={{ backgroundColor: 'var(--bg-card)', borderRadius: '16px', border: '1px solid var(--border-light)', overflow: 'hidden' }}>
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '2fr 1.5fr 1.5fr 1.2fr 1.2fr 1fr',
-                    padding: '16px 20px',
-                    backgroundColor: 'var(--bg-subtle)',
-                    fontWeight: 800,
-                    fontSize: '0.82rem',
-                    color: 'var(--text-muted)',
-                    textTransform: 'uppercase',
-                    gap: '12px'
-                  }}
-                >
-                  <div>Code & Note</div>
-                  <div>Discount Value</div>
-                  <div>Requirements</div>
-                  <div>Redemptions</div>
-                  <div>Status</div>
-                  <div style={{ textAlign: 'right' }}>Actions</div>
-                </div>
-
-                {discountsList.map((d) => (
-                  <div
-                    key={d.id}
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: '2fr 1.5fr 1.5fr 1.2fr 1.2fr 1fr',
-                      padding: '18px 20px',
-                      borderTop: '1px solid #f1f5f9',
-                      alignItems: 'center',
-                      fontSize: '0.9rem',
-                      gap: '12px'
-                    }}
-                  >
-                    <div>
-                      <span
-                        style={{
-                          display: 'inline-block',
-                          fontFamily: 'monospace',
-                          fontWeight: 800,
-                          fontSize: '0.95rem',
-                          color: 'var(--text-primary)',
-                          backgroundColor: 'var(--bg-subtle)',
-                          padding: '4px 10px',
-                          borderRadius: '6px',
-                          border: '1px solid #cbd5e1'
-                        }}
-                      >
-                        {d.code}
-                      </span>
-                      {d.description && (
-                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                          {d.description}
-                        </div>
-                      )}
-                    </div>
-
-                    <div>
-                      <span style={{ fontWeight: 800, color: '#059669', fontSize: '1rem' }}>
-                        {d.type === 'PERCENTAGE' ? `${d.value}% OFF` : `GH₵${d.value.toFixed(2)} OFF`}
-                      </span>
-                      {d.maxDiscount && (
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>
-                          Max cap: GH₵{d.maxDiscount.toFixed(2)}
-                        </div>
-                      )}
-                    </div>
-
-                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                      {d.minOrderAmount > 0 ? `Min spend: GH₵${d.minOrderAmount.toFixed(2)}` : 'No minimum spend'}
-                      {d.expiresAt && (
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>
-                          Expires: {new Date(d.expiresAt).toLocaleDateString('en-GB')}
-                        </div>
-                      )}
-                    </div>
-
-                    <div>
-                      <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
-                        {d.usedCount}
-                      </span>
-                      <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-                        {d.usageLimit ? ` / ${d.usageLimit} limit` : ' uses'}
-                      </span>
-                    </div>
-
-                    <div>
-                      <button
-                        onClick={() => handleToggleDiscount(d)}
-                        style={{
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: '4px 12px',
-                          borderRadius: '20px',
-                          fontSize: '0.78rem',
-                          fontWeight: 800,
-                          backgroundColor: d.isActive ? '#ecfdf5' : '#f1f5f9',
-                          color: d.isActive ? '#059669' : '#64748b',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px'
-                        }}
-                        title={d.isActive ? 'Click to deactivate' : 'Click to activate'}
-                      >
-                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: d.isActive ? '#10b981' : '#94a3b8' }}></span>
-                        {d.isActive ? 'Active' : 'Inactive'}
-                      </button>
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                      <button
-                        onClick={() => handleDeleteDiscount(d.id, d.code)}
-                        style={{
-                          backgroundColor: '#fee2e2',
-                          color: '#ef4444',
-                          border: 'none',
-                          borderRadius: '8px',
-                          width: '32px',
-                          height: '32px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          cursor: 'pointer'
-                        }}
-                        title="Delete promo code"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* TAB 6: INTERNATIONAL CONTAINER BATCHES, LOGISTICS & FX */}
-        {activeTab === 'logistics' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-            {/* Header Toolbar */}
-            <div
-              className="glass-panel"
-              style={{
-                borderRadius: '16px',
-                padding: '20px 24px',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: '16px',
-                border: '1px solid var(--border-light)'
-              }}
-            >
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Anchor size={20} color="#2563eb" />
-                  <h3 style={{ fontSize: '1.3rem', fontWeight: 900, color: 'var(--text-primary)', margin: 0 }}>
-                    International Pre-Order Batches & Supply Chain Engine
-                  </h3>
-                </div>
-                <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-                  Guangzhou / Yiwu consolidation, vessel milestones, volumetric CBM rates & idempotent webhooks.
-                </p>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                <span className="badge-fx">
-                  <Lock size={12} /> Active Peg: $1 = GH₵{simulatedFxRates.usdGhs}
-                </span>
-                <span className="badge-sea">
-                  <Anchor size={12} /> FCL Ocean Line: MPS Tema
-                </span>
-                <button
-                  onClick={() => setAddBatchModalOpen(true)}
-                  className="btn btn-primary"
-                  style={{
-                    padding: '8px 16px',
-                    borderRadius: '10px',
-                    fontSize: '0.85rem',
-                    fontWeight: 700,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px'
-                  }}
-                >
-                  <Plus size={16} /> New Container Batch
-                </button>
-              </div>
-            </div>
-
-            {/* Live Container Batches Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(500px, 1fr))', gap: '20px' }}>
-              {batches.map((batch) => {
-                const isSea = batch.type === 'SEA_FCL';
-                const fillPercent = isSea
-                  ? Math.round(((batch.allocatedCbm || 0) / (batch.capacityCbm || 1)) * 100)
-                  : Math.round(((batch.allocatedKg || 0) / (batch.capacityKg || 1)) * 100);
-
-                return (
-                  <div
-                    key={batch.id}
-                    className="glass-panel"
-                    style={{
-                      borderRadius: '18px',
-                      padding: '24px',
-                      border: '1px solid var(--border-light)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '16px'
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span className={isSea ? 'badge-sea' : 'badge-air'}>
-                            {isSea ? <Anchor size={12} /> : <Plane size={12} />} {batch.type}
-                          </span>
-                          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                            Cutoff: {batch.cutoffDate || 'Open'}
-                          </span>
-                        </div>
-                        <h4 style={{ fontSize: '1.25rem', fontWeight: 900, color: 'var(--text-primary)', margin: '6px 0 2px' }}>
-                          {batch.batchNumber}
-                        </h4>
-                        <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                          {batch.containerType} • {batch.carrier}
-                        </div>
-                      </div>
-
-                      <div style={{ textAlign: 'right' }}>
-                        <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
-                          Current Milestone
-                        </span>
-                        <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#2563eb' }}>
-                          {(batch.status || 'CONFIRMED').replace(/_/g, ' ')}
-                        </div>
-                        <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 700 }}>
-                          ETA: {batch.eta || 'TBD'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Route Info */}
-                    <div
-                      style={{
-                        padding: '10px 14px',
-                        backgroundColor: 'var(--bg-main)',
-                        borderRadius: '10px',
-                        border: '1px solid var(--border-light)',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        fontSize: '0.82rem',
-                        color: 'var(--text-secondary)'
-                      }}
-                    >
-                      <div>
-                        <strong>Origin:</strong> {batch.originPort}
-                      </div>
-                      <div style={{ color: '#2563eb', fontWeight: 900 }}>➔</div>
-                      <div>
-                        <strong>Destination:</strong> {batch.destinationPort}
-                      </div>
-                    </div>
-
-                    {/* Capacity Progress Bar */}
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: '6px' }}>
-                        <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
-                          Container Capacity Utilization:
-                        </span>
-                        <span style={{ fontWeight: 800, color: 'var(--text-primary)' }}>
-                          {isSea
-                            ? `${batch.allocatedCbm || 0} / ${batch.capacityCbm || 68} CBM (${fillPercent}%)`
-                            : `${batch.allocatedKg || 0} / ${batch.capacityKg || 2500} KG (${fillPercent}%)`}
-                        </span>
-                      </div>
-                      <div style={{ height: '8px', backgroundColor: 'var(--bg-main)', borderRadius: '4px', overflow: 'hidden', border: '1px solid var(--border-light)' }}>
-                        <div
-                          style={{
-                            height: '100%',
-                            width: `${Math.min(100, fillPercent)}%`,
-                            background: fillPercent > 80 ? 'linear-gradient(90deg, #2563eb, #10b981)' : '#2563eb',
-                            borderRadius: '4px',
-                            transition: 'width 0.4s ease'
-                          }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Interactive Stage Transition Controls */}
-                    <div style={{ borderTop: '1px dashed var(--border-light)', paddingTop: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                      <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                        Orders Allocated: <strong style={{ color: 'var(--text-primary)' }}>{batch.totalOrders || 0} Pre-orders</strong>
-                      </span>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button
-                          onClick={() => handleDeleteBatch(batch.id, batch.batchNumber)}
-                          style={{
-                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                            color: '#ef4444',
-                            border: 'none',
-                            borderRadius: '8px',
-                            padding: '6px 10px',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                            fontSize: '0.78rem',
-                            fontWeight: 700
-                          }}
-                          title="Delete container batch"
-                        >
-                          <Trash2 size={13} /> Delete
-                        </button>
-                        <button
-                          onClick={() => advanceBatchStatus(batch.id)}
-                          className="btn btn-sm"
-                          style={{
-                            backgroundColor: '#0f172a',
-                            color: '#ffffff',
-                            fontWeight: 700,
-                            fontSize: '0.8rem',
-                            borderRadius: '8px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          <RefreshCw size={13} /> Advance Lifecycle Stage
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Volumetric Freight & Landed Margin Simulator */}
-            <div
-              className="glass-panel"
-              style={{
-                borderRadius: '18px',
-                padding: '24px',
-                border: '1px solid var(--border-light)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '16px'
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Boxes size={20} color="#2563eb" />
-                  <h4 style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)', margin: 0 }}>
-                    Volumetric Freight & Customs Duty Margin Engine
-                  </h4>
-                </div>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                  Interactive Landed Cost Simulator
-                </span>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                    Simulated Volume (CBM)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={simCbm}
-                    onChange={(e) => setSimCbm(parseFloat(e.target.value) || 0.1)}
-                    style={{
-                      width: '100%', padding: '8px 12px', borderRadius: '8px',
-                      backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)',
-                      border: '1px solid var(--border-light)', fontWeight: 800
-                    }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                    Gross Cargo Weight (KG)
-                  </label>
-                  <input
-                    type="number"
-                    step="1"
-                    value={simKg}
-                    onChange={(e) => setSimKg(parseFloat(e.target.value) || 1)}
-                    style={{
-                      width: '100%', padding: '8px 12px', borderRadius: '8px',
-                      backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)',
-                      border: '1px solid var(--border-light)', fontWeight: 800
-                    }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                    USD / GHS Peg Rate
-                  </label>
-                  <input
-                    type="text"
-                    value={simulatedFxRates.usdGhs}
-                    onChange={(e) => setSimulatedFxRates({ ...simulatedFxRates, usdGhs: e.target.value })}
-                    style={{
-                      width: '100%', padding: '8px 12px', borderRadius: '8px',
-                      backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)',
-                      border: '1px solid var(--border-light)', fontWeight: 800
-                    }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                    Ocean Freight / CBM ($)
-                  </label>
-                  <input
-                    type="text"
-                    value={simulatedFxRates.seaRatePerCbmUsd}
-                    onChange={(e) => setSimulatedFxRates({ ...simulatedFxRates, seaRatePerCbmUsd: e.target.value })}
-                    style={{
-                      width: '100%', padding: '8px 12px', borderRadius: '8px',
-                      backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)',
-                      border: '1px solid var(--border-light)', fontWeight: 800
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Calculation Results */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', marginTop: '6px' }}>
-                <div style={{ padding: '16px', borderRadius: '12px', backgroundColor: 'rgba(59, 130, 246, 0.08)', border: '1.5px solid rgba(59, 130, 246, 0.3)' }}>
-                  <div style={{ fontSize: '0.76rem', color: '#3b82f6', fontWeight: 700, textTransform: 'uppercase' }}>
-                    Sea Freight Landed (CBM Based)
-                  </div>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--text-primary)', margin: '4px 0' }}>
-                    GH₵{(simCbm * parseFloat(simulatedFxRates.seaRatePerCbmUsd || 280) * parseFloat(simulatedFxRates.usdGhs || 15.65)).toFixed(2)}
-                  </div>
-                  <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
-                    Est. Tema Port clearance: ~GH₵{(simCbm * 450).toFixed(2)}
-                  </div>
-                </div>
-
-                <div style={{ padding: '16px', borderRadius: '12px', backgroundColor: 'rgba(37, 99, 235, 0.08)', border: '1.5px solid rgba(37, 99, 235, 0.3)' }}>
-                  <div style={{ fontSize: '0.76rem', color: '#2563eb', fontWeight: 700, textTransform: 'uppercase' }}>
-                    Air Cargo Expedited (KG Based)
-                  </div>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--text-primary)', margin: '4px 0' }}>
-                    GH₵{(simKg * parseFloat(simulatedFxRates.airRatePerKgUsd || 12.5) * parseFloat(simulatedFxRates.usdGhs || 15.65)).toFixed(2)}
-                  </div>
-                  <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
-                    Est. KIA Airport handling: ~GH₵{(simKg * 35).toFixed(2)}
-                  </div>
-                </div>
-
-                <div style={{ padding: '16px', borderRadius: '12px', backgroundColor: 'rgba(16, 185, 129, 0.08)', border: '1.5px solid rgba(16, 185, 129, 0.3)' }}>
-                  <div style={{ fontSize: '0.76rem', color: '#10b981', fontWeight: 700, textTransform: 'uppercase' }}>
-                    FX Margin Shield
-                  </div>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 900, color: '#10b981', margin: '4px 0' }}>
-                    100% PROTECTED
-                  </div>
-                  <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
-                    Locked at checkout initialization
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Financial Idempotency Webhook Monitor */}
-            <div
-              className="glass-panel"
-              style={{
-                borderRadius: '18px',
-                padding: '24px',
-                border: '1px solid var(--border-light)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '16px'
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Activity size={20} color="#10b981" />
-                  <h4 style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)', margin: 0 }}>
-                    Mobile Money & Card Idempotency Webhook Inspector
-                  </h4>
-                </div>
-                <span className="badge-fx">
-                  <Shield size={12} /> Double-Credit Prevention: Active
-                </span>
-              </div>
-
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid var(--border-light)', textAlign: 'left', color: 'var(--text-muted)' }}>
-                      <th style={{ padding: '8px 12px' }}>Provider</th>
-                      <th style={{ padding: '8px 12px' }}>Idempotency Key</th>
-                      <th style={{ padding: '8px 12px' }}>Event</th>
-                      <th style={{ padding: '8px 12px' }}>Order Reference</th>
-                      <th style={{ padding: '8px 12px' }}>Amount</th>
-                      <th style={{ padding: '8px 12px' }}>Status</th>
-                      <th style={{ padding: '8px 12px' }}>Timestamp</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {webhookLogs.map((log) => (
-                      <tr key={log.id} style={{ borderBottom: '1px solid var(--border-light)' }}>
-                        <td style={{ padding: '10px 12px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                          {log.provider}
-                        </td>
-                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontSize: '0.78rem', color: '#6366f1' }}>
-                          {log.idempotencyKey}
-                        </td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
-                          {log.event}
-                        </td>
-                        <td style={{ padding: '10px 12px', fontWeight: 800, color: '#2563eb' }}>
-                          #{log.reference}
-                        </td>
-                        <td style={{ padding: '10px 12px', fontWeight: 800, color: 'var(--text-primary)' }}>
-                          {log.amount}
-                        </td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <span
-                            style={{
-                              padding: '2px 8px',
-                              borderRadius: '4px',
-                              fontSize: '0.72rem',
-                              fontWeight: 800,
-                              backgroundColor: log.status.includes('REJECTED') ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                              color: log.status.includes('REJECTED') ? '#ef4444' : '#10b981'
-                            }}
-                          >
-                            {log.status}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 12px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                          {log.timestamp}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+        {loadError ? (
+          <div className="form-error">{loadError} <button type="button" className="shop-link-btn" onClick={load}>Try again</button></div>
+        ) : loading ? (
+          <Empty>Loading…</Empty>
+        ) : (
+          <div className="adm-panel">
+            {tab === 'orders' && <OrdersTab orders={orders} setOrders={setOrders} />}
+            {tab === 'products' && <ProductsTab products={products} setProducts={setProducts} categories={categories} onCatalogChange={onCatalogChange} />}
+            {tab === 'categories' && <CategoriesTab categories={categories} products={products} onCatalogChange={onCatalogChange} />}
+            {tab === 'promos' && <PromoTab discounts={discounts} setDiscounts={setDiscounts} />}
+            {tab === 'shipments' && <ShipmentsTab batches={batches} setBatches={setBatches} />}
+            {tab === 'messages' && <MessagesTab messages={messages} setMessages={setMessages} />}
+            {tab === 'customers' && <CustomersTab customers={customers} />}
           </div>
         )}
       </div>
-
-      {/* CREATE PROMO CODE MODAL */}
-      {addDiscountModalOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.65)',
-            backdropFilter: 'blur(5px)',
-            zIndex: 9999,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '16px'
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setAddDiscountModalOpen(false);
-          }}
-        >
-          <div
-            style={{
-              backgroundColor: 'var(--bg-card)',
-              borderRadius: '20px',
-              width: '100%',
-              maxWidth: '520px',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-              overflow: 'hidden'
-            }}
-          >
-            <div style={{ padding: '22px 28px', backgroundColor: '#0f172a', color: '#ffffff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Tag size={20} style={{ color: '#2563eb' }} />
-                <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: '#ffffff' }}>Create New Promo Code</h3>
-              </div>
-              <button onClick={() => setAddDiscountModalOpen(false)} style={{ color: '#ffffff', cursor: 'pointer', background: 'none', border: 'none' }}>
-                <X size={20} />
-              </button>
-            </div>
-
-            <form onSubmit={handleAddDiscountSubmit} style={{ padding: '24px 28px', maxHeight: '80vh', overflowY: 'auto' }}>
-              <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Promo Code Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. FLASH20, EASTER10"
-                  value={newDiscount.code}
-                  onChange={(e) => setNewDiscount({ ...newDiscount, code: e.target.value.toUpperCase() })}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem', textTransform: 'uppercase', fontWeight: 700 }}
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Discount Type *
-                  </label>
-                  <select
-                    value={newDiscount.type}
-                    onChange={(e) => setNewDiscount({ ...newDiscount, type: e.target.value })}
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem', backgroundColor: 'var(--bg-card)' }}
-                  >
-                    <option value="PERCENTAGE">Percentage (% OFF)</option>
-                    <option value="FIXED">Fixed Amount (GH₵ OFF)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Value ({newDiscount.type === 'PERCENTAGE' ? '%' : 'GH₵'}) *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    required
-                    placeholder={newDiscount.type === 'PERCENTAGE' ? 'e.g. 15' : 'e.g. 25.00'}
-                    value={newDiscount.value}
-                    onChange={(e) => setNewDiscount({ ...newDiscount, value: e.target.value })}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Minimum Order Amount (GH₵)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="e.g. 50.00 (optional)"
-                    value={newDiscount.minOrderAmount}
-                    onChange={(e) => setNewDiscount({ ...newDiscount, minOrderAmount: e.target.value })}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Max Discount Cap (GH₵)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="e.g. 100.00 (optional)"
-                    value={newDiscount.maxDiscount}
-                    onChange={(e) => setNewDiscount({ ...newDiscount, maxDiscount: e.target.value })}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Total Usage Limit
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder="e.g. 100 uses (optional)"
-                    value={newDiscount.usageLimit}
-                    onChange={(e) => setNewDiscount({ ...newDiscount, usageLimit: e.target.value })}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Expiration Date
-                  </label>
-                  <input
-                    type="date"
-                    value={newDiscount.expiresAt}
-                    onChange={(e) => setNewDiscount({ ...newDiscount, expiresAt: e.target.value })}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem', backgroundColor: 'var(--bg-card)' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ marginBottom: '18px' }}>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Internal Description / Note
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Easter promotional campaign for Instagram followers"
-                  value={newDiscount.description}
-                  onChange={(e) => setNewDiscount({ ...newDiscount, description: e.target.value })}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                />
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '22px' }}>
-                <input
-                  type="checkbox"
-                  id="discountIsActive"
-                  checked={newDiscount.isActive}
-                  onChange={(e) => setNewDiscount({ ...newDiscount, isActive: e.target.checked })}
-                  style={{ width: '18px', height: '18px', accentColor: '#2563eb', cursor: 'pointer' }}
-                />
-                <label htmlFor="discountIsActive" style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)', cursor: 'pointer' }}>
-                  Activate promo code immediately
-                </label>
-              </div>
-
-              <button
-                type="submit"
-                disabled={submittingDiscount}
-                className="btn btn-primary"
-                style={{
-                  width: '100%',
-                  background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-                  padding: '12px',
-                  borderRadius: '10px',
-                  fontSize: '0.98rem',
-                  fontWeight: 700,
-                  cursor: submittingDiscount ? 'not-allowed' : 'pointer'
-                }}
-              >
-                {submittingDiscount ? 'Saving to Database...' : 'Save Promo Code'}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ADD PRODUCT MODAL */}
-      {addProductModalOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.65)',
-            backdropFilter: 'blur(5px)',
-            zIndex: 9999,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '16px'
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setAddProductModalOpen(false);
-          }}
-        >
-          <div
-            style={{
-              backgroundColor: 'var(--bg-card)',
-              borderRadius: '20px',
-              width: '100%',
-              maxWidth: '560px',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-              overflow: 'hidden'
-            }}
-          >
-            <div style={{ padding: '24px 28px', backgroundColor: '#0f172a', color: '#ffffff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0, fontSize: '1.3rem', fontWeight: 800, color: '#ffffff' }}>Add New Product</h3>
-              <button onClick={() => setAddProductModalOpen(false)} style={{ color: '#ffffff', cursor: 'pointer' }}>
-                <X size={20} />
-              </button>
-            </div>
-
-            <form onSubmit={handleAddProductSubmit} style={{ padding: '24px 28px', maxHeight: '75vh', overflowY: 'auto' }}>
-              <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Product Title *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Stainless Steel Air Fryer 6L"
-                  value={newProduct.name}
-                  onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Category *
-                  </label>
-                  <select
-                    value={newProduct.category}
-                    onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value })}
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem', backgroundColor: 'var(--bg-card)' }}
-                  >
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.name}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Selling Price (GH₵) *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    placeholder="e.g. 150.00"
-                    value={newProduct.price}
-                    onChange={(e) => setNewProduct({ ...newProduct, price: e.target.value })}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Original Price (Optional)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="e.g. 200.00"
-                    value={newProduct.originalPrice}
-                    onChange={(e) => setNewProduct({ ...newProduct, originalPrice: e.target.value })}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Stock Availability
-                  </label>
-                  <select
-                    value={newProduct.inStock ? 'true' : 'false'}
-                    onChange={(e) => setNewProduct({ ...newProduct, inStock: e.target.value === 'true' })}
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem', backgroundColor: 'var(--bg-card)' }}
-                  >
-                    <option value="true">In Stock</option>
-                    <option value="false">Out of Stock</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Product Image Upload */}
-              <div style={{ marginBottom: '18px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', margin: 0 }}>
-                    Product Image
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setShowUrlFallback(!showUrlFallback)}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: 'var(--text-muted)',
-                      fontSize: '0.75rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      textDecoration: 'underline',
-                      padding: 0
-                    }}
-                  >
-                    {showUrlFallback ? '← Switch to file upload' : 'Paste link instead'}
-                  </button>
-                </div>
-
-                {showUrlFallback ? (
-                  <div>
-                    <input
-                      type="url"
-                      placeholder="https://images.unsplash.com/..."
-                      value={newProduct.image}
-                      onChange={(e) => setNewProduct({ ...newProduct, image: e.target.value })}
-                      style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                    />
-                    <p style={{ fontSize: '0.75rem', color: 'var(--text-light)', margin: '4px 0 0' }}>
-                      Enter a direct image URL (e.g. Unsplash or Cloudinary)
-                    </p>
-                  </div>
-                ) : (
-                  <div>
-                    {newProduct.image ? (
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '14px',
-                          padding: '12px',
-                          backgroundColor: 'var(--bg-subtle)',
-                          border: '1.5px solid var(--border-medium)',
-                          borderRadius: '10px'
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: '64px',
-                            height: '64px',
-                            borderRadius: '8px',
-                            overflow: 'hidden',
-                            backgroundColor: '#e2e8f0',
-                            flexShrink: 0
-                          }}
-                        >
-                          <img
-                            src={newProduct.image}
-                            alt="Uploaded preview"
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                          />
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#16a34a', fontSize: '0.82rem', fontWeight: 700 }}>
-                            <Check size={16} /> Photo Uploaded
-                          </div>
-                          <div
-                            style={{
-                              fontSize: '0.75rem',
-                              color: 'var(--text-muted)',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                              marginTop: '2px'
-                            }}
-                          >
-                            {newProduct.image}
-                          </div>
-                          <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-                            <label
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '4px',
-                                fontSize: '0.75rem',
-                                fontWeight: 700,
-                                color: 'var(--text-primary)',
-                                cursor: 'pointer',
-                                backgroundColor: 'var(--bg-card)',
-                                border: '1px solid #cbd5e1',
-                                padding: '4px 10px',
-                                borderRadius: '6px'
-                              }}
-                            >
-                              <Upload size={12} /> Replace
-                              <input
-                                type="file"
-                                accept="image/*"
-                                style={{ display: 'none' }}
-                                onChange={(e) => {
-                                  if (e.target.files?.[0]) handleImageFileUpload(e.target.files[0]);
-                                }}
-                              />
-                            </label>
-                            <button
-                              type="button"
-                              onClick={() => setNewProduct({ ...newProduct, image: '' })}
-                              style={{
-                                background: 'none',
-                                border: 'none',
-                                color: '#ef4444',
-                                fontSize: '0.75rem',
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                                padding: '4px 8px'
-                              }}
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <label
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          setDragOver(true);
-                        }}
-                        onDragLeave={() => setDragOver(false)}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          setDragOver(false);
-                          if (e.dataTransfer.files?.[0]) {
-                            handleImageFileUpload(e.dataTransfer.files[0]);
-                          }
-                        }}
-                        style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          padding: '24px 16px',
-                          border: `2px dashed ${dragOver ? '#2563eb' : '#cbd5e1'}`,
-                          backgroundColor: dragOver ? 'rgba(37, 99, 235, 0.08)' : '#f8fafc',
-                          borderRadius: '12px',
-                          cursor: uploadingImage ? 'not-allowed' : 'pointer',
-                          transition: 'all 0.2s ease',
-                          textAlign: 'center'
-                        }}
-                      >
-                        <input
-                          type="file"
-                          accept="image/*"
-                          disabled={uploadingImage}
-                          style={{ display: 'none' }}
-                          onChange={(e) => {
-                            if (e.target.files?.[0]) {
-                              handleImageFileUpload(e.target.files[0]);
-                            }
-                          }}
-                        />
-
-                        {uploadingImage ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-                            <Loader2 size={30} className="animate-spin" style={{ color: '#2563eb' }} />
-                            <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                              Uploading image to server...
-                            </span>
-                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Please wait a moment</span>
-                          </div>
-                        ) : (
-                          <>
-                            <div
-                              style={{
-                                width: '44px',
-                                height: '44px',
-                                borderRadius: '10px',
-                                backgroundColor: 'rgba(37, 99, 235, 0.15)',
-                                color: '#2563eb',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                marginBottom: '10px'
-                              }}
-                            >
-                              <Upload size={22} />
-                            </div>
-                            <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '2px' }}>
-                              Click to choose image or drag & drop here
-                            </span>
-                            <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
-                              JPG, PNG, WEBP, or GIF (max 15MB)
-                            </span>
-                          </>
-                        )}
-                      </label>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div style={{ marginBottom: '24px' }}>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Product Description
-                </label>
-                <textarea
-                  rows={3}
-                  placeholder="Describe the product features, sizes, or specifications..."
-                  value={newProduct.description}
-                  onChange={(e) => setNewProduct({ ...newProduct, description: e.target.value })}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem', resize: 'vertical' }}
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={submittingProduct}
-                className="btn btn-primary"
-                style={{
-                  width: '100%',
-                  background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-                  padding: '12px',
-                  borderRadius: '10px',
-                  fontSize: '0.98rem',
-                  fontWeight: 700,
-                  cursor: submittingProduct ? 'not-allowed' : 'pointer'
-                }}
-              >
-                {submittingProduct ? 'Saving to Database...' : 'Save Product to Store'}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* EDIT PRODUCT MODAL */}
-      {editProductModalOpen && editingProduct && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.65)',
-            backdropFilter: 'blur(5px)',
-            zIndex: 9999,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '16px'
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setEditProductModalOpen(false);
-          }}
-        >
-          <div
-            style={{
-              backgroundColor: 'var(--bg-card)',
-              borderRadius: '20px',
-              width: '100%',
-              maxWidth: '580px',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-              overflow: 'hidden'
-            }}
-          >
-            <div style={{ padding: '22px 28px', backgroundColor: '#0f172a', color: '#ffffff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Edit2 size={20} color="#2563eb" />
-                <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: '#ffffff' }}>
-                  Edit Product Details
-                </h3>
-              </div>
-              <button onClick={() => setEditProductModalOpen(false)} style={{ color: '#ffffff', cursor: 'pointer', background: 'none', border: 'none' }}>
-                <X size={20} />
-              </button>
-            </div>
-
-            <form onSubmit={handleUpdateProductSubmit} style={{ padding: '24px 28px', maxHeight: '78vh', overflowY: 'auto' }}>
-              <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Product Title *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Stainless Steel Air Fryer 6L"
-                  value={editingProduct.name}
-                  onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Category *
-                  </label>
-                  <select
-                    value={editingProduct.category}
-                    onChange={(e) => setEditingProduct({ ...editingProduct, category: e.target.value })}
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem', backgroundColor: 'var(--bg-card)' }}
-                  >
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.name}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Selling Price (GH₵) *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    placeholder="e.g. 150.00"
-                    value={editingProduct.price}
-                    onChange={(e) => setEditingProduct({ ...editingProduct, price: e.target.value })}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Original Price (Optional Strike-through)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="e.g. 200.00"
-                    value={editingProduct.originalPrice}
-                    onChange={(e) => setEditingProduct({ ...editingProduct, originalPrice: e.target.value })}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Stock Availability
-                  </label>
-                  <select
-                    value={editingProduct.inStock ? 'true' : 'false'}
-                    onChange={(e) => setEditingProduct({ ...editingProduct, inStock: e.target.value === 'true' })}
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem', backgroundColor: 'var(--bg-card)' }}
-                  >
-                    <option value="true">In Stock (Available to Order)</option>
-                    <option value="false">Out of Stock</option>
-                  </select>
-                </div>
-              </div>
-
-              <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Product Badge / Ribbon (Optional)
-                </label>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
-                  {['', 'Featured', 'Trending', 'New', 'Best Seller', 'Pre-Order'].map((b) => (
-                    <button
-                      type="button"
-                      key={b}
-                      onClick={() => setEditingProduct({ ...editingProduct, badge: b })}
-                      style={{
-                        padding: '4px 10px',
-                        borderRadius: '6px',
-                        fontSize: '0.78rem',
-                        fontWeight: 600,
-                        border: '1px solid var(--border-medium)',
-                        backgroundColor: (editingProduct.badge || '') === b ? '#2563eb' : 'var(--bg-subtle)',
-                        color: (editingProduct.badge || '') === b ? '#ffffff' : 'var(--text-secondary)',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      {b || 'None'}
-                    </button>
-                  ))}
-                </div>
-                <input
-                  type="text"
-                  placeholder="Or enter custom badge text (e.g. 20% OFF)"
-                  value={editingProduct.badge}
-                  onChange={(e) => setEditingProduct({ ...editingProduct, badge: e.target.value })}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.85rem' }}
-                />
-              </div>
-
-              {/* Product Image Update */}
-              <div style={{ marginBottom: '18px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', margin: 0 }}>
-                    Product Image
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setEditShowUrlFallback(!editShowUrlFallback)}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: 'var(--text-muted)',
-                      fontSize: '0.75rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      textDecoration: 'underline',
-                      padding: 0
-                    }}
-                  >
-                    {editShowUrlFallback ? '← Switch to file upload' : 'Paste link instead'}
-                  </button>
-                </div>
-
-                {editShowUrlFallback ? (
-                  <div>
-                    <input
-                      type="url"
-                      placeholder="https://images.unsplash.com/..."
-                      value={editingProduct.image}
-                      onChange={(e) => setEditingProduct({ ...editingProduct, image: e.target.value })}
-                      style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                    />
-                    <p style={{ fontSize: '0.75rem', color: 'var(--text-light)', margin: '4px 0 0' }}>
-                      Enter a direct image URL (e.g. Unsplash or Cloudinary)
-                    </p>
-                  </div>
-                ) : (
-                  <div>
-                    {editingProduct.image ? (
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '14px',
-                          padding: '12px',
-                          backgroundColor: 'var(--bg-subtle)',
-                          border: '1.5px solid var(--border-medium)',
-                          borderRadius: '10px'
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: '64px',
-                            height: '64px',
-                            borderRadius: '8px',
-                            overflow: 'hidden',
-                            backgroundColor: '#e2e8f0',
-                            flexShrink: 0
-                          }}
-                        >
-                          <img
-                            src={editingProduct.image}
-                            alt="Current preview"
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                          />
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#16a34a', fontSize: '0.82rem', fontWeight: 700 }}>
-                            <Check size={16} /> Active Image Set
-                          </div>
-                          <div
-                            style={{
-                              fontSize: '0.75rem',
-                              color: 'var(--text-muted)',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                              marginTop: '2px'
-                            }}
-                          >
-                            {editingProduct.image}
-                          </div>
-                          <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-                            <label
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '4px',
-                                fontSize: '0.75rem',
-                                fontWeight: 700,
-                                color: 'var(--text-primary)',
-                                cursor: 'pointer',
-                                backgroundColor: 'var(--bg-card)',
-                                border: '1px solid #cbd5e1',
-                                padding: '4px 10px',
-                                borderRadius: '6px'
-                              }}
-                            >
-                              <Upload size={12} /> Replace Image
-                              <input
-                                type="file"
-                                accept="image/*"
-                                style={{ display: 'none' }}
-                                onChange={(e) => {
-                                  if (e.target.files?.[0]) handleEditImageFileUpload(e.target.files[0]);
-                                }}
-                              />
-                            </label>
-                            <button
-                              type="button"
-                              onClick={() => setEditingProduct({ ...editingProduct, image: '' })}
-                              style={{
-                                background: 'none',
-                                border: 'none',
-                                color: '#ef4444',
-                                fontSize: '0.75rem',
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                                padding: '4px 8px'
-                              }}
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <label
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          setEditDragOver(true);
-                        }}
-                        onDragLeave={() => setEditDragOver(false)}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          setEditDragOver(false);
-                          if (e.dataTransfer.files?.[0]) {
-                            handleEditImageFileUpload(e.dataTransfer.files[0]);
-                          }
-                        }}
-                        style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          padding: '24px 16px',
-                          border: `2px dashed ${editDragOver ? '#2563eb' : '#cbd5e1'}`,
-                          backgroundColor: editDragOver ? 'rgba(37, 99, 235, 0.08)' : '#f8fafc',
-                          borderRadius: '12px',
-                          cursor: editUploadingImage ? 'not-allowed' : 'pointer',
-                          transition: 'all 0.2s ease',
-                          textAlign: 'center'
-                        }}
-                      >
-                        <input
-                          type="file"
-                          accept="image/*"
-                          disabled={editUploadingImage}
-                          style={{ display: 'none' }}
-                          onChange={(e) => {
-                            if (e.target.files?.[0]) {
-                              handleEditImageFileUpload(e.target.files[0]);
-                            }
-                          }}
-                        />
-
-                        {editUploadingImage ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-                            <Loader2 size={30} className="animate-spin" style={{ color: '#2563eb' }} />
-                            <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                              Uploading new image to server...
-                            </span>
-                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Please wait a moment</span>
-                          </div>
-                        ) : (
-                          <>
-                            <div
-                              style={{
-                                width: '44px',
-                                height: '44px',
-                                borderRadius: '10px',
-                                backgroundColor: 'rgba(37, 99, 235, 0.15)',
-                                color: '#2563eb',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                marginBottom: '10px'
-                              }}
-                            >
-                              <Upload size={22} />
-                            </div>
-                            <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '2px' }}>
-                              Click to choose image or drag & drop here
-                            </span>
-                            <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
-                              JPG, PNG, WEBP, or GIF (max 15MB)
-                            </span>
-                          </>
-                        )}
-                      </label>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div style={{ marginBottom: '24px' }}>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Product Description
-                </label>
-                <textarea
-                  rows={3}
-                  placeholder="Describe the product features, sizes, or specifications..."
-                  value={editingProduct.description}
-                  onChange={(e) => setEditingProduct({ ...editingProduct, description: e.target.value })}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem', resize: 'vertical' }}
-                />
-              </div>
-
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <button
-                  type="button"
-                  onClick={() => setEditProductModalOpen(false)}
-                  className="btn btn-outline"
-                  style={{ flex: 1, padding: '12px', borderRadius: '10px', fontWeight: 700 }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={updatingProduct}
-                  className="btn btn-primary"
-                  style={{
-                    flex: 2,
-                    background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-                    padding: '12px',
-                    borderRadius: '10px',
-                    fontSize: '0.98rem',
-                    fontWeight: 700,
-                    cursor: updatingProduct ? 'not-allowed' : 'pointer'
-                  }}
-                >
-                  {updatingProduct ? 'Saving Changes...' : 'Save Product Changes'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* CREATE CONTAINER / AIR CARGO BATCH MODAL */}
-      {addBatchModalOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.75)',
-            backdropFilter: 'blur(5px)',
-            zIndex: 9999,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '16px'
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setAddBatchModalOpen(false);
-          }}
-        >
-          <div
-            style={{
-              backgroundColor: 'var(--bg-card)',
-              borderRadius: '20px',
-              width: '100%',
-              maxWidth: '620px',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-              overflow: 'hidden'
-            }}
-          >
-            <div style={{ padding: '22px 28px', backgroundColor: '#0f172a', color: '#ffffff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Anchor size={22} color="#2563eb" />
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: '#ffffff' }}>
-                    Register Logistics Batch
-                  </h3>
-                  <p style={{ margin: 0, fontSize: '0.78rem', color: '#94a3b8' }}>
-                    Deploy a new international sea freight or express air cargo consolidation
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setAddBatchModalOpen(false)}
-                style={{ color: '#ffffff', cursor: 'pointer', background: 'none', border: 'none', padding: '4px' }}
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateBatchSubmit} style={{ padding: '24px 28px', maxHeight: '78vh', overflowY: 'auto' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Batch Code / ID *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. CN-GH-2026-FCL05"
-                    value={newBatch.batchNumber}
-                    onChange={(e) => setNewBatch({ ...newBatch, batchNumber: e.target.value })}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Cargo Transit Mode *
-                  </label>
-                  <select
-                    value={newBatch.type}
-                    onChange={(e) => {
-                      const type = e.target.value;
-                      setNewBatch({
-                        ...newBatch,
-                        type,
-                        containerType: type === 'SEA_FCL' ? '40ft High Cube Container' : 'ULD Palletized Air Freight',
-                        originPort: type === 'SEA_FCL' ? 'Guangzhou Port, China' : 'Shenzhen Bao\'an Cargo Terminal',
-                        destinationPort: type === 'SEA_FCL' ? 'Port of Tema (MPS Terminal 3)' : 'Kotoka International Airport (ACC)'
-                      });
-                    }}
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem', backgroundColor: 'var(--bg-card)' }}
-                  >
-                    <option value="SEA_FCL">Sea Freight (FCL Container)</option>
-                    <option value="AIR_CARGO">Express Air Freight (Cargo Jet)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Carrier / Line *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder={newBatch.type === 'SEA_FCL' ? 'e.g. Maersk / MSC / CMA CGM' : 'e.g. Ethiopian Cargo / Emirates SkyCargo'}
-                    value={newBatch.carrier}
-                    onChange={(e) => setNewBatch({ ...newBatch, carrier: e.target.value })}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Vessel / Equipment Spec
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 40ft High Cube Container"
-                    value={newBatch.containerType}
-                    onChange={(e) => setNewBatch({ ...newBatch, containerType: e.target.value })}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Port / Hub of Loading
-                  </label>
-                  <input
-                    type="text"
-                    value={newBatch.originPort}
-                    onChange={(e) => setNewBatch({ ...newBatch, originPort: e.target.value })}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Destination Port / Hub
-                  </label>
-                  <input
-                    type="text"
-                    value={newBatch.destinationPort}
-                    onChange={(e) => setNewBatch({ ...newBatch, destinationPort: e.target.value })}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                  />
-                </div>
-              </div>
-
-              {newBatch.type === 'SEA_FCL' ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                      CBM Volume Capacity (m³)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={newBatch.capacityCbm}
-                      onChange={(e) => setNewBatch({ ...newBatch, capacityCbm: e.target.value })}
-                      style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                      Initial Allocated CBM (m³)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={newBatch.allocatedCbm}
-                      onChange={(e) => setNewBatch({ ...newBatch, allocatedCbm: e.target.value })}
-                      style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                      Gross Weight Capacity (KG)
-                    </label>
-                    <input
-                      type="number"
-                      step="1"
-                      value={newBatch.capacityKg}
-                      onChange={(e) => setNewBatch({ ...newBatch, capacityKg: e.target.value })}
-                      style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                      Initial Allocated Payload (KG)
-                    </label>
-                    <input
-                      type="number"
-                      step="1"
-                      value={newBatch.allocatedKg}
-                      onChange={(e) => setNewBatch({ ...newBatch, allocatedKg: e.target.value })}
-                      style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Initial Lifecycle Stage
-                  </label>
-                  <select
-                    value={newBatch.status}
-                    onChange={(e) => setNewBatch({ ...newBatch, status: e.target.value })}
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem', backgroundColor: 'var(--bg-card)' }}
-                  >
-                    <option value="PLANNING">Planning & Consolidation</option>
-                    <option value="CONFIRMED">Confirmed / Booking Closed</option>
-                    <option value="LOADING">Container Loading & Sealing</option>
-                    <option value="SAILING">In Transit (Sailing / Flying)</option>
-                    <option value="PORT_ARRIVAL">Arrived at Port of Tema</option>
-                    <option value="CUSTOMS_CLEARING">Customs Clearing (ICUMS)</option>
-                    <option value="DISTRIBUTED">Distributed to Pickup Hubs</option>
-                    <option value="COMPLETED">Completed</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Locked USD/GHS Rate
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="15.65"
-                    value={newBatch.lockedFxRate}
-                    onChange={(e) => setNewBatch({ ...newBatch, lockedFxRate: e.target.value })}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '24px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Consolidation Cutoff Date
-                  </label>
-                  <input
-                    type="date"
-                    value={newBatch.cutoffDate}
-                    onChange={(e) => setNewBatch({ ...newBatch, cutoffDate: e.target.value })}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Estimated Arrival Date (ETA)
-                  </label>
-                  <input
-                    type="date"
-                    value={newBatch.eta}
-                    onChange={(e) => setNewBatch({ ...newBatch, eta: e.target.value })}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1.5px solid var(--border-medium)', fontSize: '0.9rem' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <button
-                  type="button"
-                  onClick={() => setAddBatchModalOpen(false)}
-                  className="btn btn-outline"
-                  style={{ flex: 1, padding: '12px', borderRadius: '10px', fontWeight: 700 }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submittingBatch}
-                  className="btn btn-primary"
-                  style={{
-                    flex: 2,
-                    background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
-                    padding: '12px',
-                    borderRadius: '10px',
-                    fontSize: '0.98rem',
-                    fontWeight: 700,
-                    cursor: submittingBatch ? 'not-allowed' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px'
-                  }}
-                >
-                  {submittingBatch ? (
-                    <>
-                      <Loader2 size={18} className="spin" /> Registering Batch...
-                    </>
-                  ) : (
-                    <>
-                      <Anchor size={18} /> Deploy Logistics Batch
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
