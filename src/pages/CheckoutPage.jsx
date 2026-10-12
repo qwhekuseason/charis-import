@@ -813,7 +813,7 @@ export const CheckoutPage = () => {
 
                   <div>
                     <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '6px', color: 'var(--text-primary)' }}>
-                      Email Address (For Invoices &amp; Tracking Codes)
+                      Email (optional)
                     </label>
                     <input
                       type="email"
@@ -823,6 +823,9 @@ export const CheckoutPage = () => {
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                       style={{ width: '100%' }}
                     />
+                    <span style={{ display: 'block', marginTop: '4px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                      We’ll email you when your order is confirmed, shipped and delivered.
+                    </span>
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>

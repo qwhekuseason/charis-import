@@ -10,6 +10,7 @@ import fs from 'fs';
 import multer from 'multer';
 import crypto from 'crypto';
 import { v2 as cloudinary } from 'cloudinary';
+import { createNotifier, pushEnabled, pushPublicKey, emailEnabled, emailOrderPlaced, emailOrderUpdate } from './notify.js';
 
 dotenv.config();
 
@@ -18,6 +19,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const prisma = new PrismaClient();
+const notifier = createNotifier(prisma);
 const PORT = process.env.PORT || 5000;
 // Login tokens are signed with this secret — a guessable value would let anyone forge an admin login.
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -1321,6 +1323,15 @@ app.post('/api/orders', optionalAuth, async (req, res) => {
       message: 'Order placed successfully',
       data: order,
     });
+
+    // After replying, so a slow phone alert or email never delays the customer.
+    const itemCount = pricedItems.reduce((n, i) => n + i.qty, 0);
+    notifier.alertAdmins({
+      title: `New order ${order.orderCode} — ${`GH₵${total.toFixed(2)}`}`,
+      body: `${customerName} · ${itemCount} item${itemCount === 1 ? '' : 's'} · ${order.paymentMethod}`,
+      tag: `order-${order.id}`,
+    });
+    loadSettings().then((s) => emailOrderPlaced(order, s)).catch(() => {});
   } catch (error) {
     console.error('Error creating order:', error);
     res.status(error.status || 500).json({ success: false, error: error.status ? error.message : 'Could not place your order. Please try again.' });
@@ -1378,7 +1389,8 @@ app.patch('/api/orders/:id/status', authenticateUser, requireAdmin, async (req, 
     if (paymentStatus && !['PENDING', 'VERIFYING', 'PAID', 'REFUNDED'].includes(paymentStatus)) {
       return res.status(400).json({ success: false, error: `Unknown payment status "${paymentStatus}".` });
     }
-    if (!(await prisma.order.findUnique({ where: { id } }))) {
+    const before = await prisma.order.findUnique({ where: { id } });
+    if (!before) {
       return res.status(404).json({ success: false, error: 'Order not found.' });
     }
 
@@ -1393,7 +1405,10 @@ app.patch('/api/orders/:id/status', authenticateUser, requireAdmin, async (req, 
     await rewardReferrerIfDue(updated);
     await refundCreditIfCancelled(updated);
 
-    res.json({ success: true, data: updated });
+    // Tell the customer by email (only if they gave one and the status really changed).
+    const emailed = await emailOrderUpdate(before, updated);
+
+    res.json({ success: true, data: updated, emailed });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -1431,6 +1446,13 @@ app.post('/api/inquiries', inquiryLimiter, async (req, res) => {
       success: true,
       message: 'Inquiry received successfully. We will get back to you shortly.',
       data: inquiry,
+    });
+
+    const isRequest = /^item request/i.test(subject);
+    notifier.alertAdmins({
+      title: isRequest ? `New item request from ${name}` : `New message from ${name}`,
+      body: message.length > 120 ? `${message.slice(0, 117)}…` : message,
+      tag: `inquiry-${inquiry.id}`,
     });
   } catch (error) {
     console.error('Error saving inquiry:', error);
@@ -1920,6 +1942,12 @@ app.post('/api/reviews', authenticateUser, async (req, res) => {
     });
 
     res.status(201).json({ success: true, data: review });
+
+    notifier.alertAdmins({
+      title: `New ${numericRating}★ review — ${product.name}`,
+      body: `${req.user.name}: ${review.comment.length > 110 ? `${review.comment.slice(0, 107)}…` : review.comment}`,
+      tag: `review-${review.id}`,
+    });
   } catch (error) {
     console.error('Error submitting review:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -1927,10 +1955,63 @@ app.post('/api/reviews', authenticateUser, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Admin phone alerts (push) & email status
+// ---------------------------------------------------------------------------
+// GET /api/push/status (Admin) — is everything set up, and which devices get alerts
+app.get('/api/push/status', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    res.json({
+      success: true,
+      data: { pushEnabled, publicKey: pushPublicKey(), emailEnabled, devices: await notifier.listDevices() },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Could not load alert settings.' });
+  }
+});
+
+// POST /api/push/subscribe (Admin) — this device wants alerts
+app.post('/api/push/subscribe', authenticateUser, requireAdmin, async (req, res) => {
+  const sub = req.body.subscription;
+  if (!pushEnabled) return res.status(400).json({ success: false, error: 'Phone alerts are not set up on the server yet.' });
+  if (!sub || typeof sub.endpoint !== 'string' || !/^https:\/\//.test(sub.endpoint) || !sub.keys?.p256dh || !sub.keys?.auth) {
+    return res.status(400).json({ success: false, error: 'This browser sent an invalid alert subscription.' });
+  }
+  try {
+    await notifier.addSubscription(sub, req.user, req.body.device);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Could not turn on alerts.' });
+  }
+});
+
+// POST /api/push/unsubscribe (Admin) — stop alerts on a device
+app.post('/api/push/unsubscribe', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    await notifier.removeSubscription(String(req.body.endpoint || ''));
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Could not turn off alerts.' });
+  }
+});
+
+// POST /api/push/test (Admin) — send a test alert to every admin device
+app.post('/api/push/test', authenticateUser, requireAdmin, async (req, res) => {
+  const { sent } = await notifier.alertAdmins({ title: 'CHARI alerts are working', body: 'You will get an alert like this for every new order, item request and review.', tag: 'test' });
+  res.json({ success: true, data: { sent } });
+});
+
+// ---------------------------------------------------------------------------
 // Production Static Serving (Single-Port Deployment)
 // ---------------------------------------------------------------------------
 const distDir = path.join(__dirname, '../dist');
 if (fs.existsSync(distDir)) {
+  // The service worker and app manifest must always be fresh so updates reach installed apps.
+  for (const file of ['sw.js', 'manifest.webmanifest']) {
+    app.get(`/${file}`, (req, res) => {
+      res.set('Cache-Control', 'no-cache');
+      res.sendFile(path.join(distDir, file));
+    });
+  }
   // Built JS/CSS have content hashes in their names, so they can be cached for a year;
   // index.html must always be re-checked so visitors pick up new deploys.
   // fallthrough:false → a missing old asset returns 404 instead of index.html, so the app can detect it and reload.

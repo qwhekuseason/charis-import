@@ -157,9 +157,9 @@ const OrdersTab = ({ orders, setOrders }) => {
   const update = async (order, changes) => {
     setSaving(order.id);
     try {
-      const updated = await admin.setOrderStatus(order.id, changes);
+      const { data: updated, emailed } = await admin.setOrderStatus(order.id, changes);
       setOrders((prev) => prev.map((o) => (o.id === order.id ? { ...o, ...updated } : o)));
-      showToast(`Order ${order.orderCode} updated`, 'success');
+      showToast(`Order ${order.orderCode} updated${emailed ? ' — customer emailed' : ''}`, 'success');
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
@@ -1258,6 +1258,135 @@ const HuntTab = ({ discounts, products }) => {
 };
 
 // ---------------------------------------------------------------------------
+// Phone alerts (web push) for new orders, item requests and reviews
+// ---------------------------------------------------------------------------
+const keyToBytes = (base64) => {
+  const padded = (base64 + '='.repeat((4 - (base64.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+  return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
+};
+const deviceName = () => {
+  const ua = navigator.userAgent;
+  const os = /iPhone|iPad/.test(ua) ? 'iPhone/iPad' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Mac/.test(ua) ? 'Mac' : 'Device';
+  const browser = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'browser';
+  return `${os} · ${browser}`;
+};
+const isIos = () => /iPhone|iPad|iPod/.test(navigator.userAgent);
+const isInstalled = () => window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true;
+
+const AlertsCard = () => {
+  const { showToast } = useStore();
+  const [status, setStatus] = useState(null);
+  const [mySub, setMySub] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+  const swReady = async () => {
+    if (!navigator.serviceWorker.controller) await navigator.serviceWorker.register('/sw.js');
+    return navigator.serviceWorker.ready;
+  };
+
+  const load = async () => {
+    try {
+      setStatus(await admin.getAlertStatus());
+      if (supported) setMySub(await (await swReady()).pushManager.getSubscription());
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const turnOn = async () => {
+    setBusy(true);
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') throw new Error('Alerts are blocked. Allow notifications for this site in your browser settings, then try again.');
+      const reg = await swReady();
+      const sub = (await reg.pushManager.getSubscription())
+        || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyToBytes(status.publicKey) }));
+      await admin.subscribeAlerts(sub.toJSON(), deviceName());
+      showToast('Alerts are on for this device', 'success');
+      await load();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const turnOff = async (endpoint) => {
+    setBusy(true);
+    try {
+      await admin.unsubscribeAlerts(endpoint);
+      if (mySub && mySub.endpoint === endpoint) await mySub.unsubscribe();
+      showToast('Alerts turned off for that device', 'info');
+      await load();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const test = async () => {
+    setBusy(true);
+    try {
+      const { sent } = await admin.sendTestAlert();
+      showToast(sent ? `Test alert sent to ${sent} device${sent === 1 ? '' : 's'}` : 'No devices have alerts turned on yet', sent ? 'success' : 'info');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!status) return <div className="adm-card adm-settings"><Empty>Loading alerts…</Empty></div>;
+  const devices = status.devices || [];
+  const thisDeviceOn = Boolean(mySub && devices.some((d) => d.endpoint === mySub.endpoint));
+
+  return (
+    <div className="adm-card adm-settings adm-alerts">
+      <h3 className="adm-section-title">Alerts on your phone</h3>
+      <p className="adm-muted">Get a notification the moment a customer places an order, requests an item or writes a review.</p>
+
+      {!status.pushEnabled ? (
+        <div className="form-error">Phone alerts aren’t set up on the server yet. Add the VAPID keys in Render → Environment (see the setup notes).</div>
+      ) : !supported ? (
+        <div className="adm-alerts-note">
+          {isIos() && !isInstalled()
+            ? <>On iPhone, first add CHARI to your home screen: tap <strong>Share</strong> → <strong>Add to Home Screen</strong>. Then open CHARI from your home screen, sign in, and come back here.</>
+            : 'This browser can’t receive alerts. Try Chrome on Android or a computer, or Safari on an iPhone with CHARI added to the home screen.'}
+        </div>
+      ) : (
+        <div className="adm-inline">
+          {thisDeviceOn
+            ? <button type="button" className="btn btn-outline" disabled={busy} onClick={() => turnOff(mySub.endpoint)}>Turn off on this device</button>
+            : <button type="button" className="btn btn-primary" disabled={busy} onClick={turnOn}>Turn on alerts on this device</button>}
+          <button type="button" className="btn btn-outline" disabled={busy || devices.length === 0} onClick={test}>Send a test alert</button>
+        </div>
+      )}
+
+      {devices.length > 0 && (
+        <ul className="adm-alert-devices">
+          {devices.map((d) => (
+            <li key={d.endpoint}>
+              <span><strong>{d.device}</strong>{mySub?.endpoint === d.endpoint ? ' (this device)' : ''}<span className="adm-muted"> · {d.userName} · added {date(d.addedAt)}</span></span>
+              <button type="button" className="shop-link-btn" disabled={busy} onClick={() => turnOff(d.endpoint)}>Remove</button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <h3 className="adm-section-title">Customer emails</h3>
+      <p className="adm-muted">
+        {status.emailEnabled
+          ? 'On. Customers who give an email get an order confirmation, and an update each time you change the order or payment status.'
+          : 'Off. Once an email account is connected on the server (SMTP_URL), customers who give an email will get order updates automatically.'}
+      </p>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
 const SettingsTab = () => {
@@ -1292,6 +1421,8 @@ const SettingsTab = () => {
   };
 
   return (
+    <>
+    <AlertsCard />
     <form onSubmit={save} className="adm-card adm-settings">
       <h3 className="adm-section-title">Contact details</h3>
       <div className="form-row">
@@ -1324,6 +1455,7 @@ const SettingsTab = () => {
         <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button>
       </div>
     </form>
+    </>
   );
 };
 

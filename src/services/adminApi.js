@@ -23,8 +23,9 @@ async function request(path, { method = 'GET', body, isForm = false } = {}) {
 
 // Orders
 export const listOrders = async () => (await request('/orders')).data || [];
+// Returns { data: updated order, emailed: whether the customer was emailed }
 export const setOrderStatus = async (id, { orderStatus, paymentStatus }) =>
-  (await request(`/orders/${id}/status`, { method: 'PATCH', body: { orderStatus, paymentStatus } })).data;
+  request(`/orders/${id}/status`, { method: 'PATCH', body: { orderStatus, paymentStatus } });
 
 // Products
 export const listProducts = async () => (await request('/products')).data || [];
@@ -66,6 +67,12 @@ export const saveSettings = async (changes) => (await request('/settings', { met
 // Treasure hunt (promo codes hidden around the site)
 export const getHunt = async () => (await request('/hunt')).data;
 export const saveHunt = async (items) => (await request('/hunt', { method: 'PUT', body: { items } })).data;
+
+// Phone alerts & email status
+export const getAlertStatus = async () => (await request('/push/status')).data;
+export const subscribeAlerts = async (subscription, device) => request('/push/subscribe', { method: 'POST', body: { subscription, device } });
+export const unsubscribeAlerts = async (endpoint) => request('/push/unsubscribe', { method: 'POST', body: { endpoint } });
+export const sendTestAlert = async () => (await request('/push/test', { method: 'POST' })).data;
 
 // Photos
 export const uploadPhoto = async (file) => {
