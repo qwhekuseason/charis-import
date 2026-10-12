@@ -11,7 +11,7 @@ export const QuoteModal = () => {
     productName: '',
     productUrl: '',
     budget: '',
-    city: 'Accra',
+    city: 'Kumasi',
     quantity: '1',
     notes: '',
     shippingPreference: 'sea' // sea or air
@@ -43,7 +43,7 @@ export const QuoteModal = () => {
       `Quantity: ${formData.quantity || '1'}`,
       `Budget: ${formData.budget ? `GH₵${formData.budget}` : 'Flexible'}`,
       `Shipping: ${formData.shippingPreference === 'air' ? 'Air (7–12 days)' : 'Sea (30–50 days)'}`,
-      `Deliver to: ${formData.city || 'Accra'}`,
+      `Deliver to: ${formData.city || 'Kumasi'}`,
       `Details: ${formData.notes || '—'}`,
       imagePreview ? 'Customer has a photo — ask them to send it on WhatsApp.' : null,
     ].filter(Boolean);

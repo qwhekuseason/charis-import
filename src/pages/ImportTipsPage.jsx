@@ -1,5 +1,6 @@
 import React from 'react';
 import { useStore } from '../context/StoreContext';
+import { HiddenGem } from '../components/HiddenGem';
 import {
   Search,
   FileSpreadsheet,
@@ -56,7 +57,7 @@ export const ImportTipsPage = () => {
     {
       num: 6,
       title: 'Local Delivery in Ghana',
-      desc: 'Collect for free in Spintex, Accra, or we deliver to your door or your nearest VIP/STC bus station.',
+      desc: 'Collect for free in Kumasi, or we deliver to your door or your nearest VIP/STC bus station.',
       icon: Truck,
       highlight: 'Nationwide delivery across all 16 regions'
     }
@@ -85,7 +86,7 @@ export const ImportTipsPage = () => {
               marginBottom: '14px'
             }}
           >
-            Importing to Ghana: What to know before you order
+            Importing to Ghana: What to know before you order <HiddenGem spot="import-tips-page" />
           </h1>
           <p
             style={{

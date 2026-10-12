@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useStore } from '../context/StoreContext';
 import { sizedImage } from '../utils/images';
 import { productCategorySlug } from '../utils/categories';
+import { HiddenGem } from './HiddenGem';
 import {
   X,
   ShoppingBag,
@@ -37,7 +38,6 @@ export const ProductDetailModal = () => {
     voteHelpfulReview,
     user,
     openAuth,
-    fxRates,
     calculateVolumetricFreight
   } = useStore();
 
@@ -305,8 +305,10 @@ export const ProductDetailModal = () => {
               {selectedProduct.name}
             </h2>
 
-            {/* Star Rating */}
-            {selectedProduct.rating && (
+            <HiddenGem spot={`product:${selectedProduct.id}`} className="hidden-gem-inline" />
+
+            {/* Star Rating — only from real customer reviews */}
+            {selectedProduct.reviewCount > 0 && selectedProduct.rating > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                 <div style={{ display: 'flex', color: '#2563eb' }}>
                   {[...Array(5)].map((_, i) => (
@@ -548,7 +550,7 @@ export const ProductDetailModal = () => {
                   {[
                     { icon: Ship, name: 'Sea shipping', time: '35–45 working days', fee: 35, note: 'Cheapest option. Best for heavy or bulk items.' },
                     { icon: Plane, name: 'Air shipping', time: '7–12 working days', fee: 75, note: 'Faster delivery for urgent orders.' },
-                    { icon: Truck, name: 'Local delivery (Accra)', time: '1–2 working days', fee: 40, note: 'For items already in stock at our Accra hub.' },
+                    { icon: Truck, name: 'Local delivery (Kumasi)', time: '1–2 working days', fee: 40, note: 'For items already in stock in Kumasi.' },
                   ].map((opt) => (
                     <div key={opt.name} style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '12px 14px', border: '1px solid var(--border-light)', borderRadius: '10px' }}>
                       
@@ -574,7 +576,7 @@ export const ProductDetailModal = () => {
                     const totalReviews = currentReviews.length;
                     const avgRating = totalReviews > 0
                       ? (currentReviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews).toFixed(1)
-                      : (selectedProduct.rating || 5.0).toFixed(1);
+                      : '0.0';
 
                     const starCounts = [5, 4, 3, 2, 1].map((s) => ({
                       star: s,

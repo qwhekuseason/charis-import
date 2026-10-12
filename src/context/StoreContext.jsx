@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { PRODUCTS, CATEGORIES } from '../data/products';
 import {
   getProducts,
   getCategories,
@@ -11,7 +10,6 @@ import {
   updateUserProfile as apiUpdateProfile,
   removeAuthToken,
   getActiveBatches,
-  getActiveDiscounts,
   getReviews,
   submitReview as apiSubmitReview,
   getMyReferrals as apiGetMyReferrals
@@ -27,10 +25,28 @@ export const useStore = () => {
   return context;
 };
 
+// Used until the server's settings arrive (and if it can't be reached).
+export const DEFAULT_STORE_SETTINGS = {
+  phoneDisplay: '+233 59 144 0934',
+  whatsappNumber: '233591440934',
+  momoNumber: '059 144 0934',
+  momoName: 'CHARIS IMPORT',
+  email: 'support@charisimport.com',
+  location: 'Kumasi, Ghana',
+  pickupPoint: 'Kumasi',
+  openingHours: 'Monday – Saturday, 8:00 am – 6:30 pm',
+  announcements: [
+    'Invite a friend, earn GH₵25 in store credit',
+    "Seen it online? Request any item and we'll source it",
+  ],
+};
+
 export const StoreProvider = ({ children }) => {
   // Live Database States
-  const [products, setProducts] = useState(PRODUCTS);
-  const [categories, setCategories] = useState(CATEGORIES);
+  // Catalogue comes only from the database — no demo products, not even while loading.
+  const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [catalogStatus, setCatalogStatus] = useState('loading'); // loading | ready | error
   const [serverOnline, setServerOnline] = useState(false);
 
   // Authentication State
@@ -55,26 +71,9 @@ export const StoreProvider = ({ children }) => {
 
   const toggleTheme = () => {};
 
-  // International FX Rates Snapshot & Margin Locking
-  const [fxRates] = useState({
-    USD_GHS: 15.65,
-    RMB_GHS: 2.18,
-    lockedAt: '16:00 GMT (Rate Locked)',
-    lockValidityMinutes: 30
-  });
-
   // Pre-Order Batch Status Engine (Dynamic from PostgreSQL)
-  const [activeContainerBatch, setActiveContainerBatch] = useState({
-    batchId: 'CN-GH-2026-FCL04',
-    containerNumber: 'CN-GH-2026-FCL04',
-    containerType: '40ft High Cube Container (FCL Consolidated)',
-    fillPercentage: 82,
-    cutoffDaysRemaining: 3,
-    cutoffDate: '2026-10-04',
-    etaTemaPort: '2026-11-08',
-    originPort: 'Guangzhou International Sea Port',
-    destinationPort: 'Tema MPS Terminal 3, Ghana'
-  });
+  // null until the admin creates a real shipment — nothing is shown otherwise.
+  const [activeContainerBatch, setActiveContainerBatch] = useState(null);
 
   // Volumetric & Freight Duty Calculation Engine
   const calculateVolumetricFreight = (cbm = 0.05, actualKg = 5) => {
@@ -163,8 +162,6 @@ export const StoreProvider = ({ children }) => {
   // Reviews State (Linked to Neon PostgreSQL)
   const [reviews, setReviews] = useState([]);
 
-  // Active Promo Discounts (Linked to Neon PostgreSQL)
-  const [availableCoupons, setAvailableCoupons] = useState([]);
 
   // Referral programme — code, store credit and history all come from the server.
   const [referralInfo, setReferralInfo] = useState(null);
@@ -201,12 +198,51 @@ export const StoreProvider = ({ children }) => {
   // Toasts
   const [toasts, setToasts] = useState([]);
 
-  // WhatsApp Hotline
-  const WHATSAPP_NUMBER = '233591440934';
+  // Business details & banner text — set by the admin in Admin → Settings.
+  const [settings, setSettings] = useState(DEFAULT_STORE_SETTINGS);
+  const refreshSettings = async () => {
+    try {
+      const res = await fetch('/api/settings');
+      const data = await res.json();
+      if (data?.data) setSettings({ ...DEFAULT_STORE_SETTINGS, ...data.data });
+    } catch {
+      // keep defaults
+    }
+  };
+  useEffect(() => { refreshSettings(); }, []);
+
+  const WHATSAPP_NUMBER = settings.whatsappNumber;
 
   useEffect(() => {
     localStorage.setItem('charis_cart', JSON.stringify(cart));
   }, [cart]);
+
+  // Keep cart prices in step with the live catalogue (a deal starting or ending, an admin price change).
+  useEffect(() => {
+    if (!products.length) return;
+    setCart((prev) => {
+      let changed = false;
+      const next = prev.map((item) => {
+        const fresh = products.find((p) => p.id === item.product.id);
+        if (!fresh || fresh.price === item.unitPrice) return item;
+        changed = true;
+        return { ...item, product: fresh, unitPrice: fresh.price, total: fresh.price * item.quantity };
+      });
+      return changed ? next : prev;
+    });
+  }, [products]);
+
+  // When the soonest deal ends, reload the catalogue so normal prices come back on screen.
+  useEffect(() => {
+    const ends = products
+      .filter((p) => p.onDeal && p.dealEndsAt)
+      .map((p) => new Date(p.dealEndsAt).getTime() - Date.now())
+      .filter((ms) => ms > 0 && ms < 2 ** 31 - 1);
+    if (!ends.length) return undefined;
+    const timer = setTimeout(() => refreshProducts(), Math.min(...ends) + 1000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products]);
 
   useEffect(() => {
     localStorage.setItem('charis_wishlist', JSON.stringify(wishlist));
@@ -224,16 +260,14 @@ export const StoreProvider = ({ children }) => {
   // Fetch live products and categories from PostgreSQL via REST API
   const refreshProducts = async () => {
     try {
-      const liveProducts = await getProducts();
-      if (liveProducts && liveProducts.length > 0) {
-        setProducts(liveProducts);
-      }
-      const liveCategories = await getCategories();
-      if (liveCategories && liveCategories.length > 0) {
-        setCategories(liveCategories);
-      }
+      const [liveProducts, liveCategories] = await Promise.all([getProducts(), getCategories()]);
+      if (!Array.isArray(liveProducts)) throw new Error('No products returned');
+      setProducts(liveProducts);
+      if (Array.isArray(liveCategories)) setCategories(liveCategories);
+      setCatalogStatus('ready');
     } catch (err) {
       console.warn('Could not fetch live products:', err);
+      setCatalogStatus((s) => (s === 'ready' ? s : 'error'));
     }
   };
 
@@ -242,15 +276,14 @@ export const StoreProvider = ({ children }) => {
       const res = await getActiveBatches();
       if (res && res.primary) {
         const p = res.primary;
-        const fill = p.capacityCbm && p.allocatedCbm ? Math.round((p.allocatedCbm / p.capacityCbm) * 100) : 82;
+        const fill = p.capacityCbm && p.allocatedCbm ? Math.round((p.allocatedCbm / p.capacityCbm) * 100) : null;
         setActiveContainerBatch({
           batchId: p.batchNumber,
           containerNumber: p.batchNumber,
           containerType: p.containerType,
           fillPercentage: fill,
-          cutoffDaysRemaining: 3,
-          cutoffDate: p.cutoffDate || '2026-10-04',
-          etaTemaPort: p.eta || '2026-11-08',
+          cutoffDate: p.cutoffDate || null,
+          etaTemaPort: p.eta || null,
           originPort: p.originPort,
           destinationPort: p.destinationPort,
           carrier: p.carrier,
@@ -274,28 +307,24 @@ export const StoreProvider = ({ children }) => {
     }
   };
 
-  // Fetch active discount codes from Neon PostgreSQL
-  const refreshCoupons = async () => {
+  // Treasure hunt: where coupons are hidden (codes stay on the server until found)
+  const [huntSpots, setHuntSpots] = useState([]);
+  const refreshHunt = async () => {
     try {
-      const liveCoupons = await getActiveDiscounts();
-      if (liveCoupons && liveCoupons.length > 0) {
-        setAvailableCoupons(liveCoupons);
-      }
-    } catch (err) {
-      console.warn('Could not fetch active coupons:', err);
+      const res = await fetch('/api/hunt/spots');
+      const data = await res.json();
+      setHuntSpots(Array.isArray(data?.data) ? data.data : []);
+    } catch {
+      setHuntSpots([]);
     }
   };
 
   useEffect(() => {
-    checkServerHealth().then((res) => {
-      setServerOnline(Boolean(res.online));
-      if (res.online) {
-        refreshProducts();
-        refreshBatches();
-        refreshReviews();
-        refreshCoupons();
-      }
-    });
+    checkServerHealth().then((res) => setServerOnline(Boolean(res.online)));
+    refreshProducts();
+    refreshBatches();
+    refreshReviews();
+    refreshHunt();
 
     // Check for saved login session
     getCurrentUser()
@@ -616,7 +645,6 @@ export const StoreProvider = ({ children }) => {
       value={{
         theme,
         toggleTheme,
-        fxRates,
         activeContainerBatch,
         calculateVolumetricFreight,
         currentPage,
@@ -663,7 +691,9 @@ export const StoreProvider = ({ children }) => {
         addReview,
         getReviewsForProduct,
         voteHelpfulReview,
-        availableCoupons,
+        catalogStatus,
+        huntSpots,
+        refreshHunt,
         preorderTermsOpen,
         setPreorderTermsOpen,
         searchQuery,
@@ -676,7 +706,9 @@ export const StoreProvider = ({ children }) => {
         showToast,
         calculateTierPrice,
         getWhatsAppOrderLink,
-        WHATSAPP_NUMBER
+        WHATSAPP_NUMBER,
+        settings,
+        refreshSettings
       }}
     >
       {children}

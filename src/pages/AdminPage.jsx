@@ -25,7 +25,7 @@ const BATCH_STAGES = [
   ['QC_BATCHING', 'Checking & packing'],
   ['HIGH_SEAS', 'On the way to Ghana'],
   ['CUSTOMS_CLEARANCE', 'Clearing customs'],
-  ['ACCRA_HUB', 'Arrived in Accra'],
+  ['ACCRA_HUB', 'Arrived in Kumasi'],
   ['DELIVERY_READY', 'Out for delivery'],
 ];
 const MESSAGE_STATUSES = [
@@ -270,8 +270,8 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
     id: p.id,
     name: p.name,
     category: p.category,
-    price: String(p.price),
-    originalPrice: p.originalPrice ? String(p.originalPrice) : '',
+    price: String(p.listPrice ?? p.price),
+    originalPrice: (p.listWasPrice ?? p.originalPrice) ? String(p.listWasPrice ?? p.originalPrice) : '',
     inStock: p.inStock !== false,
     isNew: p.badge === 'New',
     photos: (p.gallery && p.gallery.length ? p.gallery : [p.image]).filter(Boolean),
@@ -326,7 +326,7 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
 
   const savePrice = async (p) => {
     const draft = priceDrafts[p.id];
-    if (draft === undefined || Number(draft) === p.price) return;
+    if (draft === undefined || Number(draft) === (p.listPrice ?? p.price)) return;
     if (await quickUpdate(p, { price: draft }, `${p.name}: price now GH₵${Number(draft).toFixed(2)}`)) {
       setPriceDrafts((prev) => { const next = { ...prev }; delete next[p.id]; return next; });
     }
@@ -369,7 +369,7 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
                       <img src={sizedImage(p.image, 96)} alt="" />
                       <div>
                         <div className="adm-strong">{p.name}</div>
-                        <div className="adm-muted">{p.category}{p.badge === 'New' ? ' · New' : ''}</div>
+                        <div className="adm-muted">{p.category}{p.badge === 'New' ? ' · New' : ''}{p.onDeal ? ` · On deal: ${money(p.price)}` : ''}</div>
                       </div>
                     </div>
                   </td>
@@ -381,11 +381,11 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
                         min="0.01"
                         step="0.01"
                         aria-label={`Price of ${p.name}`}
-                        value={priceDrafts[p.id] ?? p.price}
+                        value={priceDrafts[p.id] ?? (p.listPrice ?? p.price)}
                         onChange={(e) => setPriceDrafts((prev) => ({ ...prev, [p.id]: e.target.value }))}
                         onKeyDown={(e) => e.key === 'Enter' && savePrice(p)}
                       />
-                      {priceDrafts[p.id] !== undefined && Number(priceDrafts[p.id]) !== p.price && (
+                      {priceDrafts[p.id] !== undefined && Number(priceDrafts[p.id]) !== (p.listPrice ?? p.price) && (
                         <>
                           <button type="button" className="btn btn-primary btn-sm" onClick={() => savePrice(p)}>Save</button>
                           <button
@@ -400,7 +400,7 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
                       )}
                     </div>
                   </td>
-                  <td className="adm-muted">{p.originalPrice ? money(p.originalPrice) : '—'}</td>
+                  <td className="adm-muted">{(p.listWasPrice ?? p.originalPrice) ? money(p.listWasPrice ?? p.originalPrice) : '—'}</td>
                   <td>
                     <label className="adm-switch">
                       <input
@@ -937,16 +937,410 @@ const CustomersTab = ({ customers }) => {
 };
 
 // ---------------------------------------------------------------------------
+// Deals
+// ---------------------------------------------------------------------------
+const pad2 = (n) => String(n).padStart(2, '0');
+const toDateInput = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const dateTime = (d) => new Date(d).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+const DealsTab = ({ products, onCatalogChange }) => {
+  const { showToast } = useStore();
+  const [form, setForm] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const normalPrice = (p) => p.listPrice ?? p.price;
+  const live = products.filter((p) => p.onDeal).sort((a, b) => new Date(a.dealEndsAt) - new Date(b.dealEndsAt));
+
+  const openForm = (preselect = []) => {
+    const end = new Date(Date.now() + 7 * 86400000);
+    setForm({
+      selected: Object.fromEntries(preselect.map((p) => [p.id, String(p.onDeal ? p.price : '')])),
+      mode: preselect.length === 1 && preselect[0].onDeal ? 'price' : 'percent',
+      percent: '20',
+      endDate: toDateInput(preselect[0]?.dealEndsAt ? new Date(preselect[0].dealEndsAt) : end),
+      endTime: preselect[0]?.dealEndsAt ? `${pad2(new Date(preselect[0].dealEndsAt).getHours())}:${pad2(new Date(preselect[0].dealEndsAt).getMinutes())}` : '23:59',
+      search: '',
+    });
+  };
+
+  const setEnd = (days) => {
+    const d = new Date(Date.now() + days * 86400000);
+    setForm((f) => ({ ...f, endDate: toDateInput(d), endTime: '23:59' }));
+  };
+
+  const dealPriceFor = (p) => {
+    if (!form) return null;
+    if (form.mode === 'percent') {
+      const pct = Number(form.percent);
+      return Number.isFinite(pct) && pct > 0 && pct < 100 ? Math.round(normalPrice(p) * (100 - pct)) / 100 : null;
+    }
+    const v = Number(form.selected[p.id]);
+    return Number.isFinite(v) && v > 0 ? v : null;
+  };
+
+  const save = async (e) => {
+    e.preventDefault();
+    const chosen = products.filter((p) => p.id in form.selected);
+    if (!chosen.length) { showToast('Choose at least one product.', 'error'); return; }
+    const items = chosen.map((p) => ({ productId: p.id, dealPrice: dealPriceFor(p) }));
+    const bad = chosen.find((p, i) => !items[i].dealPrice || items[i].dealPrice >= normalPrice(p));
+    if (bad) { showToast(`Deal price for "${bad.name}" must be below GH₵${normalPrice(bad).toFixed(2)}.`, 'error'); return; }
+    const endsAt = new Date(`${form.endDate}T${form.endTime || '23:59'}`);
+    setSaving(true);
+    try {
+      await admin.startDeals(endsAt.toISOString(), items);
+      showToast(`${items.length} deal${items.length === 1 ? '' : 's'} live until ${dateTime(endsAt)}`, 'success');
+      setForm(null);
+      onCatalogChange();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const stop = async (p) => {
+    if (!window.confirm(`End the deal on "${p.name}" now? The normal price (${money(normalPrice(p))}) comes back.`)) return;
+    try {
+      await admin.endDeal(p.id);
+      showToast(`Deal on "${p.name}" ended`, 'info');
+      onCatalogChange();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  const toggle = (p) => setForm((f) => {
+    const selected = { ...f.selected };
+    if (p.id in selected) delete selected[p.id]; else selected[p.id] = '';
+    return { ...f, selected };
+  });
+
+  const pickable = form ? products.filter((p) => p.inStock !== false && p.name.toLowerCase().includes(form.search.toLowerCase())) : [];
+  const chosen = form ? products.filter((p) => p.id in form.selected) : [];
+
+  return (
+    <>
+      <div className="adm-toolbar">
+        <span className="adm-muted">{live.length ? `${live.length} deal${live.length === 1 ? '' : 's'} running` : 'No deals running'}</span>
+        <button type="button" className="btn btn-primary" onClick={() => openForm()}><Plus size={16} /> New deal</button>
+      </div>
+
+      {live.length === 0 ? <Empty>No deals right now. Start one to show it on the home page with a countdown.</Empty> : (
+        <div className="adm-table-wrap">
+          <table className="adm-table">
+            <thead><tr><th>Product</th><th>Normal price</th><th>Deal price</th><th>Ends</th><th /></tr></thead>
+            <tbody>
+              {live.map((p) => (
+                <tr key={p.id}>
+                  <td><div className="adm-product-cell"><img src={sizedImage(p.image, 96)} alt="" /><div className="adm-strong">{p.name}</div></div></td>
+                  <td className="adm-muted">{money(normalPrice(p))}</td>
+                  <td className="adm-strong">{money(p.price)} <span className="adm-muted">(−{Math.round((1 - p.price / normalPrice(p)) * 100)}%)</span></td>
+                  <td>{dateTime(p.dealEndsAt)}</td>
+                  <td className="adm-row-actions">
+                    <button type="button" className="btn btn-outline btn-sm" onClick={() => openForm([p])}>Change</button>
+                    <button type="button" className="btn btn-outline btn-sm adm-danger" onClick={() => stop(p)}>End now</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="adm-help">During a deal customers pay the deal price, the home page shows a countdown, and the normal price comes back automatically when the deal ends.</p>
+
+      {form && (
+        <Modal
+          title="Deal"
+          onClose={() => !saving && setForm(null)}
+          footer={(
+            <>
+              <button type="button" className="btn btn-outline" onClick={() => setForm(null)} disabled={saving}>Cancel</button>
+              <button type="submit" form="deal-form" className="btn btn-primary" disabled={saving || chosen.length === 0}>
+                {saving ? 'Saving…' : `Start deal${chosen.length > 1 ? `s (${chosen.length})` : ''}`}
+              </button>
+            </>
+          )}
+        >
+          <form id="deal-form" onSubmit={save}>
+            <Field label="1. Choose products">
+              <div className="adm-search" style={{ marginBottom: 8 }}><Search size={16} /><input placeholder="Search products" value={form.search} onChange={(e) => setForm({ ...form, search: e.target.value })} /></div>
+              <div className="adm-pick-list">
+                {pickable.map((p) => (
+                  <label key={p.id} className="adm-pick">
+                    <input type="checkbox" checked={p.id in form.selected} onChange={() => toggle(p)} />
+                    <span className="adm-pick-name">{p.name}</span>
+                    <span className="adm-muted">{money(normalPrice(p))}</span>
+                  </label>
+                ))}
+              </div>
+            </Field>
+
+            <div className="form-field">
+              <span className="form-label">2. Discount</span>
+              <div className="segmented" role="tablist" style={{ marginBottom: 10 }}>
+                <button type="button" className={form.mode === 'percent' ? 'active' : ''} onClick={() => setForm({ ...form, mode: 'percent' })}>% off</button>
+                <button type="button" className={form.mode === 'price' ? 'active' : ''} onClick={() => setForm({ ...form, mode: 'price' })}>Set each price</button>
+              </div>
+              {form.mode === 'percent' ? (
+                <input className="form-input" type="number" min="1" max="95" step="1" value={form.percent} onChange={(e) => setForm({ ...form, percent: e.target.value })} aria-label="Percent off" />
+              ) : chosen.length === 0 ? <p className="form-hint">Choose products first.</p> : (
+                <div className="adm-pick-list">
+                  {chosen.map((p) => (
+                    <label key={p.id} className="adm-pick">
+                      <span className="adm-pick-name">{p.name} <span className="adm-muted">(normal {money(normalPrice(p))})</span></span>
+                      <input className="form-input adm-price" type="number" min="0.01" step="0.01" placeholder="Deal price" value={form.selected[p.id]} onChange={(e) => setForm({ ...form, selected: { ...form.selected, [p.id]: e.target.value } })} />
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="form-field">
+              <span className="form-label">3. When it ends</span>
+              <div className="adm-inline" style={{ marginBottom: 8 }}>
+                <button type="button" className="btn btn-outline btn-sm" onClick={() => setEnd(0)}>Tonight</button>
+                <button type="button" className="btn btn-outline btn-sm" onClick={() => setEnd(3)}>In 3 days</button>
+                <button type="button" className="btn btn-outline btn-sm" onClick={() => setEnd(7)}>In 1 week</button>
+              </div>
+              <div className="form-row">
+                <input className="form-input" type="date" required min={toDateInput(new Date())} value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} aria-label="End date" />
+                <input className="form-input" type="time" required value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} aria-label="End time" />
+              </div>
+            </div>
+
+            {chosen.length > 0 && (
+              <div className="adm-deal-preview">
+                <div className="adm-label">Customers will see</div>
+                {chosen.map((p) => {
+                  const dp = dealPriceFor(p);
+                  return (
+                    <div key={p.id} className="adm-deal-row">
+                      <span>{p.name}</span>
+                      <span><s className="adm-muted">{money(normalPrice(p))}</s> <strong>{dp ? money(dp) : '—'}</strong></span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </form>
+        </Modal>
+      )}
+    </>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Treasure hunt — hide promo codes around the site
+// ---------------------------------------------------------------------------
+const discountUsable = (d) =>
+  d && d.isActive && (!d.expiresAt || new Date(d.expiresAt) > new Date()) && (!d.usageLimit || (d.usedCount || 0) < d.usageLimit);
+
+const HuntTab = ({ discounts, products }) => {
+  const { showToast, refreshHunt } = useStore();
+  const [items, setItems] = useState(null);
+  const [spots, setSpots] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    admin.getHunt()
+      .then((data) => { setItems(data.items || []); setSpots(data.spots || {}); })
+      .catch((err) => setError(err.message));
+  }, []);
+
+  const byCode = useMemo(() => new Map(discounts.map((d) => [d.code, d])), [discounts]);
+  const productName = (spot) => products.find((p) => `product:${p.id}` === spot)?.name;
+  const spotLabel = (spot) => (spot.startsWith('product:') ? `Inside product: ${productName(spot) || 'deleted product'}` : spots[spot] || spot);
+
+  const update = (i, changes) => {
+    setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, ...changes } : it)));
+    setDirty(true);
+  };
+  const add = () => {
+    setItems((prev) => [...prev, { code: discounts.find(discountUsable)?.code || '', spot: 'home-hero', clue: '', active: true, finds: 0 }]);
+    setDirty(true);
+  };
+  const remove = (i) => {
+    setItems((prev) => prev.filter((_, idx) => idx !== i));
+    setDirty(true);
+  };
+
+  const save = async () => {
+    if (items.some((it) => !it.code)) { showToast('Pick a promo code for every hidden spot', 'error'); return; }
+    setSaving(true);
+    try {
+      const data = await admin.saveHunt(items);
+      setItems(data.items);
+      setDirty(false);
+      refreshHunt();
+      showToast('Treasure hunt saved — the gems are live on the site', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (error) return <div className="form-error">{error}</div>;
+  if (!items) return <Empty>Loading…</Empty>;
+
+  return (
+    <>
+      <div className="adm-card adm-hunt-intro">
+        <strong>How it works</strong>
+        <p className="adm-muted">
+          Promo codes are no longer shown to everyone. Hide a code somewhere on the site and a small gem appears there.
+          When a customer taps the gem, they get the code. A gem disappears by itself when its code is switched off, runs out or expires.
+          Create the codes first in <em>Promo codes</em> — tip: give hidden codes a usage limit so only the first finders get them.
+        </p>
+      </div>
+
+      <div className="adm-toolbar">
+        <span className="adm-muted">{items.length} hidden {items.length === 1 ? 'code' : 'codes'}</span>
+        <div className="adm-inline">
+          <button type="button" className="btn btn-outline" onClick={add} disabled={discounts.length === 0 || items.length >= 30}><Plus size={16} /> Hide a code</button>
+          <button type="button" className="btn btn-primary" onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : 'Save'}</button>
+        </div>
+      </div>
+
+      {discounts.length === 0 && <Empty>Create a promo code first, then come back here to hide it.</Empty>}
+
+      {items.length === 0 ? (
+        discounts.length > 0 && <Empty>Nothing hidden yet. Tap “Hide a code” to start.</Empty>
+      ) : (
+        <div className="adm-hunt-list">
+          {items.map((it, i) => {
+            const d = byCode.get(it.code);
+            const live = it.active && discountUsable(d);
+            return (
+              <div key={it.id || `new-${i}`} className="adm-card adm-hunt-item">
+                <div className="form-row">
+                  <Field label="Promo code">
+                    <select className="form-input" value={it.code} onChange={(e) => update(i, { code: e.target.value })}>
+                      <option value="">Choose a code…</option>
+                      {discounts.map((dc) => (
+                        <option key={dc.id} value={dc.code}>
+                          {dc.code} — {dc.type === 'PERCENTAGE' ? `${dc.value}% off` : `${money(dc.value)} off`}{discountUsable(dc) ? '' : ' (not usable)'}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Hide it on">
+                    <select className="form-input" value={it.spot} onChange={(e) => update(i, { spot: e.target.value })}>
+                      <optgroup label="Pages">
+                        {Object.entries(spots).map(([id, text]) => <option key={id} value={id}>{text}</option>)}
+                      </optgroup>
+                      <optgroup label="Inside a product">
+                        {products.map((p) => <option key={p.id} value={`product:${p.id}`}>{p.name}</option>)}
+                      </optgroup>
+                    </select>
+                  </Field>
+                </div>
+                <Field label="Hint (optional)" hint="Shown when someone hovers over the gem, e.g. “Look where the story begins”">
+                  <input className="form-input" maxLength={140} value={it.clue || ''} onChange={(e) => update(i, { clue: e.target.value })} />
+                </Field>
+                <div className="adm-hunt-foot">
+                  <label className="adm-switch"><input type="checkbox" checked={it.active !== false} onChange={() => update(i, { active: !(it.active !== false) })} /><span>{it.active !== false ? 'On' : 'Off'}</span></label>
+                  <span className={live ? 'adm-pill adm-pill-ok' : 'adm-pill'}>{live ? 'Showing on the site' : d ? 'Hidden — code is off, used up or expired' : 'Not showing'}</span>
+                  <span className="adm-muted">Found {it.finds || 0}×{d ? ` · code used ${d.usedCount || 0}×` : ''}</span>
+                  <span className="adm-muted adm-hunt-where">{spotLabel(it.spot)}</span>
+                  <button type="button" className="btn btn-outline btn-sm adm-danger" onClick={() => remove(i)} aria-label="Remove this hidden code"><Trash2 size={14} /></button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {dirty && <p className="adm-muted" style={{ textAlign: 'right' }}>You have unsaved changes.</p>}
+    </>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+const SettingsTab = () => {
+  const { showToast, settings, refreshSettings } = useStore();
+  const [form, setForm] = useState(() => ({ ...settings, announcementsText: (settings.announcements || []).join('\n') }));
+  const [saving, setSaving] = useState(false);
+  const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
+
+  const save = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const { announcementsText, ...rest } = form;
+      await admin.saveSettings({
+        phoneDisplay: rest.phoneDisplay,
+        whatsappNumber: rest.whatsappNumber,
+        momoNumber: rest.momoNumber,
+        momoName: rest.momoName,
+        email: rest.email,
+        location: rest.location,
+        pickupPoint: rest.pickupPoint,
+        openingHours: rest.openingHours,
+        announcements: announcementsText.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 6),
+      });
+      await refreshSettings();
+      showToast('Settings saved — the website is updated', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form onSubmit={save} className="adm-card adm-settings">
+      <h3 className="adm-section-title">Contact details</h3>
+      <div className="form-row">
+        <Field label="Phone number shown on the site" hint="Shown in the footer and on the Contact page"><input className="form-input" required value={form.phoneDisplay} onChange={set('phoneDisplay')} /></Field>
+        <Field label="WhatsApp number" hint="With country code, e.g. 233591440934"><input className="form-input" required inputMode="numeric" value={form.whatsappNumber} onChange={set('whatsappNumber')} /></Field>
+      </div>
+      <div className="form-row">
+        <Field label="Email" hint="Leave empty to hide"><input className="form-input" type="email" value={form.email} onChange={set('email')} /></Field>
+        <Field label="Opening hours"><input className="form-input" value={form.openingHours} onChange={set('openingHours')} /></Field>
+      </div>
+
+      <h3 className="adm-section-title">Location</h3>
+      <div className="form-row">
+        <Field label="Business location" hint="e.g. Kumasi, Ghana"><input className="form-input" required value={form.location} onChange={set('location')} /></Field>
+        <Field label="Pickup point" hint="Where customers collect orders, e.g. Adum, Kumasi"><input className="form-input" required value={form.pickupPoint} onChange={set('pickupPoint')} /></Field>
+      </div>
+
+      <h3 className="adm-section-title">Mobile Money</h3>
+      <div className="form-row">
+        <Field label="MoMo number customers pay to"><input className="form-input" required value={form.momoNumber} onChange={set('momoNumber')} /></Field>
+        <Field label="MoMo account name"><input className="form-input" required value={form.momoName} onChange={set('momoName')} /></Field>
+      </div>
+
+      <h3 className="adm-section-title">Top banner messages</h3>
+      <Field label="One message per line (up to 6)" hint="These rotate in the blue bar at the top of every page. A deals message is added automatically while a deal is running.">
+        <textarea className="form-input" rows={4} value={form.announcementsText} onChange={set('announcementsText')} />
+      </Field>
+
+      <div className="adm-inline" style={{ justifyContent: 'flex-end' }}>
+        <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button>
+      </div>
+    </form>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 const TABS = [
   ['orders', 'Orders'],
   ['products', 'Products'],
+  ['deals', 'Deals'],
   ['categories', 'Categories'],
   ['promos', 'Promo codes'],
+  ['hunt', 'Treasure hunt'],
   ['shipments', 'Shipments'],
   ['messages', 'Messages'],
   ['customers', 'Customers'],
+  ['settings', 'Settings'],
 ];
 
 export const AdminPage = () => {
@@ -1017,7 +1411,7 @@ export const AdminPage = () => {
     );
   }
 
-  const counts = { orders: orders.length, products: products.length, categories: categories.length, promos: discounts.length, shipments: batches.length, messages: stats.newMessages, customers: customers.length };
+  const counts = { orders: orders.length, products: products.length, deals: products.filter((p) => p.onDeal).length, categories: categories.length, promos: discounts.length, shipments: batches.length, messages: stats.newMessages, customers: customers.length };
 
   return (
     <div className="section adm">
@@ -1058,9 +1452,12 @@ export const AdminPage = () => {
             {tab === 'products' && <ProductsTab products={products} setProducts={setProducts} categories={categories} onCatalogChange={onCatalogChange} />}
             {tab === 'categories' && <CategoriesTab categories={categories} products={products} onCatalogChange={onCatalogChange} />}
             {tab === 'promos' && <PromoTab discounts={discounts} setDiscounts={setDiscounts} />}
+            {tab === 'hunt' && <HuntTab discounts={discounts} products={products} />}
             {tab === 'shipments' && <ShipmentsTab batches={batches} setBatches={setBatches} />}
             {tab === 'messages' && <MessagesTab messages={messages} setMessages={setMessages} />}
             {tab === 'customers' && <CustomersTab customers={customers} />}
+            {tab === 'deals' && <DealsTab products={products} onCatalogChange={onCatalogChange} />}
+            {tab === 'settings' && <SettingsTab />}
           </div>
         )}
       </div>

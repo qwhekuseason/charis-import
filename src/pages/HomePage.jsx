@@ -5,6 +5,7 @@ import { SmartImage } from '../components/SmartImage';
 import { getActiveBatches } from '../services/api';
 import { sizedImage, imageSrcSet } from '../utils/images';
 import { ArrowRight } from 'lucide-react';
+import { HiddenGem } from '../components/HiddenGem';
 
 const HERO_IMAGE = 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?fit=crop&auto=format';
 
@@ -16,20 +17,21 @@ const BATCH_STAGE_LABELS = {
   HIGH_SEAS: 'On the way to Ghana',
   CUSTOMS_CLEARANCE: 'Clearing customs',
   CUSTOMS_CLEARING: 'Clearing customs',
-  ACCRA_HUB: 'Arrived in Accra',
+  ACCRA_HUB: 'Arrived in Kumasi',
   DELIVERY_READY: 'Out for delivery',
 };
 
 const formatShortDate = (isoDate) =>
   new Date(`${isoDate}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 
-// Ghana runs on GMT all year, so "today's" deals end at the next UTC midnight.
-const msUntilGhanaMidnight = () => DAY_MS - (Date.now() % DAY_MS);
 
+// "2d 04:15:09" or "04:15:09" — time left until a deal ends.
 const formatCountdown = (ms) => {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const pad = (n) => String(n).padStart(2, '0');
-  return `${pad(Math.floor(totalSeconds / 3600))}:${pad(Math.floor((totalSeconds % 3600) / 60))}:${pad(totalSeconds % 60)}`;
+  const days = Math.floor(totalSeconds / 86400);
+  const clock = `${pad(Math.floor((totalSeconds % 86400) / 3600))}:${pad(Math.floor((totalSeconds % 3600) / 60))}:${pad(totalSeconds % 60)}`;
+  return days > 0 ? `${days}d ${clock}` : clock;
 };
 
 // Turns a live batch record into the copy shown on the hero card.
@@ -61,12 +63,6 @@ const describeBatch = (batch) => {
   };
 };
 
-// Hard-coded until real customer reviews are added.
-const TESTIMONIALS = [
-  { quote: 'Ordered a commercial blender and kids sets to Kumasi. Packaged well and arrived at the VIP station within 24 hours.', name: 'Nana Ama S.', location: 'Kumasi' },
-  { quote: 'Same-day delivery to East Legon. The dresses fit true to size and looked exactly like the photos.', name: 'Esi Mensah', location: 'Accra' },
-  { quote: 'They replied on WhatsApp within minutes when I asked about mannequin sizes. Paying with MoMo was easy.', name: 'Kofi B.', location: 'Takoradi' },
-];
 
 export const HomePage = () => {
   const {
@@ -77,11 +73,13 @@ export const HomePage = () => {
     WHATSAPP_NUMBER,
     setPreorderTermsOpen,
     setQuoteModalOpen,
-    setReferralModalOpen
+    setReferralModalOpen,
+    reviews,
+    catalogStatus
   } = useStore();
   const [moreFilter, setMoreFilter] = useState('all');
   const [activeBatch, setActiveBatch] = useState(null);
-  const [dealsCountdown, setDealsCountdown] = useState(msUntilGhanaMidnight);
+  const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
     let cancelled = false;
@@ -96,11 +94,16 @@ export const HomePage = () => {
   }, []);
 
   useEffect(() => {
-    const timer = setInterval(() => setDealsCountdown(msUntilGhanaMidnight()), 1000);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
 
   const batchInfo = describeBatch(activeBatch);
+
+  // Only real reviews written by customers — the section stays hidden until there are some.
+  const customerReviews = (reviews || [])
+    .filter((r) => r.rating >= 4 && (r.comment || '').trim().length >= 20)
+    .slice(0, 3);
 
   const openCategory = (slug) => {
     setSelectedCategory(slug);
@@ -110,9 +113,15 @@ export const HomePage = () => {
   const discountOf = (p) => (p.originalPrice && p.originalPrice > p.price ? (p.originalPrice - p.price) / p.originalPrice : 0);
 
   // Each section shows different products so the store doesn't look like it repeats itself.
-  const dealProducts = [...products].filter((p) => discountOf(p) > 0).sort((a, b) => discountOf(b) - discountOf(a)).slice(0, 5);
+  // Deals set in Admin (with an end time) come first; otherwise show products that are simply on sale.
+  const liveDeals = products.filter((p) => p.onDeal && p.dealEndsAt && new Date(p.dealEndsAt).getTime() > now);
+  const hasLiveDeals = liveDeals.length > 0;
+  const dealProducts = (hasLiveDeals ? liveDeals : products.filter((p) => discountOf(p) > 0))
+    .sort((a, b) => discountOf(b) - discountOf(a))
+    .slice(0, 10);
+  const soonestDealEnd = hasLiveDeals ? Math.min(...liveDeals.map((p) => new Date(p.dealEndsAt).getTime())) : null;
   const dealIds = new Set(dealProducts.map((p) => p.id));
-  const maxDealPercent = Math.round(Math.max(0, ...products.map(discountOf)) * 100);
+  const maxDealPercent = Math.round(Math.max(0, ...dealProducts.map(discountOf)) * 100);
 
   const popularProducts = [...products]
     .filter((p) => !dealIds.has(p.id))
@@ -140,6 +149,7 @@ export const HomePage = () => {
             <h1 className="home-hero-title">
               See it. Send it.<br />
               <span>We'll source it.</span>
+              <HiddenGem spot="home-hero" />
             </h1>
             <p className="home-hero-text">
               Clothes, kitchen appliances, mannequins and more — ordered from trusted overseas suppliers and delivered anywhere in Ghana.
@@ -197,10 +207,13 @@ export const HomePage = () => {
       {/* Categories */}
       <section className="container home-section">
         <div className="section-head">
-          <h2>Shop by category</h2>
+          <h2>Shop by category <HiddenGem spot="home-categories" /></h2>
           <button type="button" className="section-head-link" onClick={() => navigate('categories')}>See all</button>
         </div>
         <div className="category-tiles">
+          {catalogStatus === 'loading' && categories.length === 0 && [...Array(6)].map((_, i) => (
+            <div key={i} className="category-tile is-loading" aria-hidden="true"><span className="skeleton-box" /><span className="skeleton-line" /></div>
+          ))}
           {categories.map((cat) => (
             <button type="button" key={cat.id} className="category-tile" onClick={() => openCategory(cat.slug)}>
               <SmartImage src={sizedImage(cat.image, 240)} alt="" width="120" height="120" loading="lazy" />
@@ -215,9 +228,9 @@ export const HomePage = () => {
         <section className="container home-section">
           <div className="section-head">
             <div>
-              <h2>Today's deals</h2>
+              <h2>{hasLiveDeals ? 'Deals' : 'On sale'}</h2>
               <p className="section-head-sub">
-                Up to {maxDealPercent}% off · ends in <span className="countdown">{formatCountdown(dealsCountdown)}</span>
+                Up to {maxDealPercent}% off{hasLiveDeals && <> · ends in <span className="countdown">{formatCountdown(soonestDealEnd - now)}</span></>}
               </p>
             </div>
             <button type="button" className="section-head-link" onClick={() => navigate('shop', { filter: 'deals' })}>See all deals</button>
@@ -290,25 +303,37 @@ export const HomePage = () => {
             ))}
           </div>
         </div>
-        <div className="products-grid">
-          {moreProducts.map((product) => <ProductCard key={product.id} product={product} />)}
-        </div>
+        {catalogStatus === 'loading' && products.length === 0 ? (
+          <div className="products-grid" aria-label="Loading products">
+            {[...Array(5)].map((_, i) => <div key={i} className="pcard-skeleton" aria-hidden="true" />)}
+          </div>
+        ) : moreProducts.length > 0 ? (
+          <div className="products-grid">
+            {moreProducts.map((product) => <ProductCard key={product.id} product={product} />)}
+          </div>
+        ) : (
+          <p className="empty-note">
+            {catalogStatus === 'error' ? 'We couldn’t load products. Please refresh the page.' : 'New products are coming soon.'}
+          </p>
+        )}
       </section>
 
-      {/* Reviews */}
-      <section className="container home-section">
-        <div className="section-head">
-          <h2>What customers say</h2>
-        </div>
-        <div className="review-grid">
-          {TESTIMONIALS.map((t) => (
-            <figure key={t.name} className="review-quote">
-              <blockquote>“{t.quote}”</blockquote>
-              <figcaption>{t.name} · {t.location}</figcaption>
-            </figure>
-          ))}
-        </div>
-      </section>
+      {/* Reviews — real customer reviews only */}
+      {customerReviews.length > 0 && (
+        <section className="container home-section">
+          <div className="section-head">
+            <h2>What customers say</h2>
+          </div>
+          <div className="review-grid">
+            {customerReviews.map((r) => (
+              <figure key={r.id} className="review-quote">
+                <blockquote>“{r.comment}”</blockquote>
+                <figcaption>{r.userName}{r.userCity ? ` · ${r.userCity}` : ''}</figcaption>
+              </figure>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Contact */}
       <section className="container home-section">

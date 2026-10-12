@@ -1,5 +1,6 @@
 import React from 'react';
 import { useStore } from '../context/StoreContext';
+import { HiddenGem } from '../components/HiddenGem';
 import {
   ShoppingBag,
   ShieldCheck,
@@ -38,7 +39,7 @@ export const AboutPage = () => {
               marginBottom: '16px'
             }}
           >
-            Quality imports, delivered across Ghana
+            Quality imports, delivered across Ghana <HiddenGem spot="about-page" />
           </h1>
           <p
             style={{
@@ -129,10 +130,10 @@ export const AboutPage = () => {
           >
             
             <h3 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: '8px', color: 'var(--text-primary)' }}>
-              Pickup in Accra
+              Pickup in Kumasi
             </h3>
             <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-              Collect your order for free in Spintex, Accra, or we send it to your nearest bus station.
+              Collect your order for free in Kumasi, or we send it to your nearest bus station.
             </p>
           </div>
         </div>

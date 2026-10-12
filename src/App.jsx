@@ -104,6 +104,7 @@ export const App = () => {
     quoteModalOpen,
     referralModalOpen,
     authModalOpen,
+    WHATSAPP_NUMBER,
   } = useStore();
 
   const renderCurrentPage = () => {
@@ -173,7 +174,7 @@ export const App = () => {
 
         {/* Floating WhatsApp Quick Action Button with live pulse */}
         <a
-          href="https://wa.me/233591440934?text=Hello%20CHARI%20Team%2C%20I%20have%20an%20inquiry%20about%20your%20products."
+          href={`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent('Hello CHARI, I have a question about your products.')}`}
           target="_blank"
           rel="noreferrer"
           className="floating-wa-btn"

@@ -39,10 +39,9 @@ export const CheckoutPage = () => {
     WHATSAPP_NUMBER,
     user,
     setPreorderTermsOpen,
-    availableCoupons,
-    fxRates,
     calculateVolumetricFreight,
-    referralInfo
+    referralInfo,
+    settings
   } = useStore();
   const [useCredit, setUseCredit] = useState(false);
 
@@ -81,16 +80,16 @@ export const CheckoutPage = () => {
       icon: Plane,
       cost: 75.00,
       time: '7 - 12 working days',
-      desc: 'Flown directly by air cargo into Accra for quicker delivery.'
+      desc: 'Flown to Ghana by air cargo for quicker delivery.'
     },
     {
       id: 'local_express',
-      name: 'Local delivery (Accra)',
+      name: 'Local delivery (Kumasi)',
       type: 'LOCAL_DISPATCH',
       icon: Truck,
       cost: 40.00,
       time: '1 - 2 working days',
-      desc: 'Delivered directly to your doorstep anywhere in Greater Accra from our Spintex hub.'
+      desc: 'For items already in stock — delivered to your door in Kumasi.'
     }
   ];
 
@@ -128,7 +127,7 @@ export const CheckoutPage = () => {
     fullName: user?.name || '',
     phone: user?.phone || '',
     email: user?.email || '',
-    region: user?.city ? (user.city.includes('Accra') ? 'Greater Accra' : user.city.includes('Kumasi') ? 'Ashanti' : 'Greater Accra') : 'Greater Accra',
+    region: user?.city?.includes('Accra') ? 'Greater Accra' : 'Ashanti',
     city: user?.city || '',
     address: user?.address || '',
     notes: ''
@@ -247,11 +246,6 @@ export const CheckoutPage = () => {
         containerNumber: null,
         flightNumber: null,
         volumetricWeight: { cbm: freightCalc.cbm, actualKg: freightCalc.actualKg },
-        fxLock: {
-          usdRate: fxRates?.USD_GHS || 15.65,
-          rmbRate: fxRates?.RMB_GHS || 2.18,
-          lockedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' GMT'
-        },
         idempotencyKey,
         items: cart.map((i) => ({
           id: i.product?.id || i.id,
@@ -276,14 +270,14 @@ export const CheckoutPage = () => {
         paymentMethod:
           paymentMethod === 'momo'
             ? `${momoProvider.toUpperCase()} MoMo Transfer (${momoNumber || formData.phone})`
-            : 'Pay on collection (Spintex, Accra)',
+            : `Pay on collection (${settings.pickupPoint})`,
         waybillNumber: `BL-GH-${orderId}`,
         steps: [
-          { title: 'Order Confirmed', time: 'Just Now', location: 'Charis Import Office', done: true, note: 'Order registered and price locked in Cedis.' },
+          { title: 'Order Confirmed', time: 'Just Now', location: 'CHARI', done: true, note: 'Order registered and price locked in Cedis.' },
           { title: 'Supplier Processing & Quality Check', time: '1–3 Days', location: 'Overseas Warehouse', done: false, note: 'Supplier prepares and inspects items before shipping.' },
           { title: 'In Transit to Ghana', time: selectedShipping.type === 'SEA_FREIGHT' ? 'Sea: 35–45 days' : 'Air: 7–12 days', location: 'En Route to Ghana', done: false, note: 'Cargo moving safely to Ghana.' },
           { title: 'Customs Clearance at Port', time: 'Pending Arrival', location: 'Tema Port / Airport', done: false, note: 'Customs duties and port clearance processed.' },
-          { title: 'Arrived at Accra Hub', time: 'Pending', location: 'Spintex Rd Hub, Accra', done: false, note: 'Sorted and prepared for local delivery.' },
+          { title: 'Arrived in Kumasi', time: 'Pending', location: settings.pickupPoint, done: false, note: 'Sorted and prepared for local delivery.' },
           { title: 'Out for Delivery / Ready for Pickup', time: 'Pending', location: `${formData.city}, ${formData.region}`, done: false, note: 'Delivered to your address or ready for pickup.' }
         ]
       };
@@ -319,7 +313,7 @@ export const CheckoutPage = () => {
       .join('\n');
 
     const msg = encodeURIComponent(
-      `*📦 NEW ORDER CONFIRMATION - CHARIS IMPORT*\n\n` +
+      `*New order — CHARI*\n\n` +
       `*Order ID:* #${code}\n` +
       `*Customer:* ${order.customerName}\n` +
       `*Phone:* ${order.phone}\n` +
@@ -333,8 +327,8 @@ export const CheckoutPage = () => {
       (order.creditUsed ? `*Store credit:* -GH₵${order.creditUsed.toFixed(2)}\n` : '') +
       `*TOTAL PAYABLE:* GH₵${(order.total || 0).toFixed(2)}\n\n` +
       `*Payment Method:* ${order.paymentMethod}\n` +
-      `*Payment MoMo Account:* 059 144 0934 (CHARIS IMPORT)\n\n` +
-      `Hello CHARIS team, I have confirmed this order on your website and am sending my payment details / transfer receipt now.`
+      `*Pay to MoMo:* ${settings.momoNumber} (${settings.momoName})\n\n` +
+      `Hello CHARI, I have placed this order on your website and will send my payment receipt now.`
     );
     return `https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`;
   };
@@ -531,7 +525,7 @@ export const CheckoutPage = () => {
                       Mobile Money Transfer Details
                     </h3>
                     <div style={{ fontSize: '0.76rem', color: '#059669', fontWeight: 700 }}>
-                      Official Charis Import Verified Recipient
+                      Official CHARI payment account
                     </div>
                   </div>
                 </div>
@@ -556,18 +550,15 @@ export const CheckoutPage = () => {
                 >
                   <div>
                     <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                      TRANSFER TO (MTN MOMO NUMBER)
+                      MoMo number
                     </div>
                     <div style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--text-primary)', letterSpacing: '0.02em', marginTop: '2px' }}>
-                      059 144 0934
-                    </div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                      International format: +233 59 144 0934
+                      {settings.momoNumber}
                     </div>
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleCopy('0591440934', 'momoNumber', 'MoMo Number')}
+                    onClick={() => handleCopy(settings.momoNumber.replace(/\s/g, ''), 'momoNumber', 'MoMo number')}
                     className="btn btn-outline"
                     style={{ padding: '8px 14px', fontSize: '0.82rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}
                   >
@@ -600,10 +591,10 @@ export const CheckoutPage = () => {
                 >
                   <div>
                     <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                      REGISTERED ACCOUNT NAME
+                      Account name
                     </div>
                     <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: '2px' }}>
-                      CHARIS IMPORT
+                      {settings.momoName}
                     </div>
                   </div>
                   <span style={{ fontSize: '0.74rem', color: '#059669', fontWeight: 700, backgroundColor: 'rgba(16, 185, 129, 0.1)', padding: '3px 8px', borderRadius: '6px' }}>
@@ -714,7 +705,7 @@ export const CheckoutPage = () => {
                 </div>
                 <ol style={{ paddingLeft: '18px', margin: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   <li>Dial <strong>*170#</strong> or open your MTN MoMo / Bank App.</li>
-                  <li>Transfer <strong>GH₵{placedOrderDetails.total.toFixed(2)}</strong> to <strong>059 144 0934</strong> with reference <strong>{placedOrderDetails.orderCode || placedOrderDetails.orderId}</strong>.</li>
+                  <li>Transfer <strong>GH₵{placedOrderDetails.total.toFixed(2)}</strong> to <strong>{settings.momoNumber}</strong> with reference <strong>{placedOrderDetails.orderCode || placedOrderDetails.orderId}</strong>.</li>
                   <li>Click the button below to send your payment screenshot or SMS confirmation to WhatsApp.</li>
                 </ol>
               </div>
@@ -860,7 +851,7 @@ export const CheckoutPage = () => {
                         type="text"
                         required
                         className="glass-input"
-                        placeholder="e.g. Spintex / Adum / Takoradi"
+                        placeholder="e.g. Adum / Asokwa / Takoradi"
                         value={formData.city}
                         onChange={(e) => setFormData({ ...formData, city: e.target.value })}
                         style={{ width: '100%' }}
@@ -876,7 +867,7 @@ export const CheckoutPage = () => {
                       type="text"
                       required
                       className="glass-input"
-                      placeholder="e.g. VIP Station Kumasi, or Hse No. 12 Spintex Road"
+                      placeholder="e.g. VIP Station Accra, or Hse No. 12, Asokwa"
                       value={formData.address}
                       onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                       style={{ width: '100%' }}
@@ -965,7 +956,7 @@ export const CheckoutPage = () => {
                         Select Payment Method
                       </h3>
                       <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
-                        Pay safely using Mobile Money (MoMo) or pay upon pickup in Accra.
+                        Pay with Mobile Money (MoMo), or pay when you collect in Kumasi.
                       </p>
                     </div>
                     <button
@@ -1023,7 +1014,7 @@ export const CheckoutPage = () => {
                           </div>
                         </div>
                         <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                          Transfer directly to our official MoMo number (059 144 0934) after confirming. Details provided on next screen and sent to WhatsApp.
+                          You'll see our MoMo number on the next screen after you place the order.
                         </p>
                       </div>
                     </label>
@@ -1119,10 +1110,10 @@ export const CheckoutPage = () => {
                       />
                       <div>
                         <span style={{ fontWeight: 800, fontSize: '0.96rem', color: 'var(--text-primary)' }}>
-                          Pay when you collect (Accra)
+                          Pay when you collect (Kumasi)
                         </span>
                         <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                          Check your items at our Spintex, Accra pickup point, then pay.
+                          Check your items at our Kumasi pickup point, then pay.
                         </p>
                       </div>
                     </label>

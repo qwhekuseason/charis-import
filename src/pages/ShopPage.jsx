@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useStore } from '../context/StoreContext';
+import { HiddenGem } from '../components/HiddenGem';
 import { ProductCard } from '../components/ProductCard';
 import { productCategorySlug } from '../utils/categories';
 import { SlidersHorizontal, X, Search, ChevronDown } from 'lucide-react';
@@ -9,6 +10,7 @@ const PRICE_MAX = 5000;
 export const ShopPage = () => {
   const {
     products,
+    catalogStatus,
     categories,
     selectedCategory,
     setSelectedCategory,
@@ -88,7 +90,7 @@ export const ShopPage = () => {
       <div className="container">
         {/* Header */}
         <div className="shop-header">
-          <h1 className="shop-title">{pageTitle}</h1>
+          <h1 className="shop-title">{pageTitle} <HiddenGem spot="shop-header" /></h1>
           <p className="shop-subtitle">
             Order from overseas suppliers and we deliver to you anywhere in Ghana.
           </p>
@@ -247,7 +249,11 @@ export const ShopPage = () => {
               </div>
             )}
 
-            {filteredProducts.length === 0 ? (
+            {catalogStatus === 'loading' && products.length === 0 ? (
+              <div className="products-grid" aria-label="Loading products">
+                {[...Array(8)].map((_, i) => <div key={i} className="pcard-skeleton" aria-hidden="true" />)}
+              </div>
+            ) : filteredProducts.length === 0 ? (
               <div className="shop-empty">
                 <h3>
                   {selectedCategory !== 'all' && countFor(selectedCategory) === 0

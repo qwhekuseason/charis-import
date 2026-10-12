@@ -16,7 +16,6 @@ import {
 
 export const Navbar = () => {
   const {
-    fxRates,
     currentPage,
     pageParams,
     navigate,
@@ -29,7 +28,8 @@ export const Navbar = () => {
     user,
     openAuth,
     setQuoteModalOpen,
-    setReferralModalOpen
+    setReferralModalOpen,
+    WHATSAPP_NUMBER
   } = useStore();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -62,7 +62,7 @@ export const Navbar = () => {
           style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
         >
           <img
-            src="/charis-logo.jpeg"
+            src="/chari-mark.jpg"
             alt="CHARI"
             style={{
               width: '42px',
@@ -365,7 +365,7 @@ export const Navbar = () => {
           {/* Mobile WhatsApp */}
           <div style={{ marginTop: '16px' }}>
             <a
-              href="https://wa.me/233591440934"
+              href={`https://wa.me/${WHATSAPP_NUMBER}`}
               target="_blank"
               rel="noreferrer"
               style={{

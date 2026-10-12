@@ -76,6 +76,36 @@ const upload = multer({
 // "Food & Snacks" → "food-snacks" (must match src/utils/categories.js)
 const slugify = (value) => String(value || '').toLowerCase().replace(/&/g, ' ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
+// ── Deals ──────────────────────────────────────────────────────────────
+// A deal set in Admin (dealPrice + dealEndsAt) replaces the price until it ends,
+// then the normal price comes back by itself — no one has to remember to undo it.
+const isDealActive = (p) =>
+  p.dealPrice != null && p.dealEndsAt != null && new Date(p.dealEndsAt) > new Date() && p.dealPrice < p.price;
+const effectivePrice = (p) => (isDealActive(p) ? p.dealPrice : p.price);
+
+// Product as the shop and Admin see it. `price` is what customers pay right now;
+// `listPrice` / `listWasPrice` are the normal prices Admin edits.
+const formatProduct = (p) => {
+  const onDeal = isDealActive(p);
+  return {
+    ...p,
+    price: onDeal ? p.dealPrice : p.price,
+    // During a deal the crossed-out price is the normal price, so "−25%" means what the admin set.
+    originalPrice: onDeal ? p.price : p.originalPrice,
+    listPrice: p.price,
+    listWasPrice: p.originalPrice,
+    onDeal,
+    dealEndsAt: onDeal ? p.dealEndsAt : null,
+    images: p.gallery && p.gallery.length > 0 ? p.gallery : [p.image],
+    categorySlug: slugify(p.category),
+    justLanded: p.badge === 'New',
+    specifications: p.specs || [],
+    // Stars only when real customers have reviewed it (new products default to 4.8 in the database).
+    rating: p.reviewsCount > 0 ? p.rating : 0,
+    reviewCount: p.reviewsCount,
+  };
+};
+
 // Render sits behind a proxy — trust it so req.ip is the visitor's real address.
 app.set('trust proxy', 1);
 
@@ -474,14 +504,7 @@ app.get('/api/products', async (req, res) => {
       orderBy,
     });
 
-    const formatted = products.map((p) => ({
-      ...p,
-      images: p.gallery && p.gallery.length > 0 ? p.gallery : [p.image],
-      categorySlug: slugify(p.category),
-      justLanded: p.badge === 'New',
-      specifications: p.specs || [],
-      reviewCount: p.reviewsCount,
-    }));
+    const formatted = products.map(formatProduct);
 
     res.json({ success: true, count: formatted.length, data: formatted });
   } catch (error) {
@@ -506,14 +529,7 @@ app.get('/api/products/:idOrSlug', async (req, res) => {
 
     res.json({
       success: true,
-      data: {
-        ...product,
-        images: product.gallery && product.gallery.length > 0 ? product.gallery : [product.image],
-        categorySlug: slugify(product.category),
-        justLanded: product.badge === 'New',
-        specifications: product.specs || [],
-        reviewCount: product.reviewsCount,
-      },
+      data: formatProduct(product),
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -635,7 +651,7 @@ app.post('/api/products', authenticateUser, requireAdmin, async (req, res) => {
       data: { ...data, slug: await uniqueProductSlug(data.name) },
     });
 
-    res.status(201).json({ success: true, data: { ...newProduct, categorySlug: slugify(newProduct.category) } });
+    res.status(201).json({ success: true, data: formatProduct(newProduct) });
   } catch (error) {
     console.error('Error creating product:', error);
     res.status(500).json({ success: false, error: 'Could not save the product. Please try again.' });
@@ -656,7 +672,7 @@ app.put('/api/products/:id', authenticateUser, requireAdmin, async (req, res) =>
     if (data.name && data.name !== existing.name) data.slug = await uniqueProductSlug(data.name, existing.id);
 
     const updated = await prisma.product.update({ where: { id: existing.id }, data });
-    res.json({ success: true, data: { ...updated, categorySlug: slugify(updated.category) } });
+    res.json({ success: true, data: formatProduct(updated) });
   } catch (error) {
     console.error('Error updating product:', error);
     res.status(500).json({ success: false, error: 'Could not update the product. Please try again.' });
@@ -673,6 +689,262 @@ app.delete('/api/products/:id', authenticateUser, requireAdmin, async (req, res)
     res.json({ success: true, message: 'Product deleted successfully' });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Could not delete the product. Please try again.' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Deals API (Admin)
+// ---------------------------------------------------------------------------
+
+// POST /api/deals — put one or more products on deal until a given date/time.
+// Body: { endsAt, items: [{ productId, dealPrice }] }
+app.post('/api/deals', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const endsAt = new Date(req.body.endsAt);
+    if (Number.isNaN(endsAt.getTime()) || endsAt <= new Date()) {
+      return res.status(400).json({ success: false, error: 'Choose an end date and time in the future.' });
+    }
+    const items = Array.isArray(req.body.items) ? req.body.items : [];
+    if (items.length === 0) return res.status(400).json({ success: false, error: 'Choose at least one product.' });
+
+    const products = await prisma.product.findMany({ where: { id: { in: items.map((i) => String(i.productId)) } } });
+    const byId = new Map(products.map((p) => [p.id, p]));
+    for (const item of items) {
+      const p = byId.get(String(item.productId));
+      const dealPrice = Number(item.dealPrice);
+      if (!p) return res.status(400).json({ success: false, error: 'One of the products no longer exists. Refresh and try again.' });
+      if (!Number.isFinite(dealPrice) || dealPrice <= 0 || dealPrice >= p.price) {
+        return res.status(400).json({ success: false, error: `Deal price for "${p.name}" must be above 0 and below its normal price (GH₵${p.price.toFixed(2)}).` });
+      }
+    }
+
+    const updated = await prisma.$transaction(items.map((item) =>
+      prisma.product.update({
+        where: { id: String(item.productId) },
+        data: { dealPrice: roundMoney(Number(item.dealPrice)), dealEndsAt: endsAt },
+      })
+    ));
+    res.json({ success: true, data: updated.map(formatProduct) });
+  } catch (error) {
+    console.error('Error saving deals:', error);
+    res.status(500).json({ success: false, error: 'Could not save the deal. Please try again.' });
+  }
+});
+
+// DELETE /api/deals/:productId — end a deal now (normal price returns).
+app.delete('/api/deals/:productId', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const updated = await prisma.product.update({
+      where: { id: req.params.productId },
+      data: { dealPrice: null, dealEndsAt: null },
+    });
+    res.json({ success: true, data: formatProduct(updated) });
+  } catch (error) {
+    res.status(404).json({ success: false, error: 'Product not found.' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Store settings (business details & site text the admin can change)
+// ---------------------------------------------------------------------------
+const DEFAULT_SETTINGS = {
+  phoneDisplay: '+233 59 144 0934',
+  whatsappNumber: '233591440934',
+  momoNumber: '059 144 0934',
+  momoName: 'CHARIS IMPORT',
+  email: 'support@charisimport.com',
+  location: 'Kumasi, Ghana',
+  pickupPoint: 'Kumasi',
+  openingHours: 'Monday – Saturday, 8:00 am – 6:30 pm',
+  announcements: [
+    'Invite a friend, earn GH₵25 in store credit',
+    "Seen it online? Request any item and we'll source it",
+  ],
+};
+
+const SETTING_RULES = {
+  phoneDisplay: (v) => typeof v === 'string' && v.trim().length >= 9 && v.trim().length <= 30,
+  whatsappNumber: (v) => typeof v === 'string' && /^\d{10,15}$/.test(v.replace(/\D/g, '')),
+  momoNumber: (v) => typeof v === 'string' && v.replace(/\D/g, '').length >= 9,
+  momoName: (v) => typeof v === 'string' && v.trim().length > 0 && v.length <= 60,
+  email: (v) => typeof v === 'string' && (v === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())),
+  location: (v) => typeof v === 'string' && v.trim().length > 1 && v.length <= 120,
+  pickupPoint: (v) => typeof v === 'string' && v.trim().length > 1 && v.length <= 120,
+  openingHours: (v) => typeof v === 'string' && v.length <= 120,
+  announcements: (v) => Array.isArray(v) && v.length <= 6 && v.every((m) => typeof m === 'string' && m.length <= 120),
+};
+
+const SETTING_LABELS = {
+  phoneDisplay: 'phone number',
+  whatsappNumber: 'WhatsApp number (digits with country code, e.g. 233591440934)',
+  momoNumber: 'MoMo number',
+  momoName: 'MoMo account name',
+  email: 'email address',
+  location: 'business location',
+  pickupPoint: 'pickup point',
+  openingHours: 'opening hours',
+  announcements: 'banner messages (up to 6, each under 120 characters)',
+};
+
+const loadSettings = async () => {
+  const rows = await prisma.storeSetting.findMany();
+  // Only public settings — the treasure hunt (with its codes) is stored here too but never sent out.
+  const saved = Object.fromEntries(rows.filter((r) => r.key in DEFAULT_SETTINGS).map((r) => [r.key, r.value]));
+  return { ...DEFAULT_SETTINGS, ...saved };
+};
+
+// GET /api/settings — public
+app.get('/api/settings', async (req, res) => {
+  try {
+    res.json({ success: true, data: await loadSettings() });
+  } catch (error) {
+    // Database not updated yet → still serve the defaults so the site works.
+    res.json({ success: true, data: DEFAULT_SETTINGS });
+  }
+});
+
+// PUT /api/settings — Admin
+app.put('/api/settings', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const changes = {};
+    for (const [key, value] of Object.entries(req.body || {})) {
+      if (!SETTING_RULES[key]) continue;
+      const clean = key === 'whatsappNumber' ? String(value).replace(/\D/g, '')
+        : key === 'announcements' ? value.map((m) => String(m).trim()).filter(Boolean)
+        : typeof value === 'string' ? value.trim() : value;
+      if (!SETTING_RULES[key](key === 'announcements' ? clean : value)) {
+        return res.status(400).json({ success: false, error: `Please check the ${SETTING_LABELS[key] || key}.` });
+      }
+      changes[key] = clean;
+    }
+    for (const [key, value] of Object.entries(changes)) {
+      await prisma.storeSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+    }
+    res.json({ success: true, data: await loadSettings() });
+  } catch (error) {
+    console.error('Error saving settings:', error);
+    res.status(500).json({ success: false, error: 'Could not save settings.' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Treasure hunt — promo codes hidden around the site
+//   Admin hides a promo code at a spot (a page, the footer, or inside a product).
+//   The shop only learns WHERE gems are; the code is revealed when someone finds one.
+// ---------------------------------------------------------------------------
+const HUNT_SPOTS = {
+  'home-hero': 'Home page — top',
+  'home-categories': 'Home page — categories',
+  'shop-header': 'Shop page — top',
+  'categories-page': 'Categories page',
+  'about-page': 'About page',
+  'import-tips-page': 'Buying guide page',
+  'contact-page': 'Contact page',
+  'track-page': 'Track order page',
+  footer: 'Footer (every page)',
+};
+const huntLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: 'Too many tries. Please wait a few minutes.' });
+
+const loadHunt = async () => {
+  const row = await prisma.storeSetting.findUnique({ where: { key: 'treasureHunt' } });
+  return Array.isArray(row?.value) ? row.value : [];
+};
+const saveHunt = (items) =>
+  prisma.storeSetting.upsert({ where: { key: 'treasureHunt' }, update: { value: items }, create: { key: 'treasureHunt', value: items } });
+
+// A gem only shows while its promo code can actually be used.
+const usableDiscount = async (code) => {
+  const d = await prisma.discount.findUnique({ where: { code } });
+  if (!d || !d.isActive) return null;
+  if (d.expiresAt && new Date() > new Date(d.expiresAt)) return null;
+  if (d.usageLimit && d.usedCount >= d.usageLimit) return null;
+  return d;
+};
+
+// GET /api/hunt/spots — public: where gems are hidden (no codes)
+app.get('/api/hunt/spots', async (req, res) => {
+  try {
+    const items = await loadHunt();
+    const visible = [];
+    for (const item of items) {
+      if (item.active && (await usableDiscount(item.code))) visible.push({ id: item.id, spot: item.spot, clue: item.clue || '' });
+    }
+    res.json({ success: true, data: visible });
+  } catch (error) {
+    res.json({ success: true, data: [] });
+  }
+});
+
+// POST /api/hunt/:id/claim — public: reveal the code for a gem that was found
+app.post('/api/hunt/:id/claim', huntLimiter, async (req, res) => {
+  try {
+    const items = await loadHunt();
+    const item = items.find((i) => i.id === req.params.id && i.active);
+    const discount = item && (await usableDiscount(item.code));
+    if (!discount) return res.status(404).json({ success: false, error: 'This treasure has already been taken. Keep hunting!' });
+
+    item.finds = (item.finds || 0) + 1;
+    await saveHunt(items);
+
+    res.json({
+      success: true,
+      data: {
+        code: discount.code,
+        offer: discount.type === 'PERCENTAGE' ? `${discount.value}% off` : `GH₵${discount.value} off`,
+        maxDiscount: discount.maxDiscount,
+        minOrderAmount: discount.minOrderAmount || 0,
+        expiresAt: discount.expiresAt,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Could not open the treasure. Please try again.' });
+  }
+});
+
+// GET /api/hunt — Admin: everything, including codes and how often each was found
+app.get('/api/hunt', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    res.json({ success: true, data: { items: await loadHunt(), spots: HUNT_SPOTS } });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Could not load the treasure hunt.' });
+  }
+});
+
+// PUT /api/hunt — Admin: replace the list of hidden coupons
+app.put('/api/hunt', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const incoming = Array.isArray(req.body.items) ? req.body.items : null;
+    if (!incoming || incoming.length > 30) return res.status(400).json({ success: false, error: 'Send a list of up to 30 hidden coupons.' });
+    const existing = new Map((await loadHunt()).map((i) => [i.id, i]));
+    const clean = [];
+    for (const raw of incoming) {
+      const code = String(raw.code || '').trim().toUpperCase();
+      const spot = String(raw.spot || '');
+      if (!(await prisma.discount.findUnique({ where: { code } }))) {
+        return res.status(400).json({ success: false, error: `Promo code "${code || '(empty)'}" doesn't exist. Create it in Promo codes first.` });
+      }
+      if (spot.startsWith('product:')) {
+        if (!(await prisma.product.findUnique({ where: { id: spot.slice(8) } }))) {
+          return res.status(400).json({ success: false, error: 'The product chosen as a hiding place no longer exists.' });
+        }
+      } else if (!HUNT_SPOTS[spot]) {
+        return res.status(400).json({ success: false, error: 'Choose where to hide each coupon.' });
+      }
+      const id = raw.id && existing.has(raw.id) ? raw.id : crypto.randomBytes(6).toString('hex');
+      clean.push({
+        id,
+        code,
+        spot,
+        clue: String(raw.clue || '').trim().slice(0, 140),
+        active: raw.active !== false,
+        finds: existing.get(id)?.finds || 0,
+      });
+    }
+    await saveHunt(clean);
+    res.json({ success: true, data: { items: clean, spots: HUNT_SPOTS } });
+  } catch (error) {
+    console.error('Error saving treasure hunt:', error);
+    res.status(500).json({ success: false, error: 'Could not save the treasure hunt.' });
   }
 });
 
@@ -787,7 +1059,7 @@ app.delete('/api/categories/:id', authenticateUser, requireAdmin, async (req, re
 const DELIVERY_OPTIONS = [
   { id: 'sea_freight', name: 'Sea shipping', fee: 35 },
   { id: 'air_cargo', name: 'Air shipping', fee: 75 },
-  { id: 'local_express', name: 'Local delivery (Accra)', fee: 40 },
+  { id: 'local_express', name: 'Local delivery (Kumasi)', fee: 40 },
 ];
 
 const roundMoney = (n) => Math.round(n * 100) / 100;
@@ -953,7 +1225,7 @@ app.post('/api/orders', optionalAuth, async (req, res) => {
         id: product.id,
         name: product.name,
         qty,
-        price: product.price,
+        price: effectivePrice(product),
         image: product.image,
       });
     }
@@ -1196,47 +1468,6 @@ app.get('/api/inquiries', authenticateUser, requireAdmin, async (req, res) => {
 // Discounts & Promo Codes API
 // ---------------------------------------------------------------------------
 
-// Auto-seed default discounts if table is empty
-const seedInitialDiscounts = async () => {
-  try {
-    const count = await prisma.discount.count();
-    if (count === 0) {
-      await prisma.discount.createMany({
-        data: [
-          {
-            code: 'CHARIS10',
-            description: '10% off promotional store coupon',
-            type: 'PERCENTAGE',
-            value: 10,
-            minOrderAmount: 0,
-            isActive: true,
-          },
-          {
-            code: 'WELCOME',
-            description: 'New customer welcome discount of GH₵15 off',
-            type: 'FIXED',
-            value: 15,
-            minOrderAmount: 50,
-            isActive: true,
-          },
-          {
-            code: 'VIPDISPATCH',
-            description: 'GH₵25 discount on bulk orders over GH₵250',
-            type: 'FIXED',
-            value: 25,
-            minOrderAmount: 250,
-            isActive: true,
-          }
-        ]
-      });
-      console.log('🎟️ Seeded initial store discount codes (CHARIS10, WELCOME, VIPDISPATCH)');
-    }
-  } catch (err) {
-    console.warn('Initial discounts check:', err.message);
-  }
-};
-seedInitialDiscounts();
-
 // A date-only expiry ("2026-12-31") means the code works until the end of that day.
 const endOfDay = (value) => new Date(/^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? `${value}T23:59:59Z` : value);
 
@@ -1424,29 +1655,7 @@ app.post('/api/discounts/validate', async (req, res) => {
   }
 });
 
-// GET /api/discounts/active (Public - get active promo codes for customer checkout)
-app.get('/api/discounts/active', async (req, res) => {
-  try {
-    const discounts = await prisma.discount.findMany({
-      where: { isActive: true },
-      orderBy: { value: 'desc' }
-    });
-    res.json({
-      success: true,
-      data: discounts.map((d) => ({
-        code: d.code,
-        type: d.type,
-        value: d.value,
-        badge: d.type === 'PERCENTAGE' ? `${d.value}% OFF` : `GH₵${d.value} OFF`,
-        description: d.description || `Special discount on your order`,
-        minSpend: d.minOrderAmount || 0,
-        expiresAt: d.expiresAt
-      }))
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
+// (There is deliberately no public list of promo codes — customers find them in the treasure hunt.)
 
 // ---------------------------------------------------------------------------
 // Container Batches & Logistics API (/api/batches)
@@ -1738,6 +1947,6 @@ if (fs.existsSync(distDir)) {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`🚀 CHARIS Import API Server running on http://localhost:${PORT}`);
+  console.log(`🚀 CHARI server running on http://localhost:${PORT}`);
   console.log(`📦 Connected to Neon PostgreSQL Database with JWT Auth`);
 });

@@ -8,24 +8,27 @@ generator client {
 }
 
 model Product {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   name          String
-  slug          String   @unique
+  slug          String    @unique
   category      String
   price         Float
   originalPrice Float?
-  inStock       Boolean  @default(true)
-  rating        Float    @default(4.8)
-  reviewsCount  Int      @default(0)
+  inStock       Boolean   @default(true)
+  rating        Float     @default(4.8)
+  reviewsCount  Int       @default(0)
   badge         String?
   image         String
-  gallery       String[] @default([])
+  gallery       String[]  @default([])
   description   String
   specs         Json?
-  tags          String[] @default([])
+  tags          String[]  @default([])
+  // Time-limited deal set from Admin: while dealEndsAt is in the future, customers pay dealPrice.
+  dealPrice     Float?
+  dealEndsAt    DateTime?
   reviews       Review[]
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }
 
 model Category {
@@ -162,4 +165,12 @@ model Review {
   verified     Boolean  @default(true)
   helpfulCount Int      @default(0)
   createdAt    DateTime @default(now())
+}
+
+// Business details and site text the admin can change without a developer
+// (phone, MoMo number, location, banner messages). One row per setting.
+model StoreSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
 }

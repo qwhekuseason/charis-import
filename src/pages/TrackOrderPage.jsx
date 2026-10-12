@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useStore } from '../context/StoreContext';
+import { HiddenGem } from '../components/HiddenGem';
 import { sizedImage } from '../utils/images';
 import { trackOrder as apiTrackOrder } from '../services/api';
 import {
@@ -114,7 +115,7 @@ export const TrackOrderPage = () => {
           
 
           <h1 style={{ fontSize: 'clamp(1.6rem, 5vw, 2.2rem)', fontWeight: 900, color: 'var(--text-primary)', marginBottom: '8px', letterSpacing: '-0.02em' }}>
-            Track your order
+            Track your order <HiddenGem spot="track-page" />
           </h1>
           <p style={{ fontSize: '0.94rem', color: 'var(--text-muted)', maxWidth: '620px', margin: '0 auto 24px', lineHeight: 1.6 }}>
             Enter your order code and phone number to see where your order is.
@@ -483,7 +484,7 @@ export const TrackOrderPage = () => {
                 </span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px', fontWeight: 800, color: 'var(--text-primary)' }}>
                   
-                  <span>{searchedOrder.destination || 'Pickup in Accra'}</span>
+                  <span>{searchedOrder.destination || 'Pickup in Kumasi'}</span>
                 </div>
                 <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px' }}>
                   Fulfillment: {searchedOrder.shippingMethod || 'Standard Importation Logistics'}
@@ -581,7 +582,7 @@ export const TrackOrderPage = () => {
                   Need customs clearance or delivery assistance?
                 </div>
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  Our Spintex Rd importation logistics team responds immediately on WhatsApp.
+                  Our Kumasi team replies on WhatsApp every day.
                 </div>
               </div>
 

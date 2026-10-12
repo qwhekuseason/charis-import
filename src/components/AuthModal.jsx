@@ -9,7 +9,7 @@ export const AuthModal = () => {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [city, setCity] = useState('Accra');
+  const [city, setCity] = useState('Kumasi');
   const [inviteCode, setInviteCode] = useState(pendingInviteCode || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');

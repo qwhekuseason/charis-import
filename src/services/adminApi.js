@@ -55,6 +55,18 @@ export const listMessages = async () => (await request('/inquiries')).data || []
 export const setMessageStatus = async (id, status) => (await request(`/inquiries/${id}`, { method: 'PATCH', body: { status } })).data;
 export const listCustomers = async () => (await request('/auth/users')).data || [];
 
+// Deals
+export const startDeals = async (endsAt, items) => (await request('/deals', { method: 'POST', body: { endsAt, items } })).data;
+export const endDeal = async (productId) => (await request(`/deals/${productId}`, { method: 'DELETE' })).data;
+
+// Settings
+export const getSettings = async () => (await request('/settings')).data;
+export const saveSettings = async (changes) => (await request('/settings', { method: 'PUT', body: changes })).data;
+
+// Treasure hunt (promo codes hidden around the site)
+export const getHunt = async () => (await request('/hunt')).data;
+export const saveHunt = async (items) => (await request('/hunt', { method: 'PUT', body: { items } })).data;
+
 // Photos
 export const uploadPhoto = async (file) => {
   const form = new FormData();

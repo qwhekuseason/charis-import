@@ -1,5 +1,6 @@
 import React from 'react';
 import { useStore } from '../context/StoreContext';
+import { HiddenGem } from '../components/HiddenGem';
 import { sizedImage } from '../utils/images';
 import { productCategorySlug } from '../utils/categories';
 import { ArrowRight, Layers } from 'lucide-react';
@@ -30,7 +31,7 @@ export const CategoriesPage = () => {
         >
           <span className="section-pretitle">Categories</span>
           <h1 style={{ fontSize: '2.4rem', fontWeight: 900, color: 'var(--text-primary)', marginBottom: '10px' }}>
-            Shop by category
+            Shop by category <HiddenGem spot="categories-page" />
           </h1>
           <p style={{ fontSize: '1rem', color: 'var(--text-muted)' }}>
             Find what you need, with delivery anywhere in Ghana.

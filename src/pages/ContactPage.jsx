@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useStore } from '../context/StoreContext';
+import { HiddenGem } from '../components/HiddenGem';
 import { submitInquiry } from '../services/api';
 import {
   MessageCircle,
@@ -12,7 +13,7 @@ import {
 } from 'lucide-react';
 
 export const ContactPage = () => {
-  const { showToast, WHATSAPP_NUMBER } = useStore();
+  const { showToast, WHATSAPP_NUMBER, settings } = useStore();
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
@@ -68,10 +69,10 @@ export const ContactPage = () => {
         >
           <span className="section-pretitle">Get in Touch</span>
           <h1 style={{ fontSize: '2.4rem', fontWeight: 900, color: 'var(--text-primary)', marginBottom: '8px' }}>
-            Contact CHARI
+            Contact CHARI <HiddenGem spot="contact-page" />
           </h1>
           <p style={{ fontSize: '0.98rem', color: 'var(--text-muted)', maxWidth: '620px', margin: '0 auto' }}>
-            Questions about a product, an order or a special request? Our Accra team is happy to help.
+            Questions about a product, an order or a special request? Our Kumasi team is happy to help.
           </p>
         </div>
 
@@ -110,76 +111,34 @@ export const ContactPage = () => {
                 className="btn btn-whatsapp"
                 style={{ width: '100%' }}
               >
-                <MessageCircle size={18} /> Chat: +233 59 144 0934
+                <MessageCircle size={18} /> Chat on WhatsApp
               </a>
             </div>
 
-            {/* Phone & Email */}
-            <div
-              style={{
-                backgroundColor: 'var(--bg-card)',
-                borderRadius: '14px',
-                padding: '24px',
-                border: '1px solid var(--border-light)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '16px'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
-                
-                <div>
-                  <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>Phone Lines</h4>
-                  <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)', fontWeight: 600, marginTop: '2px' }}>
-                    +233 24 977 3097
-                  </div>
-                  <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                    +233 59 717 7580
-                  </div>
-                </div>
+            {/* Details */}
+            <div className="contact-details">
+              <div>
+                <h4>Phone</h4>
+                <a href={`tel:+${settings.whatsappNumber}`}>{settings.phoneDisplay}</a>
               </div>
-
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
-                
+              {settings.email && (
                 <div>
-                  <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>Email Address</h4>
-                  <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)', fontWeight: 600, marginTop: '2px' }}>
-                    orders@charisimport.com
-                  </div>
-                  <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                    support@charisimport.com
-                  </div>
+                  <h4>Email</h4>
+                  <a href={`mailto:${settings.email}`}>{settings.email}</a>
                 </div>
+              )}
+              <div>
+                <h4>Pickup location</h4>
+                <p>{settings.pickupPoint}</p>
+                <p className="contact-note">Free pickup available</p>
               </div>
-
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
-                
-                <div>
-                  <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>Pickup location</h4>
-                  <div style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                    Spintex Road / Accra Central, Greater Accra Region, Ghana
-                  </div>
-                  <div style={{ fontSize: '0.8rem', color: '#059669', fontWeight: 600, marginTop: '2px' }}>
-                    Free store pickup available
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
-                
-                <div>
-                  <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>Working Hours</h4>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    Monday – Saturday: 8:00 AM – 6:30 PM
-                  </div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                    WhatsApp: we reply every day
-                  </div>
-                </div>
+              <div>
+                <h4>Opening hours</h4>
+                <p>{settings.openingHours}</p>
+                <p className="contact-note">We reply on WhatsApp every day</p>
               </div>
             </div>
           </div>
-
           {/* Form Column */}
           <div
             style={{
@@ -277,7 +236,7 @@ export const ContactPage = () => {
                       <option value="Bulk / wholesale order">Bulk / wholesale order</option>
                       <option value="Track my order">Track my order</option>
                       <option value="Request an item">Request an item</option>
-                      <option value="Pickup in Accra">Pickup in Accra</option>
+                      <option value="Pickup in Kumasi">Pickup in Kumasi</option>
                     </select>
                   </div>
                 </div>

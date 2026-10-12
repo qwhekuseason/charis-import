@@ -1,92 +1,109 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useStore } from '../context/StoreContext';
 import { sizedImage, imageSrcSet } from '../utils/images';
 import { SmartImage } from './SmartImage';
-import { Heart, ShoppingBag, MessageCircle, Star } from 'lucide-react';
+import { Heart, Plus, Check, Star } from 'lucide-react';
+
+// "3 days", "5 hours", "20 min" — short enough for a card.
+const timeLeft = (endsAt) => {
+  const ms = new Date(endsAt).getTime() - Date.now();
+  if (ms <= 0) return null;
+  const hours = ms / 3600000;
+  if (hours >= 36) return `${Math.round(hours / 24)} days`;
+  if (hours >= 1) return `${Math.floor(hours)} hr${Math.floor(hours) === 1 ? '' : 's'}`;
+  return `${Math.max(1, Math.floor(ms / 60000))} min`;
+};
+
+const cedis = (n) => `GH₵${Number(n).toFixed(2).replace(/\.00$/, '')}`;
 
 export const ProductCard = ({ product }) => {
-  const { addToCart, toggleWishlist, isInWishlist, setSelectedProduct, getWhatsAppOrderLink } = useStore();
+  const { addToCart, toggleWishlist, isInWishlist, setSelectedProduct } = useStore();
+  const [added, setAdded] = useState(false);
 
-  const isFavorited = isInWishlist(product.id);
+  useEffect(() => {
+    if (!added) return undefined;
+    const t = setTimeout(() => setAdded(false), 1400);
+    return () => clearTimeout(t);
+  }, [added]);
+
+  const saved = isInWishlist(product.id);
+  const soldOut = product.inStock === false;
   const mainImage = product.images ? product.images[0] : (product.image || '');
   const discount = product.originalPrice > product.price
     ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
     : null;
   const reviewCount = product.reviewCount || product.reviewsCount || 0;
+  const dealLeft = product.onDeal && product.dealEndsAt ? timeLeft(product.dealEndsAt) : null;
+
+  // One label at most, in order of importance.
+  const label = soldOut ? { text: 'Out of stock', tone: 'muted' }
+    : product.onDeal ? { text: 'Deal', tone: 'deal' }
+    : product.justLanded ? { text: 'New', tone: 'new' }
+    : null;
+
+  const open = () => setSelectedProduct(product);
 
   return (
-    <div className="product-card">
-      <div className="product-thumb-box" onClick={() => setSelectedProduct(product)} style={{ cursor: 'pointer' }}>
-        <SmartImage
-          src={sizedImage(mainImage, 480)}
-          srcSet={imageSrcSet(mainImage, [320, 480, 720])}
-          sizes="(max-width: 768px) 50vw, 260px"
-          alt={product.name}
-          fallbackLabel={product.name}
-          className="product-image"
-          loading="lazy"
-          decoding="async"
-        />
+    <article className={`pcard ${soldOut ? 'is-soldout' : ''}`}>
+      <div className="pcard-media">
+        <button type="button" className="pcard-image-btn" onClick={open} aria-label={`View ${product.name}`}>
+          <SmartImage
+            src={sizedImage(mainImage, 480)}
+            srcSet={imageSrcSet(mainImage, [320, 480, 720])}
+            sizes="(max-width: 768px) 50vw, 260px"
+            alt={product.name}
+            fallbackLabel={product.name}
+            className="pcard-image"
+            loading="lazy"
+            decoding="async"
+          />
+        </button>
 
-        <div className="product-badges">
-          {discount && <span className="badge badge-sale">−{discount}%</span>}
-          {product.justLanded && <span className="badge badge-new">New</span>}
-        </div>
+        {label && <span className={`pcard-label pcard-label-${label.tone}`}>{label.text}</span>}
 
         <button
-          className={`wishlist-btn-overlay ${isFavorited ? 'active' : ''}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            toggleWishlist(product);
-          }}
-          aria-label={isFavorited ? 'Remove from saved items' : 'Save item'}
-          title={isFavorited ? 'Remove from saved items' : 'Save item'}
+          type="button"
+          className={`pcard-icon pcard-save ${saved ? 'is-on' : ''}`}
+          onClick={() => toggleWishlist(product)}
+          aria-label={saved ? 'Remove from saved items' : 'Save item'}
+          aria-pressed={saved}
         >
-          <Heart size={15} fill={isFavorited ? '#ef4444' : 'none'} color={isFavorited ? '#ef4444' : 'var(--text-muted)'} />
+          <Heart size={16} fill={saved ? 'currentColor' : 'none'} />
         </button>
-      </div>
 
-      <div className="product-content">
-        <span className="product-category">{product.category}</span>
-
-        <h3 className="product-title" onClick={() => setSelectedProduct(product)} title={product.name}>
-          {product.name}
-        </h3>
-
-        {product.rating > 0 && reviewCount > 0 && (
-          <div className="product-rating" aria-label={`Rated ${product.rating} out of 5`}>
-            <Star size={12} fill="#f59e0b" color="#f59e0b" />
-            <span>{Number(product.rating).toFixed(1)}</span>
-            <span className="product-rating-count">({reviewCount})</span>
-          </div>
-        )}
-
-        <div className="product-pricing">
-          <span className="price-main">
-            <span className="currency-ghc">GH₵</span>
-            {product.price.toFixed(2)}
-          </span>
-          {discount && <span className="price-was">GH₵{product.originalPrice.toFixed(2)}</span>}
-        </div>
-
-        <div className="card-actions">
-          <button className="card-add-btn" onClick={() => addToCart(product, 1)}>
-            <ShoppingBag size={14} />
-            <span>Add to cart</span>
-          </button>
-          <a
-            href={getWhatsAppOrderLink(product, 1)}
-            target="_blank"
-            rel="noreferrer"
-            className="card-whatsapp-btn"
-            aria-label={`Order ${product.name} on WhatsApp`}
-            title="Order on WhatsApp"
-            onClick={(e) => e.stopPropagation()}
+        {!soldOut && (
+          <button
+            type="button"
+            className={`pcard-icon pcard-add ${added ? 'is-added' : ''}`}
+            onClick={() => { addToCart(product, 1); setAdded(true); }}
+            aria-label={`Add ${product.name} to cart`}
           >
-            <MessageCircle size={16} />
-          </a>
-        </div>
+            {added ? <Check size={18} /> : <Plus size={18} />}
+          </button>
+        )}
       </div>
-    </div>
+
+      <button type="button" className="pcard-body" onClick={open}>
+        <h3 className="pcard-name">{product.name}</h3>
+
+        <div className="pcard-price">
+          <span className="pcard-now">{cedis(product.price)}</span>
+          {discount && (
+            <>
+              <s className="pcard-was">{cedis(product.originalPrice)}</s>
+              <span className="pcard-off">−{discount}%</span>
+            </>
+          )}
+        </div>
+
+        {dealLeft ? (
+          <span className="pcard-meta pcard-deal-left">Ends in {dealLeft}</span>
+        ) : product.rating > 0 && reviewCount > 0 ? (
+          <span className="pcard-meta">
+            <Star size={12} fill="#f59e0b" color="#f59e0b" /> {Number(product.rating).toFixed(1)} <span className="pcard-count">({reviewCount})</span>
+          </span>
+        ) : null}
+      </button>
+    </article>
   );
 };

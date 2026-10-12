@@ -1,9 +1,10 @@
 import React from 'react';
 import { useStore } from '../context/StoreContext';
+import { HiddenGem } from './HiddenGem';
 import { MtnMomoIcon, TelecelCashIcon, AtMoneyIcon, CashOnDeliveryIcon } from './PaymentIcons';
 
 export const Footer = () => {
-  const { navigate, setQuoteModalOpen, WHATSAPP_NUMBER } = useStore();
+  const { navigate, setQuoteModalOpen, WHATSAPP_NUMBER, settings } = useStore();
 
   const columns = [
     {
@@ -39,16 +40,16 @@ export const Footer = () => {
         <div className="site-footer-grid">
           <div>
             <button type="button" className="site-footer-brand" onClick={() => navigate('home')}>
-              <img src="/charis-logo.jpeg" alt="" width="44" height="44" />
+              <img src="/chari-mark.jpg" alt="" width="44" height="44" />
               <span>CHARI</span>
             </button>
             <p className="site-footer-about">
               Quality products bought from overseas suppliers and delivered anywhere in Ghana.
             </p>
             <p className="site-footer-contact">
-              Spintex, Accra
+              {settings.location}
               <br />
-              <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noreferrer">+233 59 144 0934</a>
+              <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noreferrer">{settings.phoneDisplay}</a>
             </p>
           </div>
 
@@ -71,7 +72,7 @@ export const Footer = () => {
         </div>
 
         <div className="site-footer-bottom">
-          <span>© {new Date().getFullYear()} CHARI. All rights reserved.</span>
+          <span>© {new Date().getFullYear()} CHARI. All rights reserved. <HiddenGem spot="footer" /></span>
           <div className="site-footer-pay" aria-label="Payment methods we accept">
             <span>We accept</span>
             <MtnMomoIcon />

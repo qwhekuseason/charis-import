@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useStore } from '../context/StoreContext';
 import { sizedImage } from '../utils/images';
+import { getFoundCodes } from '../utils/hunt';
 import { validateDiscountCode } from '../services/api';
 import {
   X,
@@ -27,11 +28,9 @@ export const CartDrawer = () => {
     clearCart,
     cartSubtotal,
     navigate,
-    showToast,
-    availableCoupons,
-    fxRates,
-    activeContainerBatch
+    showToast
   } = useStore();
+  const foundCodes = cartDrawerOpen ? getFoundCodes() : [];
 
   const [promoCode, setPromoCode] = useState('');
   const [discountInfo, setDiscountInfo] = useState(null); // { code, type, value, amount }
@@ -368,14 +367,14 @@ export const CartDrawer = () => {
                   </button>
                 </form>
 
-                {/* Available Promo Chips */}
-                {!discountInfo && availableCoupons && availableCoupons.length > 0 && (
+                {/* Only codes this shopper found in the treasure hunt — never a public list */}
+                {!discountInfo && foundCodes.length > 0 && (
                   <div style={{ marginTop: '10px' }}>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '6px' }}>
-                      Active Coupons:
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '6px' }}>
+                      Codes you found:
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                      {availableCoupons.map((coupon) => (
+                      {foundCodes.map((coupon) => (
                         <button
                           key={coupon.code}
                           type="button"
@@ -393,13 +392,18 @@ export const CartDrawer = () => {
                             color: '#2563eb',
                             cursor: 'pointer'
                           }}
-                          title={coupon.description}
+                          title={coupon.offer}
                         >
-                           {coupon.code} • {coupon.badge}
+                          {coupon.code} • {coupon.offer}
                         </button>
                       ))}
                     </div>
                   </div>
+                )}
+                {!discountInfo && foundCodes.length === 0 && (
+                  <p style={{ marginTop: '8px', fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                    No code? Some are hidden around the site — keep an eye out.
+                  </p>
                 )}
 
                 {discountInfo && (

@@ -523,21 +523,14 @@ export async function deleteBatch(batchId) {
 }
 
 // ---------------------------------------------------------------------------
-// Active Discounts & Public Coupons
+// Treasure hunt — promo codes are never listed publicly; they are revealed when found.
 // ---------------------------------------------------------------------------
 
-/**
- * Fetch active discount codes available for customers
- */
-export async function getActiveDiscounts() {
-  try {
-    const res = await fetch(`${API_BASE}/discounts/active`);
-    const data = await res.json();
-    return data.data || [];
-  } catch (error) {
-    console.warn('Could not fetch active discounts:', error);
-    return [];
-  }
+export async function claimHiddenCode(huntId) {
+  const res = await fetch(`${API_BASE}/hunt/${encodeURIComponent(huntId)}/claim`, { method: 'POST' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'This code is no longer available');
+  return data.data;
 }
 
 // ---------------------------------------------------------------------------
