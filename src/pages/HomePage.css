@@ -208,3 +208,99 @@
 @media (max-width: 760px) {
   .hm-deals-intro { flex-direction: column; align-items: flex-start; gap: 8px; }
 }
+
+/* ══════════════════════════════════════════════════════════
+   Cinematics — the hero opens like a title sequence, then
+   sections rise into view as you scroll. Transform and opacity
+   only, so it stays smooth on phones. Switched off when the
+   device asks for reduced motion.
+   ══════════════════════════════════════════════════════════ */
+@keyframes hmRise { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: none; } }
+@keyframes hmLineUp { from { transform: translateY(110%); } to { transform: none; } }
+@keyframes hmShimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@keyframes hmUnveil { from { clip-path: inset(100% 0 0 0 round 18px); } to { clip-path: inset(0 0 0 0 round 18px); } }
+@keyframes hmKen { from { transform: scale(1.22); } to { transform: scale(1.04); } }
+@keyframes hmDrift { 0%, 100% { transform: scale(1.04) translate(0, 0); } 50% { transform: scale(1.1) translate(-1.5%, -1.2%); } }
+@keyframes hmRoute { to { stroke-dashoffset: -480; } }
+@keyframes hmFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+@keyframes hmSpin { to { transform: rotate(360deg); } }
+@keyframes hmTicker { to { transform: translateX(-50%); } }
+@keyframes hmPing { 0% { box-shadow: 0 0 0 0 rgba(212, 175, 90, 0.55); } 100% { box-shadow: 0 0 0 9px rgba(212, 175, 90, 0); } }
+
+/* Hero copy: each piece rises in turn */
+.hm-hero-copy > * { animation: hmRise 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.hm-hero-copy > :nth-child(1) { animation-delay: 0.05s; }
+.hm-hero-copy > .hm-hero-title { animation: none; }
+.hm-hero-copy > :nth-child(3) { animation-delay: 0.7s; }
+.hm-hero-copy > :nth-child(4) { animation-delay: 0.85s; }
+.hm-hero-copy > :nth-child(5) { animation-delay: 1s; }
+.hm-hero-copy > :nth-child(6) { animation-delay: 1.15s; }
+
+/* Headline: each line slides up from behind a mask */
+.hm-line { display: block; overflow: hidden; padding: 0 0.08em 0.1em 0; margin-bottom: -0.1em; }
+.hm-line > * { display: inline-block; animation: hmLineUp 1.05s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.hm-line:nth-child(1) > * { animation-delay: 0.2s; }
+.hm-line:nth-child(2) > * { animation-delay: 0.42s; }
+/* "We'll source it." catches the light now and then */
+.hm-hero-title em {
+  background: linear-gradient(100deg, var(--gold-bright) 35%, #fff4d2 50%, var(--gold-bright) 65%);
+  background-size: 250% 100%; background-position: 100% 0;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: hmLineUp 1.05s cubic-bezier(0.2, 0.8, 0.2, 1) 0.42s both, hmShimmer 3.2s ease-in-out 1.8s infinite;
+}
+
+/* Orbit rings turn slowly, like the ring round the logo */
+.hm-hero::before { border-style: dashed; animation: hmSpin 90s linear infinite; }
+.hm-hero::after { animation: hmSpin 140s linear infinite reverse; }
+
+/* The flight route and plane */
+.hm-flight { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+.hm-flight-route { fill: none; stroke: rgba(212, 175, 90, 0.3); stroke-width: 1.5; stroke-linecap: round; stroke-dasharray: 2 12; animation: hmRoute 26s linear infinite; }
+.hm-flight-plane { fill: var(--gold-bright); opacity: 0.9; }
+
+/* Photo mosaic: tiles unveil one by one, then drift; on desktop they follow the mouse at different depths */
+.hm-mosaic-tile { animation: hmUnveil 1.15s cubic-bezier(0.7, 0, 0.2, 1) both; translate: calc(var(--mx, 0) * var(--depth, 12px)) calc(var(--my, 0) * var(--depth, 12px)); transition: translate 0.6s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.hm-mosaic-tile.is-0 { animation-delay: 0.35s; --depth: -10px; }
+.hm-mosaic-tile.is-1 { animation-delay: 0.55s; --depth: 18px; }
+.hm-mosaic-tile.is-2 { animation-delay: 0.7s; --depth: 24px; }
+.hm-mosaic-tile.is-3 { animation-delay: 0.85s; --depth: 14px; }
+.hm-mosaic-tile img { animation: hmKen 2.4s cubic-bezier(0.2, 0.7, 0.2, 1) both, hmDrift 20s ease-in-out 2.6s infinite; transition: scale 0.6s ease; }
+.hm-mosaic-tile.is-1 img { animation-delay: 0.2s, 4s; }
+.hm-mosaic-tile.is-2 img { animation-delay: 0.35s, 6s; }
+.hm-mosaic-tile.is-3 img { animation-delay: 0.5s, 8s; }
+.hm-mosaic-tile:hover img { scale: 1.05; }
+.hm-mosaic-tile > span { animation: hmRise 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) 1.3s both; }
+.hm-shipment { animation: hmRise 1s cubic-bezier(0.2, 0.7, 0.2, 1) 1.4s both, hmFloat 6s ease-in-out 2.6s infinite; }
+
+/* Ticker band */
+.hm-ticker { margin-top: 30px; overflow: hidden; padding: 16px 0; background: var(--bg-card); border-block: 1px solid var(--border-light);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent); mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent); }
+.hm-ticker-track { display: flex; width: max-content; animation: hmTicker 45s linear infinite; }
+.hm-ticker:hover .hm-ticker-track { animation-play-state: paused; }
+.hm-ticker-group { display: flex; align-items: center; gap: 26px; padding-right: 26px; white-space: nowrap; }
+.hm-ticker-item { display: inline-flex; align-items: center; gap: 26px; font-family: var(--font-serif); font-size: 1.35rem; font-weight: 600; color: var(--ink); }
+.hm-ticker-item i, .hm-ticker-sep { font-style: normal; font-size: 0.85rem; color: var(--gold); }
+.hm-ticker-lead { font-size: 0.74rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold-text); }
+
+/* "Limited time" gets a live dot */
+.hm-deals-intro .hm-eyebrow::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--gold-bright); animation: hmPing 1.8s ease-out infinite; }
+
+/* Scroll reveals (only once the page script has switched them on) */
+.hm-animate [data-reveal] { opacity: 0; transform: translateY(28px); transition: opacity 0.75s cubic-bezier(0.2, 0.7, 0.2, 1), transform 0.85s cubic-bezier(0.2, 0.7, 0.2, 1); transition-delay: calc(var(--i, 0) * 80ms); }
+.hm-animate [data-reveal].is-in { opacity: 1; transform: none; }
+.hm-grid-item { min-width: 0; }
+
+@media (max-width: 760px) {
+  .hm-ticker { margin-top: 22px; padding: 12px 0; }
+  .hm-ticker-item { font-size: 1.1rem; gap: 20px; }
+  .hm-ticker-group { gap: 20px; padding-right: 20px; }
+  .hm-flight-route { stroke-width: 2; }
+  .hm-animate [data-reveal] { transform: translateY(18px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hm-flight-plane { display: none; }
+  .hm-ticker-track { animation: none; }
+  .hm-mosaic-tile { translate: none; }
+  .hm-hero-title em { animation: none; background: none; color: var(--gold-bright); }
+}
