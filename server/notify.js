@@ -15,7 +15,7 @@ const SITE_URL = (process.env.SITE_URL || 'https://charis-import.onrender.com').
 export const pushEnabled = Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
 if (pushEnabled) {
   webpush.setVapidDetails(
-    process.env.VAPID_SUBJECT || 'mailto:support@charisimport.com',
+    process.env.VAPID_SUBJECT || 'mailto:princessarmah514@gmail.com',
     process.env.VAPID_PUBLIC_KEY,
     process.env.VAPID_PRIVATE_KEY
   );
@@ -31,7 +31,7 @@ if (process.env.SMTP_URL) {
   }
 }
 export const emailEnabled = Boolean(mailer);
-const MAIL_FROM = process.env.MAIL_FROM || 'CHARI <no-reply@charisimport.com>';
+const MAIL_FROM = process.env.MAIL_FROM || 'CHARI <princessarmah514@gmail.com>';
 
 console.log(pushEnabled ? '🔔 Admin phone alerts are on' : '🔕 Admin phone alerts off (set VAPID keys to turn on)');
 console.log(emailEnabled ? '📧 Customer emails are on' : '📭 Customer emails off (set SMTP_URL to turn on)');

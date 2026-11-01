@@ -12,7 +12,7 @@ if (/^VAPID_PUBLIC_KEY=/m.test(env)) {
   console.log('Alert keys are already in .env — nothing changed.');
 } else {
   const { publicKey, privateKey } = webpush.generateVAPIDKeys();
-  const block = `\n# Admin phone alerts (web push)\nVAPID_PUBLIC_KEY=${publicKey}\nVAPID_PRIVATE_KEY=${privateKey}\nVAPID_SUBJECT=mailto:support@charisimport.com\n`;
+  const block = `\n# Admin phone alerts (web push)\nVAPID_PUBLIC_KEY=${publicKey}\nVAPID_PRIVATE_KEY=${privateKey}\nVAPID_SUBJECT=mailto:princessarmah514@gmail.com\n`;
   fs.appendFileSync(envPath, (env.endsWith('\n') || !env ? '' : '\n') + block);
   console.log('✅ Alert keys added to .env.');
   console.log('   Next: copy VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT from .env into Render → Environment.');

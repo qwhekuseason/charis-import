@@ -874,7 +874,7 @@ const DEFAULT_SETTINGS = {
   whatsappNumber: '233591440934',
   momoNumber: '059 144 0934',
   momoName: 'CHARIS IMPORT',
-  email: 'support@charisimport.com',
+  email: 'princessarmah514@gmail.com',
   location: 'Kumasi, Ghana',
   pickupPoint: 'Kumasi',
   openingHours: 'Monday – Saturday, 8:00 am – 6:30 pm',
