@@ -10,28 +10,30 @@ import './GlobeIntro.css';
 const GOLD = '#d4af5a';
 const CREAM = '#f3e2b0';
 const DEG = Math.PI / 180;
-const TILE_PX = 192; // each photo is pre-cut to this size, sharp even when zoomed in
+// Each photo is cut twice: small for the globe (cheap to draw hundreds of times a frame)
+// and large for the close-up at the end.
+const TILE_SMALL = 56;
+const TILE_LARGE = 192;
 
 // Where the plane stops, in order. [longitude, latitude]
 const STOPS = [
   { name: 'Guangzhou', country: 'China', at: [113.26, 23.13] },
   { name: 'Dubai', country: 'UAE', at: [55.27, 25.2] },
-  { name: 'Istanbul', country: 'Türkiye', at: [28.98, 41.01] },
   { name: 'London', country: 'UK', at: [-0.13, 51.51] },
   { name: 'Kumasi', country: 'Ghana', at: [-1.62, 6.69] },
 ];
 
-// Timeline (ms, counted from when the photos are ready)
-const FADE_IN = 1000;
-const LEG = 1050;
+// Timeline (ms) — about 5.5 seconds in all
+const FADE_IN = 650;
+const LEG = 800;
 const FLIGHT_END = FADE_IN + LEG * (STOPS.length - 1);
-const ZOOM_TIME = 1900; // the dive into Ghana
+const ZOOM_TIME = 1350; // the dive into Ghana
 const ZOOM_TO = 4.6; // how close it gets
-const TITLE_AT = FLIGHT_END + 1100;
-const LEAVE_AT = FLIGHT_END + ZOOM_TIME + 700;
-const DONE_AT = LEAVE_AT + 750;
-// How long to wait for photos before starting anyway (icons fill any gaps).
-const PHOTO_WAIT = 2200;
+const TITLE_AT = FLIGHT_END + 650;
+const LEAVE_AT = FLIGHT_END + ZOOM_TIME + 450;
+const DONE_AT = LEAVE_AT + 600;
+// Each photo fades into its place on the globe as it arrives — nothing waits for them.
+const PHOTO_FADE = 450;
 
 const landBits = (() => {
   const bin = atob(LAND_MASK);
@@ -78,22 +80,24 @@ const buildPoints = (count) => {
 };
 
 // A product photo cut into a round tile with a thin gold rim — like a little coin.
-const makePhotoTile = (img) => {
+const cutTile = (img, px) => {
   const c = document.createElement('canvas');
-  c.width = TILE_PX; c.height = TILE_PX;
+  c.width = px; c.height = px;
   const g = c.getContext('2d');
-  const r = TILE_PX / 2;
+  const r = px / 2;
+  const rim = Math.max(1.5, px / 32);
   g.save();
-  g.beginPath(); g.arc(r, r, r - 4, 0, Math.PI * 2); g.clip();
-  g.fillStyle = '#fff'; g.fillRect(0, 0, TILE_PX, TILE_PX);
-  const scale = Math.max(TILE_PX / img.naturalWidth, TILE_PX / img.naturalHeight);
+  g.beginPath(); g.arc(r, r, r - rim, 0, Math.PI * 2); g.clip();
+  g.fillStyle = '#fff'; g.fillRect(0, 0, px, px);
+  const scale = Math.max(px / img.naturalWidth, px / img.naturalHeight);
   const w = img.naturalWidth * scale; const h = img.naturalHeight * scale;
-  g.drawImage(img, (TILE_PX - w) / 2, (TILE_PX - h) / 2, w, h);
+  g.drawImage(img, (px - w) / 2, (px - h) / 2, w, h);
   g.restore();
-  g.lineWidth = 6; g.strokeStyle = GOLD;
-  g.beginPath(); g.arc(r, r, r - 4, 0, Math.PI * 2); g.stroke();
+  g.lineWidth = rim * 1.5; g.strokeStyle = GOLD;
+  g.beginPath(); g.arc(r, r, r - rim, 0, Math.PI * 2); g.stroke();
   return c;
 };
+const makePhotoTile = (img) => ({ small: cutTile(img, TILE_SMALL), large: cutTile(img, TILE_LARGE), readyAt: performance.now() });
 const loadPhoto = (url) => new Promise((resolve) => {
   const img = new Image();
   img.decoding = 'async';
@@ -110,11 +114,10 @@ const makeIconTiles = () => PRODUCT_ICONS.map((inner) => {
 });
 
 const PLANE = new Path2D('M14 0 L-6 -3.2 L-10 -12 L-14 -12 L-10 -2.6 L-16 -2 L-19 -6 L-21 -6 L-19.5 0 L-21 6 L-19 6 L-16 2 L-10 2.6 L-14 12 L-10 12 L-6 3.2 Z');
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export const GlobeIntro = ({ onDone, photos = [] }) => {
   const canvasRef = useRef(null);
-  const [phase, setPhase] = useState('loading'); // loading → flying → title → leaving
+  const [phase, setPhase] = useState('flying'); // flying → title → leaving
   const doneRef = useRef(false);
   const finish = useRef(() => {});
   // The shop's products may still be arriving when the intro starts — always read the latest list.
@@ -127,11 +130,37 @@ export const GlobeIntro = ({ onDone, photos = [] }) => {
     const isPhone = window.innerWidth < 640;
     const points = buildPoints(isPhone ? 2400 : 3800);
     const iconTiles = makeIconTiles();
-    let photoTiles = [];
+    let cancelled = false;
+    // address → tile once loaded; null while loading; false if it failed
+    const tilesByUrl = new Map();
+    let urls = [];
+    const syncPhotos = () => {
+      urls = [...new Set(photosRef.current)].slice(0, 36);
+      urls.forEach((url) => {
+        if (tilesByUrl.has(url)) return;
+        tilesByUrl.set(url, null);
+        loadPhoto(url).then((tile) => { if (!cancelled) tilesByUrl.set(url, tile || false); });
+      });
+    };
+    // Each spot on the globe keeps one photo, so pictures don't reshuffle as more products arrive;
+    // a spot whose photo failed moves on to the next one that works.
+    const photoFor = (p) => {
+      if (!urls.length) return null;
+      if (!p.url || tilesByUrl.get(p.url) === false) {
+        for (let k = 0; k < urls.length; k++) {
+          const candidate = urls[(p.pick + k) % urls.length];
+          if (tilesByUrl.get(candidate) !== false) { p.url = candidate; break; }
+        }
+      }
+      return p.url ? tilesByUrl.get(p.url) : null;
+    };
+    syncPhotos();
+    const photoTimer = setInterval(syncPhotos, 300); // products can arrive a moment after the intro starts
     const stops = STOPS.map((s) => ({ ...s, vec: toVec(s.at) }));
     let width = 0; let height = 0; let dpr = 1;
     const resize = () => {
-      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      // Sharp enough on high-resolution phones without drawing 3x the pixels.
+      dpr = Math.min(window.devicePixelRatio || 1, isPhone ? 1.5 : 2);
       width = window.innerWidth; height = window.innerHeight;
       canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
       canvas.style.width = `${width}px`; canvas.style.height = `${height}px`;
@@ -140,7 +169,7 @@ export const GlobeIntro = ({ onDone, photos = [] }) => {
     window.addEventListener('resize', resize);
 
     const cam = { lon: STOPS[0].at[0] + 70, lat: 18 };
-    let start = 0; let prev = 0; let raf = 0; let titled = false; let leaving = false; let cancelled = false;
+    let start = 0; let prev = 0; let raf = 0; let titled = false; let leaving = false;
 
     const end = () => {
       if (doneRef.current) return;
@@ -231,11 +260,17 @@ export const GlobeIntro = ({ onDone, photos = [] }) => {
         }
         const twinkle = dive > 0.3 ? 1 : 0.86 + 0.14 * Math.sin(t * 0.003 + p.phase);
         ctx.globalAlpha = intro * Math.min(1, 0.12 + s.z * 1.1) * twinkle;
-        if (photoTiles.length) {
-          ctx.drawImage(photoTiles[p.pick % photoTiles.length], s.x - size / 2, s.y - size / 2, size, size);
-        } else {
-          const icon = iconTiles[p.pick % iconTiles.length];
-          if (icon.complete && icon.naturalWidth) ctx.drawImage(icon, s.x - size / 2, s.y - size / 2, size, size);
+        const tile = photoFor(p);
+        const shown = tile ? clamp01((now - tile.readyAt) / PHOTO_FADE) : 0;
+        if (shown < 1) {
+          // A gold dot holds the place until the photo arrives (or an outline if there are no photos at all).
+          const icon = urls.length ? null : iconTiles[p.pick % iconTiles.length];
+          if (icon && icon.complete && icon.naturalWidth) ctx.drawImage(icon, s.x - size / 2, s.y - size / 2, size, size);
+          else { ctx.fillStyle = GOLD; ctx.beginPath(); ctx.arc(s.x, s.y, Math.max(1, size * 0.18), 0, Math.PI * 2); ctx.fill(); }
+        }
+        if (shown > 0) {
+          if (shown < 1) ctx.globalAlpha *= shown;
+          ctx.drawImage(size > TILE_SMALL * 0.9 ? tile.large : tile.small, s.x - size / 2, s.y - size / 2, size, size);
         }
       }
       ctx.globalAlpha = 1;
@@ -325,25 +360,13 @@ export const GlobeIntro = ({ onDone, photos = [] }) => {
       raf = requestAnimationFrame(frame);
     };
 
-    // Get the photos ready first (up to a couple of seconds), then roll.
-    (async () => {
-      const deadline = performance.now() + PHOTO_WAIT;
-      while (photosRef.current.length < 8 && performance.now() < deadline - 900) await sleep(100);
-      const urls = [...new Set(photosRef.current)].slice(0, 36);
-      const loads = Promise.all(urls.map(loadPhoto)).then((tiles) => tiles.filter(Boolean));
-      const tiles = await Promise.race([loads, sleep(Math.max(300, deadline - performance.now())).then(() => null)]);
-      if (cancelled) return;
-      photoTiles = tiles || [];
-      // Any photos that finish a moment later still join in.
-      if (!tiles) loads.then((late) => { if (!cancelled && late.length) photoTiles = late; });
-      setPhase('flying');
-      raf = requestAnimationFrame(frame);
-    })();
+    raf = requestAnimationFrame(frame);
 
     const onKey = (e) => { if (e.key === 'Escape') finish.current(); };
     window.addEventListener('keydown', onKey);
     return () => {
       cancelled = true;
+      clearInterval(photoTimer);
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', resize);
       window.removeEventListener('keydown', onKey);
@@ -353,7 +376,6 @@ export const GlobeIntro = ({ onDone, photos = [] }) => {
   return (
     <div className={`gi is-${phase}`} role="dialog" aria-modal="true" aria-label="CHARI intro">
       <canvas ref={canvasRef} className="gi-canvas" aria-hidden="true" />
-      <div className="gi-loading" aria-hidden="true"><span /></div>
       <p className="gi-caption" aria-hidden="true">Sourcing from suppliers around the world…</p>
       <div className="gi-title">
         <img src="/chari-mark.jpg" alt="" width="64" height="64" />
