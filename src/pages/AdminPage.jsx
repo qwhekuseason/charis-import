@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../context/StoreContext';
 import * as admin from '../services/adminApi';
 import { sizedImage } from '../utils/images';
-import { X, Plus, Trash2, RefreshCw, Search, Upload, MessageCircle, ArrowLeft, ArrowRight } from 'lucide-react';
+import { X, Plus, Trash2, RefreshCw, Search, Upload, MessageCircle, ArrowLeft, ArrowRight, Phone, Check, AlertTriangle, Copy } from 'lucide-react';
+import { SmartImage } from '../components/SmartImage';
 
 // ---------------------------------------------------------------------------
 // Labels shown to the admin (database values → plain words)
@@ -46,18 +47,33 @@ const waLink = (phone, text) => {
 // ---------------------------------------------------------------------------
 // Small building blocks
 // ---------------------------------------------------------------------------
-const Modal = ({ title, onClose, children, footer }) => (
-  <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
-    <div className="modal-panel adm-modal" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="modal-header">
-        <h2 className="modal-title">{title}</h2>
-        <button type="button" className="modal-close" onClick={onClose} aria-label="Close"><X size={20} /></button>
+const Modal = ({ title, onClose, children, footer }) => {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  // Escape closes, and the page behind stays still while the popup is open.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') closeRef.current(); };
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, []);
+  return (
+    <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal-panel adm-modal" role="dialog" aria-modal="true" aria-label={title}>
+        <div className="modal-header">
+          <h2 className="modal-title">{title}</h2>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Close"><X size={20} /></button>
+        </div>
+        <div className="modal-body">{children}</div>
+        {footer && <div className="adm-modal-footer">{footer}</div>}
       </div>
-      <div className="modal-body">{children}</div>
-      {footer && <div className="adm-modal-footer">{footer}</div>}
     </div>
-  </div>
-);
+  );
+};
 
 const Field = ({ label: text, hint, children }) => (
   <label className="form-field adm-field">
@@ -70,7 +86,7 @@ const Field = ({ label: text, hint, children }) => (
 const Empty = ({ children }) => <div className="adm-empty">{children}</div>;
 
 // Photo picker used for products and categories: upload files or paste links, reorder, remove.
-const PhotoManager = ({ photos, onChange, max = 8, single = false }) => {
+const PhotoManager = ({ photos, onChange, max = 8, single = false, onBusyChange }) => {
   const { showToast } = useStore();
   const [uploading, setUploading] = useState(false);
   const [link, setLink] = useState('');
@@ -79,6 +95,7 @@ const PhotoManager = ({ photos, onChange, max = 8, single = false }) => {
     const list = Array.from(files || []).filter((f) => f.type.startsWith('image/'));
     if (!list.length) return;
     setUploading(true);
+    onBusyChange?.(true);
     try {
       const urls = [];
       for (const file of list.slice(0, single ? 1 : max - photos.length)) {
@@ -90,6 +107,7 @@ const PhotoManager = ({ photos, onChange, max = 8, single = false }) => {
       showToast(err.message, 'error');
     } finally {
       setUploading(false);
+      onBusyChange?.(false);
     }
   };
 
@@ -111,7 +129,7 @@ const PhotoManager = ({ photos, onChange, max = 8, single = false }) => {
       <div className="adm-photo-grid">
         {photos.map((url, i) => (
           <div key={url + i} className="adm-photo">
-            <img src={sizedImage(url, 200)} alt="" />
+            <SmartImage src={sizedImage(url, 200)} alt="" fallbackLabel="Can't load photo" />
             {i === 0 && !single && <span className="adm-photo-main">Main photo</span>}
             <div className="adm-photo-actions">
               {!single && i > 0 && <button type="button" onClick={() => move(i, -1)} aria-label="Move left"><ArrowLeft size={14} /></button>}
@@ -139,27 +157,51 @@ const PhotoManager = ({ photos, onChange, max = 8, single = false }) => {
 // ---------------------------------------------------------------------------
 // Orders
 // ---------------------------------------------------------------------------
-const OrdersTab = ({ orders, setOrders }) => {
+// Quick views of the order list, in the order the team works through them.
+const ORDER_VIEWS = [
+  ['all', 'All', () => true],
+  ['check', 'Check payment', (o) => o.orderStatus !== 'CANCELLED' && o.paymentStatus === 'VERIFYING'],
+  ['unpaid', 'Not paid', (o) => o.orderStatus !== 'CANCELLED' && (o.paymentStatus || 'PENDING') === 'PENDING'],
+  ['toShip', 'To ship', (o) => o.paymentStatus === 'PAID' && ['PROCESSING', 'CONFIRMED'].includes(o.orderStatus)],
+  ['shipped', 'On the way', (o) => o.orderStatus === 'SHIPPED'],
+  ['done', 'Delivered', (o) => o.orderStatus === 'DELIVERED'],
+  ['cancelled', 'Cancelled', (o) => o.orderStatus === 'CANCELLED'],
+];
+
+// The one most likely next action for an order, so the common path is a single tap.
+const nextStep = (o) => {
+  if (o.orderStatus === 'CANCELLED' || o.orderStatus === 'DELIVERED') return null;
+  if (o.paymentStatus === 'VERIFYING') return { label: 'Mark as paid', changes: { paymentStatus: 'PAID' } };
+  if (o.paymentStatus !== 'PAID') return null;
+  if (o.orderStatus === 'PROCESSING') return { label: 'Confirm order', changes: { orderStatus: 'CONFIRMED' } };
+  if (o.orderStatus === 'CONFIRMED') return { label: 'Mark shipped', changes: { orderStatus: 'SHIPPED' } };
+  if (o.orderStatus === 'SHIPPED') return { label: 'Mark delivered', changes: { orderStatus: 'DELIVERED' } };
+  return null;
+};
+
+const OrdersTab = ({ orders, setOrders, view, setView, searchRequest }) => {
   const { showToast } = useStore();
-  const [query, setQuery] = useState('');
-  const [status, setStatus] = useState('all');
-  const [payment, setPayment] = useState('all');
+  const [query, setQuery] = useState(searchRequest?.text || '');
+  useEffect(() => { if (searchRequest) setQuery(searchRequest.text); }, [searchRequest]);
   const [saving, setSaving] = useState(null);
 
+  const viewTest = (ORDER_VIEWS.find(([id]) => id === view) || ORDER_VIEWS[0])[2];
   const shown = orders.filter((o) => {
-    if (status !== 'all' && o.orderStatus !== status) return false;
-    if (payment !== 'all' && o.paymentStatus !== payment) return false;
+    if (!viewTest(o)) return false;
     if (!query.trim()) return true;
     const q = query.toLowerCase();
     return [o.orderCode, o.customerName, o.phone, o.city, o.email].some((v) => String(v || '').toLowerCase().includes(q));
   });
 
   const update = async (order, changes) => {
+    // These can't be quietly undone: the customer is emailed and any store credit is returned.
+    if (changes.orderStatus === 'CANCELLED' && !window.confirm(`Cancel order ${order.orderCode}? The customer will be told and any store credit they used is returned.`)) return;
+    if (changes.paymentStatus === 'REFUNDED' && !window.confirm(`Mark order ${order.orderCode} as refunded?`)) return;
     setSaving(order.id);
     try {
       const { data: updated, emailed } = await admin.setOrderStatus(order.id, changes);
       setOrders((prev) => prev.map((o) => (o.id === order.id ? { ...o, ...updated } : o)));
-      showToast(`Order ${order.orderCode} updated${emailed ? ' — customer emailed' : ''}`, 'success');
+      showToast(`${order.orderCode} updated${emailed ? ' — customer emailed' : ''}`, 'success');
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
@@ -169,24 +211,34 @@ const OrdersTab = ({ orders, setOrders }) => {
 
   return (
     <>
+      <div className="adm-views" role="tablist" aria-label="Order views">
+        {ORDER_VIEWS.map(([id, text, test]) => {
+          const count = orders.filter(test).length;
+          return (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={view === id}
+              className={`adm-view ${view === id ? 'is-active' : ''} ${count && ['check', 'toShip'].includes(id) ? 'is-urgent' : ''}`}
+              onClick={() => setView(id)}
+            >
+              {text} <span>{count}</span>
+            </button>
+          );
+        })}
+      </div>
       <div className="adm-toolbar">
         <div className="adm-search"><Search size={16} /><input placeholder="Search code, name, phone or city" value={query} onChange={(e) => setQuery(e.target.value)} /></div>
-        <select className="form-input adm-select" value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Filter by order status">
-          <option value="all">All statuses</option>
-          {ORDER_STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
-        <select className="form-input adm-select" value={payment} onChange={(e) => setPayment(e.target.value)} aria-label="Filter by payment">
-          <option value="all">All payments</option>
-          {PAYMENT_STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
       </div>
 
-      {shown.length === 0 ? <Empty>No orders match.</Empty> : (
+      {shown.length === 0 ? <Empty>{query ? 'No orders match your search.' : 'Nothing here right now.'}</Empty> : (
         <div className="adm-list">
           {shown.map((o) => {
             const items = Array.isArray(o.items) ? o.items : [];
+            const step = nextStep(o);
             return (
-              <article key={o.id} className={`adm-card ${saving === o.id ? 'is-saving' : ''}`}>
+              <article key={o.id} className={`adm-card ${saving === o.id ? 'is-saving' : ''}`} aria-busy={saving === o.id}>
                 <header className="adm-card-head">
                   <div>
                     <strong className="adm-code">{o.orderCode}</strong>
@@ -194,18 +246,28 @@ const OrdersTab = ({ orders, setOrders }) => {
                   </div>
                   <strong className="adm-total">{money(o.total)}</strong>
                 </header>
+                <div className="adm-pills">
+                  <span className={`adm-pill is-${o.orderStatus === 'CANCELLED' ? 'danger' : o.orderStatus === 'DELIVERED' ? 'success' : 'info'}`}>{label(ORDER_STATUSES, o.orderStatus)}</span>
+                  <span className={`adm-pill is-${o.paymentStatus === 'PAID' ? 'success' : o.paymentStatus === 'REFUNDED' ? 'muted' : 'warning'}`}>{label(PAYMENT_STATUSES, o.paymentStatus || 'PENDING')}</span>
+                </div>
 
                 <div className="adm-order-grid">
                   <div>
                     <div className="adm-label">Customer</div>
                     <div>{o.customerName}</div>
-                    <div className="adm-muted">{o.phone}{o.email ? ` · ${o.email}` : ''}</div>
+                    <a className="adm-phone" href={`tel:${String(o.phone || '').replace(/\s/g, '')}`}><Phone size={13} /> {o.phone}</a>
+                    {o.email && <div className="adm-muted">{o.email}</div>}
                     <div className="adm-muted">{[o.address, o.city].filter(Boolean).join(', ')}</div>
                   </div>
                   <div>
                     <div className="adm-label">Items</div>
-                    <ul className="adm-items">
-                      {items.map((it, i) => <li key={i}>{it.qty} × {it.name} <span className="adm-muted">@ {money(it.price)}</span></li>)}
+                    <ul className="adm-items adm-items-thumbs">
+                      {items.map((it, i) => (
+                        <li key={i}>
+                          <SmartImage src={sizedImage(it.image || '', 96)} alt="" className="adm-item-thumb" />
+                          <span>{it.qty} × {it.name} <span className="adm-muted">@ {money(it.price)}</span></span>
+                        </li>
+                      ))}
                     </ul>
                   </div>
                   <div>
@@ -219,6 +281,11 @@ const OrdersTab = ({ orders, setOrders }) => {
                 {o.notes && <p className="adm-note">Note: {o.notes}</p>}
 
                 <footer className="adm-card-actions">
+                  {step && (
+                    <button type="button" className="btn btn-primary adm-next" disabled={saving === o.id} onClick={() => update(o, step.changes)}>
+                      <Check size={16} /> {step.label}
+                    </button>
+                  )}
                   <label className="adm-mini-field">
                     <span>Order status</span>
                     <select className="form-input" value={o.orderStatus} disabled={saving === o.id} onChange={(e) => update(o, { orderStatus: e.target.value })}>
@@ -237,7 +304,7 @@ const OrdersTab = ({ orders, setOrders }) => {
                     rel="noreferrer"
                     href={waLink(o.phone, `Hello ${o.customerName}, this is CHARI about your order ${o.orderCode} (${money(o.total)}). Status: ${label(ORDER_STATUSES, o.orderStatus)}.`)}
                   >
-                    <MessageCircle size={16} /> WhatsApp customer
+                    <MessageCircle size={16} /> WhatsApp
                   </a>
                 </footer>
               </article>
@@ -253,34 +320,91 @@ const OrdersTab = ({ orders, setOrders }) => {
 // ---------------------------------------------------------------------------
 // Products
 // ---------------------------------------------------------------------------
-const emptyProduct = (category) => ({ name: '', category, price: '', originalPrice: '', inStock: true, isNew: false, photos: [], description: '' });
+const emptyProduct = (category) => ({ name: '', category, price: '', originalPrice: '', inStock: true, isNew: false, photos: [], description: '', specs: [] });
+
+// Turns a product from the server into the editor's form fields.
+const productToForm = (p) => ({
+  id: p.id,
+  name: p.name,
+  category: p.category,
+  price: String(p.listPrice ?? p.price),
+  originalPrice: (p.listWasPrice ?? p.originalPrice) ? String(p.listWasPrice ?? p.originalPrice) : '',
+  inStock: p.inStock !== false,
+  isNew: p.badge === 'New',
+  photos: (p.gallery && p.gallery.length ? p.gallery : p.images?.length ? p.images : [p.image]).filter(Boolean),
+  description: p.description || '',
+  specs: (p.specifications || p.specs || []).map((s) => ({ label: s.label || '', value: s.value || '' })),
+});
+
+// What's wrong with the form, field by field (the server checks the same things).
+const productProblems = (f) => {
+  const found = {};
+  if (!f.name.trim()) found.name = 'Give the product a name.';
+  const price = Number(f.price);
+  if (!f.price || !Number.isFinite(price) || price <= 0) found.price = 'Enter a price above 0.';
+  if (f.originalPrice !== '') {
+    const was = Number(f.originalPrice);
+    if (!Number.isFinite(was) || was <= 0) found.originalPrice = 'Enter a number, or leave it empty.';
+    else if (!found.price && was <= price) found.originalPrice = 'Must be higher than the price, or empty.';
+  }
+  if (f.photos.length === 0) found.photos = 'Add at least one photo.';
+  if (!f.category) found.category = 'Choose a category.';
+  return found;
+};
+
+const STOCK_FILTERS = [['all', 'All'], ['in', 'In stock'], ['out', 'Out of stock'], ['new', 'New'], ['deal', 'On deal']];
 
 const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => {
   const { showToast } = useStore();
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('all');
+  const [stock, setStock] = useState('all');
   const [editing, setEditing] = useState(null); // form state, id = null for a new product
+  const [original, setOriginal] = useState(null); // snapshot, to warn before throwing changes away
+  const [problems, setProblems] = useState({});
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [priceDrafts, setPriceDrafts] = useState({});
 
-  const shown = products.filter((p) => (category === 'all' || p.category === category) && p.name.toLowerCase().includes(query.toLowerCase()));
+  const stockTest = {
+    all: () => true,
+    in: (p) => p.inStock !== false,
+    out: (p) => p.inStock === false,
+    new: (p) => p.badge === 'New',
+    deal: (p) => p.onDeal,
+  }[stock];
+  const shown = products.filter((p) => (category === 'all' || p.category === category)
+    && stockTest(p)
+    && `${p.name} ${p.category}`.toLowerCase().includes(query.toLowerCase()));
 
-  const openNew = () => setEditing({ id: null, ...emptyProduct(categories[0]?.name || '') });
-  const openEdit = (p) => setEditing({
-    id: p.id,
-    name: p.name,
-    category: p.category,
-    price: String(p.listPrice ?? p.price),
-    originalPrice: (p.listWasPrice ?? p.originalPrice) ? String(p.listWasPrice ?? p.originalPrice) : '',
-    inStock: p.inStock !== false,
-    isNew: p.badge === 'New',
-    photos: (p.gallery && p.gallery.length ? p.gallery : [p.image]).filter(Boolean),
-    description: p.description || '',
-  });
+  const open = (form) => { setEditing(form); setOriginal(JSON.stringify(form)); setProblems({}); };
+  const openNew = () => open({ id: null, ...emptyProduct(category !== 'all' ? category : categories[0]?.name || '') });
+  const openEdit = (p) => open(productToForm(p));
+  // A copy to start from — handy for the same item in another colour or size.
+  const openDuplicate = (p) => open({ ...productToForm(p), id: null, name: `${p.name} (copy)` });
+
+  const isDirty = editing && JSON.stringify(editing) !== original;
+  const closeEditor = () => {
+    if (saving) return;
+    if (isDirty && !window.confirm('Close without saving? Your changes will be lost.')) return;
+    setEditing(null);
+  };
+  const setField = (key, value) => {
+    setEditing((prev) => ({ ...prev, [key]: value }));
+    if (problems[key]) setProblems((prev) => ({ ...prev, [key]: undefined }));
+  };
 
   const save = async (e) => {
     e.preventDefault();
+    if (uploading) { showToast('Wait for the photos to finish uploading.', 'warning'); return; }
+    const found = productProblems(editing);
+    setProblems(found);
+    if (Object.keys(found).length) {
+      document.querySelector(`[data-field="${Object.keys(found)[0]}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
     setSaving(true);
+    const specs = editing.specs.map((s) => ({ label: s.label.trim(), value: s.value.trim() })).filter((s) => s.label && s.value);
     const payload = {
       name: editing.name,
       category: editing.category,
@@ -291,6 +415,7 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
       image: editing.photos[0] || '',
       gallery: editing.photos,
       description: editing.description,
+      specs,
     };
     try {
       if (editing.id) {
@@ -324,12 +449,11 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
     }
   };
 
+  const clearDraft = (id) => setPriceDrafts((prev) => { const next = { ...prev }; delete next[id]; return next; });
   const savePrice = async (p) => {
     const draft = priceDrafts[p.id];
     if (draft === undefined || Number(draft) === (p.listPrice ?? p.price)) return;
-    if (await quickUpdate(p, { price: draft }, `${p.name}: price now GH₵${Number(draft).toFixed(2)}`)) {
-      setPriceDrafts((prev) => { const next = { ...prev }; delete next[p.id]; return next; });
-    }
+    if (await quickUpdate(p, { price: draft }, `${p.name}: price now GH₵${Number(draft).toFixed(2)}`)) clearDraft(p.id);
   };
 
   const remove = async (p) => {
@@ -344,6 +468,12 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
     }
   };
 
+  // Live preview numbers for the editor.
+  const previewPrice = Number(editing?.price) || 0;
+  const previewWas = Number(editing?.originalPrice) || 0;
+  const previewOff = previewWas > previewPrice && previewPrice > 0 ? Math.round(((previewWas - previewPrice) / previewWas) * 100) : 0;
+  const problem = (key) => (problems[key] ? <span className="adm-field-error" role="alert"><AlertTriangle size={13} /> {problems[key]}</span> : null);
+
   return (
     <>
       <div className="adm-toolbar">
@@ -354,104 +484,186 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
         </select>
         <button type="button" className="btn btn-primary" onClick={openNew}><Plus size={16} /> Add product</button>
       </div>
+      <div className="adm-views" role="tablist" aria-label="Product filters">
+        {STOCK_FILTERS.map(([id, text]) => {
+          const count = products.filter({ all: () => true, in: (p) => p.inStock !== false, out: (p) => p.inStock === false, new: (p) => p.badge === 'New', deal: (p) => p.onDeal }[id]).length;
+          return (
+            <button key={id} type="button" role="tab" aria-selected={stock === id} className={`adm-view ${stock === id ? 'is-active' : ''}`} onClick={() => setStock(id)}>
+              {text} <span>{count}</span>
+            </button>
+          );
+        })}
+      </div>
 
-      {shown.length === 0 ? <Empty>No products found.</Empty> : (
+      {shown.length === 0 ? (
+        <Empty>
+          {products.length === 0 ? 'No products yet.' : 'No products match.'}{' '}
+          <button type="button" className="shop-link-btn" onClick={openNew}>Add a product</button>
+        </Empty>
+      ) : (
         <div className="adm-table-wrap">
-          <table className="adm-table">
+          <table className="adm-table adm-products-table">
             <thead>
               <tr><th>Product</th><th>Price (GH₵)</th><th>Was</th><th>In stock</th><th /></tr>
             </thead>
             <tbody>
-              {shown.map((p) => (
-                <tr key={p.id}>
-                  <td>
-                    <div className="adm-product-cell">
-                      <img src={sizedImage(p.image, 96)} alt="" />
-                      <div>
-                        <div className="adm-strong">{p.name}</div>
-                        <div className="adm-muted">{p.category}{p.badge === 'New' ? ' · New' : ''}{p.onDeal ? ` · On deal: ${money(p.price)}` : ''}</div>
+              {shown.map((p) => {
+                const draftChanged = priceDrafts[p.id] !== undefined && Number(priceDrafts[p.id]) !== (p.listPrice ?? p.price);
+                return (
+                  <tr key={p.id} className={p.inStock === false ? 'is-out' : ''}>
+                    <td className="adm-cell-product">
+                      <button type="button" className="adm-product-cell" onClick={() => openEdit(p)} title="Edit product">
+                        <SmartImage src={sizedImage(p.image || p.images?.[0] || '', 96)} alt="" className="adm-product-thumb" />
+                        <span>
+                          <span className="adm-strong">{p.name}</span>
+                          <span className="adm-muted adm-product-meta">
+                            {p.category}
+                            {p.badge === 'New' && <span className="adm-pill is-info">New</span>}
+                            {p.onDeal && <span className="adm-pill is-warning">Deal {money(p.price)}</span>}
+                          </span>
+                        </span>
+                      </button>
+                    </td>
+                    <td className="adm-cell-price" data-label="Price">
+                      <div className="adm-price-cell">
+                        <input
+                          className="form-input adm-price"
+                          type="number"
+                          inputMode="decimal"
+                          min="0.01"
+                          step="0.01"
+                          aria-label={`Price of ${p.name}`}
+                          value={priceDrafts[p.id] ?? (p.listPrice ?? p.price)}
+                          onChange={(e) => setPriceDrafts((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                          onKeyDown={(e) => { if (e.key === 'Enter') savePrice(p); if (e.key === 'Escape') clearDraft(p.id); }}
+                        />
+                        {draftChanged && (
+                          <>
+                            <button type="button" className="btn btn-primary btn-sm" onClick={() => savePrice(p)}>Save</button>
+                            <button type="button" className="btn btn-outline btn-sm" aria-label="Undo price change" onClick={() => clearDraft(p.id)}><X size={14} /></button>
+                          </>
+                        )}
                       </div>
-                    </div>
-                  </td>
-                  <td>
-                    <div className="adm-price-cell">
-                      <input
-                        className="form-input adm-price"
-                        type="number"
-                        min="0.01"
-                        step="0.01"
-                        aria-label={`Price of ${p.name}`}
-                        value={priceDrafts[p.id] ?? (p.listPrice ?? p.price)}
-                        onChange={(e) => setPriceDrafts((prev) => ({ ...prev, [p.id]: e.target.value }))}
-                        onKeyDown={(e) => e.key === 'Enter' && savePrice(p)}
-                      />
-                      {priceDrafts[p.id] !== undefined && Number(priceDrafts[p.id]) !== (p.listPrice ?? p.price) && (
-                        <>
-                          <button type="button" className="btn btn-primary btn-sm" onClick={() => savePrice(p)}>Save</button>
-                          <button
-                            type="button"
-                            className="btn btn-outline btn-sm"
-                            aria-label="Undo price change"
-                            onClick={() => setPriceDrafts((prev) => { const next = { ...prev }; delete next[p.id]; return next; })}
-                          >
-                            <X size={14} />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </td>
-                  <td className="adm-muted">{(p.listWasPrice ?? p.originalPrice) ? money(p.listWasPrice ?? p.originalPrice) : '—'}</td>
-                  <td>
-                    <label className="adm-switch">
-                      <input
-                        type="checkbox"
-                        checked={p.inStock !== false}
-                        onChange={(e) => quickUpdate(p, { inStock: e.target.checked }, `${p.name}: ${e.target.checked ? 'in stock' : 'out of stock'}`)}
-                      />
-                      <span>{p.inStock !== false ? 'Yes' : 'No'}</span>
-                    </label>
-                  </td>
-                  <td className="adm-row-actions">
-                    <button type="button" className="btn btn-outline btn-sm" onClick={() => openEdit(p)}>Edit</button>
-                    <button type="button" className="btn btn-outline btn-sm adm-danger" onClick={() => remove(p)} aria-label={`Delete ${p.name}`}><Trash2 size={14} /></button>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="adm-muted adm-cell-was" data-label="Was">{(p.listWasPrice ?? p.originalPrice) ? money(p.listWasPrice ?? p.originalPrice) : '—'}</td>
+                    <td className="adm-cell-stock" data-label="In stock">
+                      <label className="adm-switch">
+                        <input
+                          type="checkbox"
+                          checked={p.inStock !== false}
+                          onChange={(e) => quickUpdate(p, { inStock: e.target.checked }, `${p.name}: ${e.target.checked ? 'in stock' : 'out of stock'}`)}
+                        />
+                        <span>{p.inStock !== false ? 'Yes' : 'No'}</span>
+                      </label>
+                    </td>
+                    <td className="adm-row-actions">
+                      <button type="button" className="btn btn-outline btn-sm" onClick={() => openEdit(p)}>Edit</button>
+                      <button type="button" className="btn btn-outline btn-sm" onClick={() => openDuplicate(p)} aria-label={`Duplicate ${p.name}`} title="Duplicate"><Copy size={14} /></button>
+                      <button type="button" className="btn btn-outline btn-sm adm-danger" onClick={() => remove(p)} aria-label={`Delete ${p.name}`} title="Delete"><Trash2 size={14} /></button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
-      <p className="adm-help">Change a price in the list, then press Save (or Enter). Out-of-stock products stay visible but can't be ordered.</p>
+      <p className="adm-help">Change a price in the list, then press Save (or Enter). Out-of-stock products stay visible but can't be ordered. Use <Copy size={12} /> to start a new product from an existing one.</p>
 
       {editing && (
         <Modal
           title={editing.id ? 'Edit product' : 'Add product'}
-          onClose={() => !saving && setEditing(null)}
+          onClose={closeEditor}
           footer={(
             <>
-              <button type="button" className="btn btn-outline" onClick={() => setEditing(null)} disabled={saving}>Cancel</button>
-              <button type="submit" form="product-form" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save product'}</button>
+              <span className="adm-footer-note">{uploading ? 'Uploading photos…' : isDirty ? 'Unsaved changes' : ''}</span>
+              <button type="button" className="btn btn-outline" onClick={closeEditor} disabled={saving}>Cancel</button>
+              <button type="submit" form="product-form" className={`btn btn-primary ${saving ? 'is-loading' : ''}`} disabled={uploading}>
+                {editing.id ? 'Save changes' : 'Add to shop'}
+              </button>
             </>
           )}
         >
-          <form id="product-form" onSubmit={save}>
-            <Field label="Name"><input className="form-input" required maxLength={120} value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></Field>
-            <Field label="Category">
-              <select className="form-input" required value={editing.category} onChange={(e) => setEditing({ ...editing, category: e.target.value })}>
-                {!categories.some((c) => c.name === editing.category) && editing.category && <option value={editing.category}>{editing.category}</option>}
-                {categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
-              </select>
-            </Field>
+          <form id="product-form" onSubmit={save} noValidate>
+            {/* How it will look in the shop */}
+            <div className="adm-preview" aria-label="Preview">
+              <SmartImage src={sizedImage(editing.photos[0] || '', 160)} alt="" className="adm-preview-img" fallbackLabel="No photo yet" />
+              <div className="adm-preview-body">
+                <span className="adm-preview-name">{editing.name || 'Product name'}</span>
+                <span className="adm-preview-price">
+                  <strong>{previewPrice ? money(previewPrice) : 'GH₵—'}</strong>
+                  {previewOff > 0 && <><s>{money(previewWas)}</s><em>−{previewOff}%</em></>}
+                </span>
+                <span className="adm-preview-tags">
+                  {editing.isNew && <span className="adm-pill is-info">New</span>}
+                  {!editing.inStock && <span className="adm-pill is-muted">Out of stock</span>}
+                  {editing.category && <span className="adm-muted">{editing.category}</span>}
+                </span>
+              </div>
+            </div>
+
+            <div data-field="name">
+              <Field label="Name">
+                <input className="form-input" maxLength={120} placeholder="Smart Air Fryer 7.5L" value={editing.name} onChange={(e) => setField('name', e.target.value)} aria-invalid={Boolean(problems.name)} />
+              </Field>
+              {problem('name')}
+            </div>
+            <div data-field="category">
+              <Field label="Category">
+                <select className="form-input" value={editing.category} onChange={(e) => setField('category', e.target.value)}>
+                  {!editing.category && <option value="">Choose…</option>}
+                  {!categories.some((c) => c.name === editing.category) && editing.category && <option value={editing.category}>{editing.category}</option>}
+                  {categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
+              </Field>
+              {problem('category')}
+            </div>
             <div className="form-row">
-              <Field label="Price (GH₵)"><input className="form-input" type="number" min="0.01" step="0.01" required value={editing.price} onChange={(e) => setEditing({ ...editing, price: e.target.value })} /></Field>
-              <Field label="Was price (GH₵)" hint="Optional. Shows a discount when higher than the price."><input className="form-input" type="number" min="0.01" step="0.01" value={editing.originalPrice} onChange={(e) => setEditing({ ...editing, originalPrice: e.target.value })} /></Field>
+              <div data-field="price">
+                <Field label="Price (GH₵)">
+                  <input className="form-input" type="number" inputMode="decimal" min="0.01" step="0.01" placeholder="450" value={editing.price} onChange={(e) => setField('price', e.target.value)} aria-invalid={Boolean(problems.price)} />
+                </Field>
+                {problem('price')}
+              </div>
+              <div data-field="originalPrice">
+                <Field label="Was price (GH₵)" hint={problems.originalPrice ? null : 'Optional — shows a discount.'}>
+                  <input className="form-input" type="number" inputMode="decimal" min="0.01" step="0.01" placeholder="600" value={editing.originalPrice} onChange={(e) => setField('originalPrice', e.target.value)} aria-invalid={Boolean(problems.originalPrice)} />
+                </Field>
+                {problem('originalPrice')}
+              </div>
             </div>
             <div className="adm-checks">
-              <label className="shop-check"><input type="checkbox" checked={editing.inStock} onChange={(e) => setEditing({ ...editing, inStock: e.target.checked })} /> In stock</label>
-              <label className="shop-check"><input type="checkbox" checked={editing.isNew} onChange={(e) => setEditing({ ...editing, isNew: e.target.checked })} /> Show "New" label</label>
+              <label className="shop-check"><input type="checkbox" checked={editing.inStock} onChange={(e) => setField('inStock', e.target.checked)} /> In stock</label>
+              <label className="shop-check"><input type="checkbox" checked={editing.isNew} onChange={(e) => setField('isNew', e.target.checked)} /> Show "New" label</label>
             </div>
-            <Field label="Photos" hint="The first photo is the main one. Up to 8."><PhotoManager photos={editing.photos} onChange={(photos) => setEditing({ ...editing, photos })} /></Field>
-            <Field label="Description"><textarea className="form-input" rows={4} value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} /></Field>
+            <div data-field="photos">
+              <Field label="Photos" hint="The first photo is the main one. Up to 8.">
+                <PhotoManager photos={editing.photos} onChange={(photos) => setField('photos', photos)} onBusyChange={setUploading} />
+              </Field>
+              {problem('photos')}
+            </div>
+            <Field label="Description">
+              <textarea className="form-input" rows={4} placeholder="What it is, what it's made of, what's in the box…" value={editing.description} onChange={(e) => setField('description', e.target.value)} />
+            </Field>
+
+            <div className="adm-specs">
+              <span className="form-label">Details shoppers see <span className="form-optional">(optional)</span></span>
+              {editing.specs.map((s, i) => (
+                <div key={i} className="adm-spec-row">
+                  <input className="form-input" placeholder="e.g. Size" aria-label={`Detail ${i + 1} name`} value={s.label}
+                    onChange={(e) => setField('specs', editing.specs.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} />
+                  <input className="form-input" placeholder="e.g. 7.5 litres" aria-label={`Detail ${i + 1} value`} value={s.value}
+                    onChange={(e) => setField('specs', editing.specs.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} />
+                  <button type="button" className="btn btn-outline btn-sm adm-danger" aria-label={`Remove detail ${i + 1}`}
+                    onClick={() => setField('specs', editing.specs.filter((_, j) => j !== i))}><X size={14} /></button>
+                </div>
+              ))}
+              {editing.specs.length < 12 && (
+                <button type="button" className="adm-add-spec" onClick={() => setField('specs', [...editing.specs, { label: '', value: '' }])}>
+                  <Plus size={14} /> Add a detail (size, colour, material…)
+                </button>
+              )}
+            </div>
           </form>
         </Modal>
       )}
@@ -462,24 +674,53 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
 // ---------------------------------------------------------------------------
 // Categories
 // ---------------------------------------------------------------------------
+// Editor state for an admin popup form, with a warning before unsaved changes are thrown away.
+const useEditor = () => {
+  const [form, setForm] = useState(null);
+  const [original, setOriginal] = useState('');
+  const [errors, setErrors] = useState({});
+  const open = (value) => { setForm(value); setOriginal(JSON.stringify(value)); setErrors({}); };
+  const dirty = form !== null && JSON.stringify(form) !== original;
+  const close = (force = false) => {
+    if (!force && dirty && !window.confirm('Close without saving? Your changes will be lost.')) return;
+    setForm(null);
+  };
+  const set = (key, value) => {
+    setForm((f) => ({ ...f, [key]: value }));
+    setErrors((e) => (e[key] ? { ...e, [key]: undefined } : e));
+  };
+  return { form, setForm, open, close, dirty, set, errors, setErrors };
+};
+
+const FieldError = ({ message }) => (message ? <span className="adm-field-error" role="alert"><AlertTriangle size={13} /> {message}</span> : null);
+const DirtyNote = ({ dirty, busy }) => <span className="adm-footer-note">{busy || (dirty ? 'Unsaved changes' : '')}</span>;
+
 const CategoriesTab = ({ categories, products, onCatalogChange }) => {
   const { showToast } = useStore();
-  const [editing, setEditing] = useState(null); // { id?, name, photos }
+  const ed = useEditor();
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const countFor = (name) => products.filter((p) => p.category === name).length;
 
   const save = async (e) => {
     e.preventDefault();
+    if (uploading) return;
+    const name = ed.form.name.trim();
+    if (!name) { ed.setErrors({ name: 'Give the category a name.' }); return; }
+    if (categories.some((c) => c.id !== ed.form.id && c.name.toLowerCase() === name.toLowerCase())) {
+      ed.setErrors({ name: `There's already a category called "${name}".` });
+      return;
+    }
     setSaving(true);
     try {
-      const body = { name: editing.name, image: editing.photos[0] || '' };
-      if (editing.id) await admin.editCategory(editing.id, body);
+      const body = { name, image: ed.form.photos[0] || '' };
+      if (ed.form.id) await admin.editCategory(ed.form.id, body);
       else await admin.addCategory(body);
-      showToast(`Category "${editing.name}" saved`, 'success');
-      setEditing(null);
+      showToast(`Category "${name}" saved`, 'success');
+      ed.close(true);
       onCatalogChange();
     } catch (err) {
-      showToast(err.message, 'error');
+      ed.setErrors({ name: err.message });
     } finally {
       setSaving(false);
     }
@@ -496,41 +737,69 @@ const CategoriesTab = ({ categories, products, onCatalogChange }) => {
     }
   };
 
+  const renaming = ed.form?.id && ed.form.name.trim() && ed.form.name.trim() !== ed.form.originalName;
+  const movingCount = ed.form?.id ? countFor(ed.form.originalName) : 0;
+
   return (
     <>
       <div className="adm-toolbar">
         <span className="adm-muted">{categories.length} categories</span>
-        <button type="button" className="btn btn-primary" onClick={() => setEditing({ name: '', photos: [] })}><Plus size={16} /> Add category</button>
+        <button type="button" className="btn btn-primary" onClick={() => ed.open({ name: '', photos: [] })}><Plus size={16} /> Add category</button>
       </div>
-      <div className="adm-cat-grid">
-        {categories.map((c) => (
-          <div key={c.id} className="adm-card adm-cat">
-            {c.image ? <img src={sizedImage(c.image, 240)} alt="" /> : <div className="img-fallback" style={{ position: 'static', aspectRatio: '1' }}>No photo</div>}
-            <div className="adm-strong">{c.name}</div>
-            <div className="adm-muted">{countFor(c.name)} products</div>
-            <div className="adm-row-actions">
-              <button type="button" className="btn btn-outline btn-sm" onClick={() => setEditing({ id: c.id, name: c.name, photos: c.image ? [c.image] : [] })}>Edit</button>
-              <button type="button" className="btn btn-outline btn-sm adm-danger" onClick={() => remove(c)} aria-label={`Delete ${c.name}`}><Trash2 size={14} /></button>
-            </div>
-          </div>
-        ))}
-      </div>
+      {categories.length === 0 ? <Empty>No categories yet. Add one so products can be grouped in the shop.</Empty> : (
+        <div className="adm-cat-grid">
+          {categories.map((c) => {
+            const count = countFor(c.name);
+            const openEdit = () => ed.open({ id: c.id, name: c.name, originalName: c.name, photos: c.image ? [c.image] : [] });
+            return (
+              <div key={c.id} className="adm-card adm-cat">
+                <button type="button" className="adm-cat-photo" onClick={openEdit} aria-label={`Edit ${c.name}`}>
+                  <SmartImage src={c.image ? sizedImage(c.image, 240) : ''} alt="" fallbackLabel="No photo" />
+                </button>
+                <div className="adm-strong">{c.name}</div>
+                <div className="adm-muted">{count} product{count === 1 ? '' : 's'}</div>
+                <div className="adm-row-actions">
+                  <button type="button" className="btn btn-outline btn-sm" onClick={openEdit}>Edit</button>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm adm-danger"
+                    onClick={() => remove(c)}
+                    disabled={count > 0}
+                    aria-label={`Delete ${c.name}`}
+                    title={count > 0 ? `Move or delete its ${count} product${count === 1 ? '' : 's'} first` : 'Delete category'}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+                {count > 0 && <span className="adm-cat-note">Can be deleted once it's empty</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
       <p className="adm-help">Renaming a category moves its products along with it. A category can only be deleted when no products use it.</p>
 
-      {editing && (
+      {ed.form && (
         <Modal
-          title={editing.id ? 'Edit category' : 'Add category'}
-          onClose={() => !saving && setEditing(null)}
+          title={ed.form.id ? 'Edit category' : 'Add category'}
+          onClose={() => !saving && ed.close()}
           footer={(
             <>
-              <button type="button" className="btn btn-outline" onClick={() => setEditing(null)} disabled={saving}>Cancel</button>
-              <button type="submit" form="category-form" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save category'}</button>
+              <DirtyNote dirty={ed.dirty} busy={uploading && 'Uploading photo…'} />
+              <button type="button" className="btn btn-outline" onClick={() => ed.close()} disabled={saving}>Cancel</button>
+              <button type="submit" form="category-form" className={`btn btn-primary ${saving ? 'is-loading' : ''}`} disabled={uploading}>Save category</button>
             </>
           )}
         >
-          <form id="category-form" onSubmit={save}>
-            <Field label="Name"><input className="form-input" required value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></Field>
-            <Field label="Photo"><PhotoManager single photos={editing.photos} onChange={(photos) => setEditing({ ...editing, photos })} /></Field>
+          <form id="category-form" onSubmit={save} noValidate>
+            <Field label="Name"><input className="form-input" maxLength={60} placeholder="Kitchen Appliances" value={ed.form.name} onChange={(e) => ed.set('name', e.target.value)} aria-invalid={Boolean(ed.errors.name)} /></Field>
+            <FieldError message={ed.errors.name} />
+            {renaming && movingCount > 0 && (
+              <p className="adm-note">The {movingCount} product{movingCount === 1 ? '' : 's'} in "{ed.form.originalName}" will move to "{ed.form.name.trim()}".</p>
+            )}
+            <Field label="Photo" hint="Shown on the home page and Categories page.">
+              <PhotoManager single photos={ed.form.photos} onChange={(photos) => ed.set('photos', photos)} onBusyChange={setUploading} />
+            </Field>
           </form>
         </Modal>
       )}
@@ -541,30 +810,90 @@ const CategoriesTab = ({ categories, products, onCatalogChange }) => {
 // ---------------------------------------------------------------------------
 // Promo codes
 // ---------------------------------------------------------------------------
+const promoStatus = (d) => {
+  if (!d.isActive) return ['Off', 'muted'];
+  if (d.expiresAt && new Date(d.expiresAt) < new Date()) return ['Expired', 'danger'];
+  if (d.usageLimit && (d.usedCount || 0) >= d.usageLimit) return ['Used up', 'warning'];
+  return ['Active', 'success'];
+};
+
+// "15% off orders of GH₵100 or more, up to GH₵50, until 31 Dec 2026, for the first 100 uses."
+const promoSummary = (f) => {
+  const value = Number(f.value);
+  if (!(value > 0)) return '';
+  const parts = [f.type === 'PERCENTAGE' ? `${value}% off` : `${money(value)} off`];
+  parts[0] += Number(f.minOrderAmount) > 0 ? ` orders of ${money(f.minOrderAmount)} or more` : ' any order';
+  if (f.type === 'PERCENTAGE' && Number(f.maxDiscount) > 0) parts.push(`up to ${money(f.maxDiscount)}`);
+  if (f.expiresAt) parts.push(`until the end of ${date(f.expiresAt)}`);
+  if (Number(f.usageLimit) > 0) parts.push(`for the first ${parseInt(f.usageLimit, 10)} use${Number(f.usageLimit) === 1 ? '' : 's'}`);
+  return `Customers get ${parts.join(', ')}.`;
+};
+
+const randomCode = () => `CHARI${Array.from(crypto.getRandomValues(new Uint8Array(4)), (b) => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b % 31]).join('')}`;
+
 const PromoTab = ({ discounts, setDiscounts }) => {
   const { showToast } = useStore();
   const blank = { code: '', description: '', type: 'PERCENTAGE', value: '', minOrderAmount: '', maxDiscount: '', usageLimit: '', expiresAt: '' };
-  const [form, setForm] = useState(null);
+  const ed = useEditor();
   const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState('');
+
+  const openEdit = (d) => ed.open({
+    id: d.id,
+    code: d.code,
+    description: d.description || '',
+    type: d.type,
+    value: String(d.value),
+    minOrderAmount: d.minOrderAmount ? String(d.minOrderAmount) : '',
+    maxDiscount: d.maxDiscount ? String(d.maxDiscount) : '',
+    usageLimit: d.usageLimit ? String(d.usageLimit) : '',
+    expiresAt: d.expiresAt ? toDateInput(new Date(d.expiresAt)) : '',
+    usedCount: d.usedCount || 0,
+  });
+
+  const validate = (f) => {
+    const found = {};
+    const code = f.code.trim().toUpperCase();
+    if (!/^[A-Z0-9-]{3,20}$/.test(code)) found.code = 'Use 3–20 letters or numbers, no spaces.';
+    else if (discounts.some((d) => d.id !== f.id && d.code === code)) found.code = `${code} already exists.`;
+    const value = Number(f.value);
+    if (!(value > 0)) found.value = 'Enter an amount above 0.';
+    else if (f.type === 'PERCENTAGE' && value > 100) found.value = 'A percentage can’t be more than 100.';
+    if (f.minOrderAmount !== '' && !(Number(f.minOrderAmount) >= 0)) found.minOrderAmount = 'Enter a number, or leave it empty.';
+    if (f.maxDiscount !== '' && !(Number(f.maxDiscount) > 0)) found.maxDiscount = 'Enter a number, or leave it empty.';
+    if (f.usageLimit !== '' && !(Number.isInteger(Number(f.usageLimit)) && Number(f.usageLimit) >= 1)) found.usageLimit = 'Enter a whole number, or leave it empty.';
+    if (!f.id && f.expiresAt && f.expiresAt < toDateInput(new Date())) found.expiresAt = 'Choose today or a later date.';
+    return found;
+  };
 
   const save = async (e) => {
     e.preventDefault();
+    const found = validate(ed.form);
+    ed.setErrors(found);
+    if (Object.keys(found).length) return;
+    const f = ed.form;
+    const body = {
+      code: f.code.trim().toUpperCase(),
+      description: f.description,
+      type: f.type,
+      value: Number(f.value),
+      minOrderAmount: f.minOrderAmount ? Number(f.minOrderAmount) : 0,
+      maxDiscount: f.type === 'PERCENTAGE' && f.maxDiscount ? Number(f.maxDiscount) : null,
+      usageLimit: f.usageLimit ? parseInt(f.usageLimit, 10) : null,
+      expiresAt: f.expiresAt || null,
+    };
     setSaving(true);
     try {
-      const created = await admin.addDiscount({
-        code: form.code.trim().toUpperCase(),
-        description: form.description,
-        type: form.type,
-        value: Number(form.value),
-        minOrderAmount: form.minOrderAmount ? Number(form.minOrderAmount) : 0,
-        maxDiscount: form.maxDiscount ? Number(form.maxDiscount) : null,
-        usageLimit: form.usageLimit ? parseInt(form.usageLimit, 10) : null,
-        expiresAt: form.expiresAt || null,
-        isActive: true,
-      });
-      setDiscounts((prev) => [created, ...prev]);
-      setForm(null);
-      showToast(`Promo code ${created.code} created`, 'success');
+      if (f.id) {
+        const updated = await admin.editDiscount(f.id, body);
+        setDiscounts((prev) => prev.map((x) => (x.id === f.id ? updated : x)));
+        showToast(`${updated.code} saved`, 'success');
+      } else {
+        const created = await admin.addDiscount({ ...body, isActive: true });
+        setDiscounts((prev) => [created, ...prev]);
+        showToast(`Promo code ${created.code} created`, 'success');
+      }
+      ed.close(true);
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
@@ -583,7 +912,7 @@ const PromoTab = ({ discounts, setDiscounts }) => {
   };
 
   const remove = async (d) => {
-    if (!window.confirm(`Delete promo code ${d.code}?`)) return;
+    if (!window.confirm(`Delete promo code ${d.code}?${d.usedCount ? ` It has been used ${d.usedCount} time${d.usedCount === 1 ? '' : 's'}.` : ''}`)) return;
     try {
       await admin.removeDiscount(d.id);
       setDiscounts((prev) => prev.filter((x) => x.id !== d.id));
@@ -593,67 +922,127 @@ const PromoTab = ({ discounts, setDiscounts }) => {
     }
   };
 
+  const copy = (code) => {
+    navigator.clipboard?.writeText(code);
+    setCopied(code);
+    setTimeout(() => setCopied(''), 1500);
+  };
+
+  const f = ed.form;
   return (
     <>
       <div className="adm-toolbar">
-        <span className="adm-muted">{discounts.length} promo codes</span>
-        <button type="button" className="btn btn-primary" onClick={() => setForm(blank)}><Plus size={16} /> New promo code</button>
+        <span className="adm-muted">{discounts.length} promo code{discounts.length === 1 ? '' : 's'}</span>
+        <button type="button" className="btn btn-primary" onClick={() => ed.open(blank)}><Plus size={16} /> New promo code</button>
       </div>
-      {discounts.length === 0 ? <Empty>No promo codes yet.</Empty> : (
+      {discounts.length === 0 ? <Empty>No promo codes yet. Create one to share with customers or hide in the treasure hunt.</Empty> : (
         <div className="adm-table-wrap">
-          <table className="adm-table">
+          <table className="adm-table adm-stack">
             <thead><tr><th>Code</th><th>Discount</th><th>Rules</th><th>Used</th><th>On</th><th /></tr></thead>
             <tbody>
-              {discounts.map((d) => (
-                <tr key={d.id}>
-                  <td><div className="adm-strong adm-code">{d.code}</div><div className="adm-muted">{d.description}</div></td>
-                  <td>{d.type === 'PERCENTAGE' ? `${d.value}% off` : `${money(d.value)} off`}{d.maxDiscount ? <div className="adm-muted">max {money(d.maxDiscount)}</div> : null}</td>
-                  <td className="adm-muted">
-                    {d.minOrderAmount ? `Min order ${money(d.minOrderAmount)}` : 'Any order'}
-                    {d.expiresAt ? <div>Ends {date(d.expiresAt)}</div> : null}
-                  </td>
-                  <td>{d.usedCount || 0}{d.usageLimit ? ` / ${d.usageLimit}` : ''}</td>
-                  <td><label className="adm-switch"><input type="checkbox" checked={d.isActive} onChange={() => toggle(d)} /><span>{d.isActive ? 'On' : 'Off'}</span></label></td>
-                  <td className="adm-row-actions"><button type="button" className="btn btn-outline btn-sm adm-danger" onClick={() => remove(d)} aria-label={`Delete ${d.code}`}><Trash2 size={14} /></button></td>
-                </tr>
-              ))}
+              {discounts.map((d) => {
+                const [statusText, tone] = promoStatus(d);
+                return (
+                  <tr key={d.id}>
+                    <td data-label="Code">
+                      <div className="adm-code-row">
+                        <span className="adm-strong adm-code">{d.code}</span>
+                        <button type="button" className={`adm-icon-btn ${copied === d.code ? 'is-done' : ''}`} onClick={() => copy(d.code)} aria-label={`Copy ${d.code}`}>
+                          {copied === d.code ? <Check size={13} /> : <Copy size={13} />}
+                        </button>
+                        <span className={`adm-pill is-${tone}`}>{statusText}</span>
+                      </div>
+                      {d.description && <div className="adm-muted">{d.description}</div>}
+                    </td>
+                    <td data-label="Discount">{d.type === 'PERCENTAGE' ? `${d.value}% off` : `${money(d.value)} off`}{d.maxDiscount ? <div className="adm-muted">max {money(d.maxDiscount)}</div> : null}</td>
+                    <td className="adm-muted" data-label="Rules">
+                      {d.minOrderAmount ? `Min order ${money(d.minOrderAmount)}` : 'Any order'}
+                      {d.expiresAt ? <div>Ends {date(d.expiresAt)}</div> : null}
+                    </td>
+                    <td data-label="Used">{d.usedCount || 0}{d.usageLimit ? ` / ${d.usageLimit}` : ''}</td>
+                    <td data-label="On"><label className="adm-switch"><input type="checkbox" checked={d.isActive} onChange={() => toggle(d)} /><span>{d.isActive ? 'On' : 'Off'}</span></label></td>
+                    <td className="adm-row-actions">
+                      <button type="button" className="btn btn-outline btn-sm" onClick={() => openEdit(d)}>Edit</button>
+                      <button type="button" className="btn btn-outline btn-sm adm-danger" onClick={() => remove(d)} aria-label={`Delete ${d.code}`}><Trash2 size={14} /></button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
 
-      {form && (
+      {f && (
         <Modal
-          title="New promo code"
-          onClose={() => !saving && setForm(null)}
+          title={f.id ? `Edit ${f.code}` : 'New promo code'}
+          onClose={() => !saving && ed.close()}
           footer={(
             <>
-              <button type="button" className="btn btn-outline" onClick={() => setForm(null)} disabled={saving}>Cancel</button>
-              <button type="submit" form="promo-form" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Create code'}</button>
+              <DirtyNote dirty={ed.dirty} />
+              <button type="button" className="btn btn-outline" onClick={() => ed.close()} disabled={saving}>Cancel</button>
+              <button type="submit" form="promo-form" className={`btn btn-primary ${saving ? 'is-loading' : ''}`}>{f.id ? 'Save changes' : 'Create code'}</button>
             </>
           )}
         >
-          <form id="promo-form" onSubmit={save}>
+          <form id="promo-form" onSubmit={save} noValidate>
+            {promoSummary(f) && <p className="adm-summary-line">{promoSummary(f)}</p>}
+            {f.id && f.usedCount > 0 && <p className="adm-note">Already used {f.usedCount} time{f.usedCount === 1 ? '' : 's'}. Changes apply to future orders only.</p>}
             <div className="form-row">
-              <Field label="Code"><input className="form-input" required value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase().replace(/\s/g, '') })} placeholder="e.g. EASTER15" /></Field>
+              <div>
+                <Field label="Code">
+                  <div className="adm-inline">
+                    <input className="form-input adm-code" value={f.code} onChange={(e) => ed.set('code', e.target.value.toUpperCase().replace(/\s/g, ''))} placeholder="EASTER15" maxLength={20} aria-invalid={Boolean(ed.errors.code)} />
+                    {!f.id && <button type="button" className="btn btn-outline btn-sm" onClick={() => ed.set('code', randomCode())}>Make one</button>}
+                  </div>
+                </Field>
+                <FieldError message={ed.errors.code} />
+              </div>
               <Field label="Type">
-                <select className="form-input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+                <select className="form-input" value={f.type} onChange={(e) => ed.set('type', e.target.value)}>
                   <option value="PERCENTAGE">Percentage off</option>
                   <option value="FIXED">Fixed amount off (GH₵)</option>
                 </select>
               </Field>
             </div>
             <div className="form-row">
-              <Field label={form.type === 'PERCENTAGE' ? 'Percent off' : 'Amount off (GH₵)'}><input className="form-input" type="number" min="0.01" step="0.01" max={form.type === 'PERCENTAGE' ? 100 : undefined} required value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} /></Field>
-              <Field label="Minimum order (GH₵)" hint="Optional"><input className="form-input" type="number" min="0" step="0.01" value={form.minOrderAmount} onChange={(e) => setForm({ ...form, minOrderAmount: e.target.value })} /></Field>
+              <div>
+                <Field label={f.type === 'PERCENTAGE' ? 'Percent off' : 'Amount off (GH₵)'}>
+                  <input className="form-input" type="number" inputMode="decimal" min="0.01" step="0.01" value={f.value} onChange={(e) => ed.set('value', e.target.value)} aria-invalid={Boolean(ed.errors.value)} />
+                </Field>
+                <FieldError message={ed.errors.value} />
+              </div>
+              <div>
+                <Field label="Minimum order (GH₵)" hint={ed.errors.minOrderAmount ? null : 'Optional'}>
+                  <input className="form-input" type="number" inputMode="decimal" min="0" step="0.01" value={f.minOrderAmount} onChange={(e) => ed.set('minOrderAmount', e.target.value)} />
+                </Field>
+                <FieldError message={ed.errors.minOrderAmount} />
+              </div>
             </div>
             <div className="form-row">
-              <Field label="Most it can take off (GH₵)" hint="Optional, for % codes"><input className="form-input" type="number" min="0" step="0.01" value={form.maxDiscount} onChange={(e) => setForm({ ...form, maxDiscount: e.target.value })} /></Field>
-              <Field label="How many times it can be used" hint="Optional"><input className="form-input" type="number" min="1" step="1" value={form.usageLimit} onChange={(e) => setForm({ ...form, usageLimit: e.target.value })} /></Field>
+              {f.type === 'PERCENTAGE' ? (
+                <div>
+                  <Field label="Most it can take off (GH₵)" hint={ed.errors.maxDiscount ? null : 'Optional'}>
+                    <input className="form-input" type="number" inputMode="decimal" min="0" step="0.01" value={f.maxDiscount} onChange={(e) => ed.set('maxDiscount', e.target.value)} />
+                  </Field>
+                  <FieldError message={ed.errors.maxDiscount} />
+                </div>
+              ) : <span />}
+              <div>
+                <Field label="How many times it can be used" hint={ed.errors.usageLimit ? null : 'Optional — in total, by all customers'}>
+                  <input className="form-input" type="number" inputMode="numeric" min="1" step="1" value={f.usageLimit} onChange={(e) => ed.set('usageLimit', e.target.value)} />
+                </Field>
+                <FieldError message={ed.errors.usageLimit} />
+              </div>
             </div>
             <div className="form-row">
-              <Field label="Ends on" hint="Optional"><input className="form-input" type="date" value={form.expiresAt} onChange={(e) => setForm({ ...form, expiresAt: e.target.value })} /></Field>
-              <Field label="Note for yourself" hint="Optional"><input className="form-input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
+              <div>
+                <Field label="Last day it works" hint={ed.errors.expiresAt ? null : 'Optional — works until the end of that day'}>
+                  <input className="form-input" type="date" value={f.expiresAt} onChange={(e) => ed.set('expiresAt', e.target.value)} />
+                </Field>
+                <FieldError message={ed.errors.expiresAt} />
+              </div>
+              <Field label="Note for yourself" hint="Optional — customers don't see this"><input className="form-input" value={f.description} onChange={(e) => ed.set('description', e.target.value)} /></Field>
             </div>
           </form>
         </Modal>
@@ -671,19 +1060,41 @@ const blankBatch = {
   status: 'CONFIRMED', cutoffDate: '', eta: '', isActive: true,
 };
 
+// "12 Nov" from a date-only value like "2026-11-12".
+const shortDay = (value) => (value ? new Date(`${value}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
+const daysUntil = (value) => (value ? Math.round((new Date(`${value}T12:00:00`) - new Date(`${toDateInput(new Date())}T12:00:00`)) / 86400000) : null);
+
 const ShipmentsTab = ({ batches, setBatches }) => {
   const { showToast, refreshBatches } = useStore();
-  const [form, setForm] = useState(null);
+  const ed = useEditor();
   const [saving, setSaving] = useState(false);
 
   const afterChange = () => { if (refreshBatches) refreshBatches(); };
+  const clearSpace = () => ed.setErrors((e) => ({ ...e, space: undefined }));
+
+  const validate = (f) => {
+    const found = {};
+    if (!f.batchNumber.trim()) found.batchNumber = 'Give the shipment a number or name.';
+    else if (batches.some((b) => b.id !== f.id && b.batchNumber === f.batchNumber.trim().toUpperCase())) found.batchNumber = 'Another shipment already uses this number.';
+    if (!f.carrier.trim()) found.carrier = 'Enter the shipping line or airline.';
+    if (f.cutoffDate && f.eta && f.eta < f.cutoffDate) found.eta = 'Arrival should be after the last day to order.';
+    const isSea = f.type === 'SEA_FCL';
+    const cap = Number(isSea ? f.capacityCbm : f.capacityKg);
+    const used = Number(isSea ? f.allocatedCbm : f.allocatedKg);
+    if (cap > 0 && used > cap) found.space = 'Space used is more than the total space.';
+    return found;
+  };
 
   const save = async (e) => {
     e.preventDefault();
+    const found = validate(ed.form);
+    ed.setErrors(found);
+    if (Object.keys(found).length) return;
+    const form = ed.form;
     setSaving(true);
     const isSea = form.type === 'SEA_FCL';
     const body = {
-      batchNumber: form.batchNumber,
+      batchNumber: form.batchNumber.trim(),
       type: form.type,
       carrier: form.carrier,
       originPort: form.originPort,
@@ -707,7 +1118,7 @@ const ShipmentsTab = ({ batches, setBatches }) => {
         setBatches((prev) => [created, ...prev]);
       }
       showToast(`Shipment ${body.batchNumber.toUpperCase()} saved`, 'success');
-      setForm(null);
+      ed.close(true);
       afterChange();
     } catch (err) {
       showToast(err.message, 'error');
@@ -745,19 +1156,23 @@ const ShipmentsTab = ({ batches, setBatches }) => {
     isActive: b.isActive !== false,
   });
 
+  const form = ed.form;
   return (
     <>
       <div className="adm-toolbar">
         <span className="adm-muted">The newest shipment marked "Show on website" appears on the home page.</span>
-        <button type="button" className="btn btn-primary" onClick={() => setForm({ ...blankBatch })}><Plus size={16} /> New shipment</button>
+        <button type="button" className="btn btn-primary" onClick={() => ed.open({ ...blankBatch })}><Plus size={16} /> New shipment</button>
       </div>
-      {batches.length === 0 ? <Empty>No shipments yet.</Empty> : (
+      {batches.length === 0 ? <Empty>No shipments yet. Add one to show customers when the next container closes and arrives.</Empty> : (
         <div className="adm-list">
           {batches.map((b) => {
             const isSea = b.type === 'SEA_FCL';
             const cap = isSea ? b.capacityCbm : b.capacityKg;
             const used = isSea ? b.allocatedCbm : b.allocatedKg;
-            const pct = cap ? Math.min(100, Math.round((used / cap) * 100)) : null;
+            const pct = cap ? Math.min(100, Math.round(((used || 0) / cap) * 100)) : null;
+            const stageIndex = BATCH_STAGES.findIndex(([v]) => v === b.status);
+            const next = BATCH_STAGES[stageIndex + 1];
+            const cutoffIn = daysUntil(b.cutoffDate);
             return (
               <article key={b.id} className="adm-card">
                 <header className="adm-card-head">
@@ -770,20 +1185,51 @@ const ShipmentsTab = ({ batches, setBatches }) => {
                     <span>Show on website</span>
                   </label>
                 </header>
+
+                <ol className="adm-stages" aria-label="Stage">
+                  {BATCH_STAGES.map(([v, l], i) => (
+                    <li key={v} className={i < stageIndex ? 'is-done' : i === stageIndex ? 'is-current' : ''} title={l}>
+                      <span className="adm-stage-dot" />
+                      <span className="adm-stage-label">{l}</span>
+                    </li>
+                  ))}
+                </ol>
+
                 <div className="adm-order-grid">
                   <div><div className="adm-label">Route</div><div>{b.originPort} → {b.destinationPort}</div></div>
-                  <div><div className="adm-label">Dates</div><div>Order cut-off: {b.cutoffDate || '—'}</div><div>Arrives: {b.eta || '—'}</div></div>
-                  <div><div className="adm-label">Space used</div><div>{used ?? 0} / {cap ?? '—'} {isSea ? 'CBM' : 'kg'}{pct !== null ? ` (${pct}%)` : ''}</div><div className="adm-muted">{b.totalOrders || 0} orders</div></div>
+                  <div>
+                    <div className="adm-label">Dates</div>
+                    <div>
+                      Last day to order: {shortDay(b.cutoffDate)}
+                      {cutoffIn !== null && (
+                        <span className={`adm-pill is-${cutoffIn < 0 ? 'muted' : cutoffIn <= 3 ? 'warning' : 'info'}`}>
+                          {cutoffIn < 0 ? 'Closed' : cutoffIn === 0 ? 'Closes today' : `${cutoffIn} day${cutoffIn === 1 ? '' : 's'} left`}
+                        </span>
+                      )}
+                    </div>
+                    <div>Arrives: {shortDay(b.eta)}</div>
+                  </div>
+                  <div>
+                    <div className="adm-label">Space used</div>
+                    <div>{used ?? 0} / {cap ?? '—'} {isSea ? 'CBM' : 'kg'}{pct !== null ? ` (${pct}%)` : ''}</div>
+                    {pct !== null && <div className="adm-meter" aria-hidden="true"><span style={{ width: `${pct}%` }} className={pct >= 90 ? 'is-full' : ''} /></div>}
+                    <div className="adm-muted">{b.totalOrders || 0} orders</div>
+                  </div>
                 </div>
                 <footer className="adm-card-actions">
+                  {next && (
+                    <button type="button" className="btn btn-primary adm-next" onClick={() => quick(b, { status: next[0] }, `${b.batchNumber}: ${next[1]}`)}>
+                      <Check size={16} /> Move to "{next[1]}"
+                    </button>
+                  )}
                   <label className="adm-mini-field">
                     <span>Stage</span>
                     <select className="form-input" value={b.status} onChange={(e) => quick(b, { status: e.target.value }, `${b.batchNumber}: ${label(BATCH_STAGES, e.target.value)}`)}>
                       {BATCH_STAGES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                     </select>
                   </label>
-                  <button type="button" className="btn btn-outline" onClick={() => setForm(toForm(b))}>Edit</button>
-                  <button type="button" className="btn btn-outline adm-danger" onClick={() => remove(b)}><Trash2 size={14} /> Delete</button>
+                  <button type="button" className="btn btn-outline" onClick={() => ed.open(toForm(b))}>Edit</button>
+                  <button type="button" className="btn btn-outline adm-danger" onClick={() => remove(b)} aria-label={`Delete ${b.batchNumber}`}><Trash2 size={14} /></button>
                 </footer>
               </article>
             );
@@ -794,53 +1240,62 @@ const ShipmentsTab = ({ batches, setBatches }) => {
       {form && (
         <Modal
           title={form.id ? 'Edit shipment' : 'New shipment'}
-          onClose={() => !saving && setForm(null)}
+          onClose={() => !saving && ed.close()}
           footer={(
             <>
-              <button type="button" className="btn btn-outline" onClick={() => setForm(null)} disabled={saving}>Cancel</button>
-              <button type="submit" form="batch-form" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save shipment'}</button>
+              <DirtyNote dirty={ed.dirty} />
+              <button type="button" className="btn btn-outline" onClick={() => ed.close()} disabled={saving}>Cancel</button>
+              <button type="submit" form="batch-form" className={`btn btn-primary ${saving ? 'is-loading' : ''}`}>Save shipment</button>
             </>
           )}
         >
-          <form id="batch-form" onSubmit={save}>
+          <form id="batch-form" onSubmit={save} noValidate>
             <div className="form-row">
-              <Field label="Shipment number"><input className="form-input" required value={form.batchNumber} onChange={(e) => setForm({ ...form, batchNumber: e.target.value })} placeholder="e.g. CN-GH-2026-FCL05" /></Field>
+              <div>
+                <Field label="Shipment number"><input className="form-input" value={form.batchNumber} onChange={(e) => ed.set('batchNumber', e.target.value)} placeholder="CN-GH-2026-FCL05" aria-invalid={Boolean(ed.errors.batchNumber)} /></Field>
+                <FieldError message={ed.errors.batchNumber} />
+              </div>
               <Field label="Type">
-                <select className="form-input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+                <select className="form-input" value={form.type} onChange={(e) => ed.set('type', e.target.value)}>
                   <option value="SEA_FCL">Sea</option>
                   <option value="AIR_CARGO">Air</option>
                 </select>
               </Field>
             </div>
-            <Field label="Shipping line / airline"><input className="form-input" required value={form.carrier} onChange={(e) => setForm({ ...form, carrier: e.target.value })} /></Field>
+            <Field label="Shipping line / airline"><input className="form-input" placeholder="Maersk" value={form.carrier} onChange={(e) => ed.set('carrier', e.target.value)} aria-invalid={Boolean(ed.errors.carrier)} /></Field>
+            <FieldError message={ed.errors.carrier} />
             <div className="form-row">
-              <Field label="From"><input className="form-input" value={form.originPort} onChange={(e) => setForm({ ...form, originPort: e.target.value })} /></Field>
-              <Field label="To"><input className="form-input" value={form.destinationPort} onChange={(e) => setForm({ ...form, destinationPort: e.target.value })} /></Field>
+              <Field label="From"><input className="form-input" value={form.originPort} onChange={(e) => ed.set('originPort', e.target.value)} /></Field>
+              <Field label="To"><input className="form-input" value={form.destinationPort} onChange={(e) => ed.set('destinationPort', e.target.value)} /></Field>
             </div>
             <div className="form-row">
-              <Field label="Last day to order"><input className="form-input" type="date" value={form.cutoffDate} onChange={(e) => setForm({ ...form, cutoffDate: e.target.value })} /></Field>
-              <Field label="Expected arrival"><input className="form-input" type="date" value={form.eta} onChange={(e) => setForm({ ...form, eta: e.target.value })} /></Field>
+              <Field label="Last day to order"><input className="form-input" type="date" value={form.cutoffDate} onChange={(e) => ed.set('cutoffDate', e.target.value)} /></Field>
+              <div>
+                <Field label="Expected arrival"><input className="form-input" type="date" value={form.eta} onChange={(e) => ed.set('eta', e.target.value)} /></Field>
+                <FieldError message={ed.errors.eta} />
+              </div>
             </div>
             {form.type === 'SEA_FCL' ? (
               <div className="form-row">
-                <Field label="Container space (CBM)"><input className="form-input" type="number" min="0" step="0.1" value={form.capacityCbm} onChange={(e) => setForm({ ...form, capacityCbm: e.target.value })} /></Field>
-                <Field label="Space already used (CBM)"><input className="form-input" type="number" min="0" step="0.1" value={form.allocatedCbm} onChange={(e) => setForm({ ...form, allocatedCbm: e.target.value })} /></Field>
+                <Field label="Container space (CBM)"><input className="form-input" type="number" inputMode="decimal" min="0" step="0.1" value={form.capacityCbm} onChange={(e) => { ed.set('capacityCbm', e.target.value); clearSpace(); }} /></Field>
+                <Field label="Space already used (CBM)"><input className="form-input" type="number" inputMode="decimal" min="0" step="0.1" value={form.allocatedCbm} onChange={(e) => { ed.set('allocatedCbm', e.target.value); clearSpace(); }} /></Field>
               </div>
             ) : (
               <div className="form-row">
-                <Field label="Weight limit (kg)"><input className="form-input" type="number" min="0" step="1" value={form.capacityKg} onChange={(e) => setForm({ ...form, capacityKg: e.target.value })} /></Field>
-                <Field label="Weight already used (kg)"><input className="form-input" type="number" min="0" step="1" value={form.allocatedKg} onChange={(e) => setForm({ ...form, allocatedKg: e.target.value })} /></Field>
+                <Field label="Weight limit (kg)"><input className="form-input" type="number" inputMode="numeric" min="0" step="1" value={form.capacityKg} onChange={(e) => { ed.set('capacityKg', e.target.value); clearSpace(); }} /></Field>
+                <Field label="Weight already used (kg)"><input className="form-input" type="number" inputMode="numeric" min="0" step="1" value={form.allocatedKg} onChange={(e) => { ed.set('allocatedKg', e.target.value); clearSpace(); }} /></Field>
               </div>
             )}
+            <FieldError message={ed.errors.space} />
             <div className="form-row">
-              <Field label="Number of orders"><input className="form-input" type="number" min="0" step="1" value={form.totalOrders} onChange={(e) => setForm({ ...form, totalOrders: e.target.value })} /></Field>
+              <Field label="Number of orders"><input className="form-input" type="number" inputMode="numeric" min="0" step="1" value={form.totalOrders} onChange={(e) => ed.set('totalOrders', e.target.value)} /></Field>
               <Field label="Stage">
-                <select className="form-input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                <select className="form-input" value={form.status} onChange={(e) => ed.set('status', e.target.value)}>
                   {BATCH_STAGES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
               </Field>
             </div>
-            <label className="shop-check"><input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} /> Show on website</label>
+            <label className="shop-check"><input type="checkbox" checked={form.isActive} onChange={(e) => ed.set('isActive', e.target.checked)} /> Show on website</label>
           </form>
         </Modal>
       )}
@@ -851,52 +1306,136 @@ const ShipmentsTab = ({ batches, setBatches }) => {
 // ---------------------------------------------------------------------------
 // Messages
 // ---------------------------------------------------------------------------
+// A request photo our server stored (local upload or our Cloudinary folder) — never a link a customer typed.
+const isStoredRequestPhoto = (url) =>
+  /^\/uploads\/req-[a-z0-9-]+\.(jpe?g|png|webp|avif)$/i.test(url || '') ||
+  /^https:\/\/res\.cloudinary\.com\/[a-z0-9_-]+\/image\/upload\/[^\s"'<>]*\/chari\/requests\/[^\s"'<>]+$/i.test(url || '');
+
+// "5 min ago", "3 hrs ago", "yesterday", then the date.
+const timeAgo = (d) => {
+  const mins = Math.round((Date.now() - new Date(d).getTime()) / 60000);
+  if (!(mins >= 0)) return date(d);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hr${hrs === 1 ? '' : 's'} ago`;
+  const days = Math.round(hrs / 24);
+  if (days === 1) return 'yesterday';
+  if (days < 7) return `${days} days ago`;
+  return date(d);
+};
+
 const MessagesTab = ({ messages, setMessages }) => {
   const { showToast } = useStore();
   const [filter, setFilter] = useState('NEW');
-  const shown = messages.filter((m) => filter === 'all' || (m.status || 'NEW') === filter);
+  const [query, setQuery] = useState('');
+  const [busy, setBusy] = useState(null);
+  const statusOf = (m) => m.status || 'NEW';
+  const counts = {
+    NEW: messages.filter((m) => statusOf(m) === 'NEW').length,
+    REPLIED: messages.filter((m) => statusOf(m) === 'REPLIED').length,
+    CLOSED: messages.filter((m) => statusOf(m) === 'CLOSED').length,
+    all: messages.length,
+  };
+  const q = query.trim().toLowerCase();
+  const shown = messages.filter((m) => (filter === 'all' || statusOf(m) === filter)
+    && (!q || [m.name, m.phone, m.email, m.subject, m.message].some((v) => String(v || '').toLowerCase().includes(q))));
 
-  const setStatus = async (m, status) => {
+  const setStatus = async (m, status, note) => {
+    setBusy(m.id);
     try {
       const updated = await admin.setMessageStatus(m.id, status);
       setMessages((prev) => prev.map((x) => (x.id === m.id ? updated : x)));
+      if (note) {
+        showToast(note, 'info', {
+          action: { label: 'Undo', onClick: () => admin.setMessageStatus(m.id, statusOf(m)).then((back) => setMessages((prev) => prev.map((x) => (x.id === m.id ? back : x)))) },
+        });
+      }
     } catch (err) {
       showToast(err.message, 'error');
+    } finally {
+      setBusy(null);
     }
+  };
+
+  const replyText = (m) => {
+    const isRequest = /^item request/i.test(m.subject || '');
+    const item = isRequest ? (m.subject || '').replace(/^item request:\s*/i, '') : '';
+    return isRequest
+      ? `Hello ${m.name}, this is CHARI about your request for "${item}". `
+      : `Hello ${m.name}, this is CHARI replying to your message about "${m.subject}". `;
   };
 
   return (
     <>
-      <div className="adm-toolbar">
-        <div className="segmented segmented-inline" role="tablist">
-          {[['NEW', 'New'], ['REPLIED', 'Replied'], ['CLOSED', 'Closed'], ['all', 'All']].map(([v, l]) => (
-            <button key={v} type="button" role="tab" aria-selected={filter === v} className={filter === v ? 'active' : ''} onClick={() => setFilter(v)}>{l}</button>
-          ))}
-        </div>
+      <div className="adm-views" role="tablist" aria-label="Message filters">
+        {[['NEW', 'New'], ['REPLIED', 'Replied'], ['CLOSED', 'Closed'], ['all', 'All']].map(([v, l]) => (
+          <button key={v} type="button" role="tab" aria-selected={filter === v} className={`adm-view ${filter === v ? 'is-active' : ''} ${v === 'NEW' && counts.NEW ? 'is-urgent' : ''}`} onClick={() => setFilter(v)}>
+            {l} <span>{counts[v]}</span>
+          </button>
+        ))}
       </div>
-      {shown.length === 0 ? <Empty>No messages here.</Empty> : (
+      <div className="adm-toolbar">
+        <div className="adm-search"><Search size={16} /><input placeholder="Search name, phone or words in the message" value={query} onChange={(e) => setQuery(e.target.value)} /></div>
+      </div>
+
+      {shown.length === 0 ? (
+        <Empty>{q ? 'No messages match your search.' : filter === 'NEW' ? 'All caught up — no new messages.' : 'No messages here.'}</Empty>
+      ) : (
         <div className="adm-list">
-          {shown.map((m) => (
-            <article key={m.id} className="adm-card">
-              <header className="adm-card-head">
-                <div><strong>{m.subject}</strong><span className="adm-muted"> · {date(m.createdAt)}</span></div>
-                <select className="form-input adm-select" value={m.status || 'NEW'} onChange={(e) => setStatus(m, e.target.value)} aria-label="Message status">
-                  {MESSAGE_STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
-              </header>
-              <p className="adm-message">{m.message}</p>
-              <footer className="adm-card-actions">
-                <span className="adm-muted">{m.name} · {m.phone || 'no phone'}{m.email ? ` · ${m.email}` : ''}</span>
-                {m.phone && (
-                  <a className="btn btn-whatsapp btn-sm" target="_blank" rel="noreferrer" href={waLink(m.phone, `Hello ${m.name}, this is CHARI replying to your message.`)} onClick={() => (m.status || 'NEW') === 'NEW' && setStatus(m, 'REPLIED')}>
-                    <MessageCircle size={14} /> Reply on WhatsApp
+          {shown.map((m) => {
+            const status = statusOf(m);
+            const isRequest = /^item request/i.test(m.subject || '');
+            const lines = String(m.message || '').split('\n');
+            // Item requests can carry a "Photo: <link>" line — show it as a picture instead of text.
+            // Only links to photos our own server stored count; anything a customer typed stays plain text.
+            const photo = lines.map((l) => (l.startsWith('Photo: ') ? l.slice(7).trim() : '')).find(isStoredRequestPhoto);
+            return (
+              <article key={m.id} className={`adm-card adm-msg ${status === 'NEW' ? 'is-new' : ''}`} aria-busy={busy === m.id}>
+                <header className="adm-card-head">
+                  <div className="adm-msg-title">
+                    <span className={`adm-pill is-${isRequest ? 'warning' : 'info'}`}>{isRequest ? 'Item request' : 'Message'}</span>
+                    <strong>{isRequest ? m.subject.replace(/^item request:\s*/i, '') : m.subject}</strong>
+                  </div>
+                  <span className="adm-muted" title={new Date(m.createdAt).toLocaleString('en-GB')}>{timeAgo(m.createdAt)}</span>
+                </header>
+                <p className="adm-message">{lines.filter((l) => !(l.startsWith('Photo: ') && l.slice(7).trim() === photo)).join('\n')}</p>
+                {photo && (
+                  <a className="adm-message-photo" href={photo} target="_blank" rel="noreferrer" title="Open the customer's photo">
+                    <SmartImage src={sizedImage(photo, 240)} alt="Photo sent by the customer" fallbackLabel="Open photo" />
+                    <span>Customer's photo</span>
                   </a>
                 )}
-              </footer>
-            </article>
-          ))}
+                <div className="adm-msg-from">
+                  <strong>{m.name}</strong>
+                  {m.phone && <a className="adm-phone" href={`tel:${String(m.phone).replace(/\s/g, '')}`}><Phone size={13} /> {m.phone}</a>}
+                  {m.email && <a className="adm-phone" href={`mailto:${m.email}?subject=${encodeURIComponent(`Re: ${m.subject}`)}`}>{m.email}</a>}
+                </div>
+                <footer className="adm-card-actions">
+                  {m.phone ? (
+                    <a className="btn btn-whatsapp btn-sm" target="_blank" rel="noreferrer" href={waLink(m.phone, replyText(m))} onClick={() => status === 'NEW' && setStatus(m, 'REPLIED')}>
+                      <MessageCircle size={14} /> Reply on WhatsApp
+                    </a>
+                  ) : m.email ? (
+                    <a className="btn btn-primary btn-sm" href={`mailto:${m.email}?subject=${encodeURIComponent(`Re: ${m.subject}`)}&body=${encodeURIComponent(replyText(m))}`} onClick={() => status === 'NEW' && setStatus(m, 'REPLIED')}>
+                      Reply by email
+                    </a>
+                  ) : null}
+                  <div className="adm-msg-status" role="group" aria-label="Status">
+                    {MESSAGE_STATUSES.map(([v, l]) => (
+                      <button key={v} type="button" className={status === v ? 'is-active' : ''} aria-pressed={status === v} disabled={busy === m.id || status === v}
+                        onClick={() => setStatus(m, v, `Marked as ${l.toLowerCase()}`)}>
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                </footer>
+              </article>
+            );
+          })}
         </div>
       )}
+      <p className="adm-help">Replying on WhatsApp marks a new message as replied. Close a conversation once it's sorted, so New only shows what still needs an answer.</p>
     </>
   );
 };
@@ -904,28 +1443,91 @@ const MessagesTab = ({ messages, setMessages }) => {
 // ---------------------------------------------------------------------------
 // Customers
 // ---------------------------------------------------------------------------
-const CustomersTab = ({ customers }) => {
+const CUSTOMER_SORTS = [
+  ['newest', 'Newest first'],
+  ['orders', 'Most orders'],
+  ['credit', 'Most store credit'],
+  ['invited', 'Most friends invited'],
+  ['name', 'Name A–Z'],
+];
+
+// Spreadsheet-safe CSV cell (quotes, commas and line breaks handled).
+const csvCell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+const CustomersTab = ({ customers, onViewOrders }) => {
   const [query, setQuery] = useState('');
-  const shown = customers.filter((c) => [c.name, c.email, c.phone, c.city].some((v) => String(v || '').toLowerCase().includes(query.toLowerCase())));
+  const [sortBy, setSortBy] = useState('newest');
+  const q = query.trim().toLowerCase();
+  const orderCount = (c) => c._count?.orders ?? 0;
+  const shown = customers
+    .filter((c) => !q || [c.name, c.email, c.phone, c.city].some((v) => String(v || '').toLowerCase().includes(q)))
+    .sort((a, b) => {
+      if (sortBy === 'orders') return orderCount(b) - orderCount(a);
+      if (sortBy === 'credit') return (b.creditBalance || 0) - (a.creditBalance || 0);
+      if (sortBy === 'invited') return (b._count?.referrals ?? 0) - (a._count?.referrals ?? 0);
+      if (sortBy === 'name') return String(a.name).localeCompare(String(b.name));
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+
+  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  const stats = [
+    ['Customers', customers.length],
+    ['Joined this month', customers.filter((c) => new Date(c.createdAt) >= monthStart).length],
+    ['Have ordered', customers.filter((c) => orderCount(c) > 0).length],
+    ['Store credit owed', money(customers.reduce((s, c) => s + (c.creditBalance || 0), 0))],
+  ];
+
+  const download = () => {
+    const rows = [['Name', 'Email', 'Phone', 'City', 'Joined', 'Orders', 'Friends invited', 'Store credit (GHS)']]
+      .concat(shown.map((c) => [c.name, c.email, c.phone || '', c.city || '', new Date(c.createdAt).toISOString().slice(0, 10), orderCount(c), c._count?.referrals ?? 0, Number(c.creditBalance || 0).toFixed(2)]));
+    const blob = new Blob([`\uFEFF${rows.map((r) => r.map(csvCell).join(',')).join('\r\n')}`], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `chari-customers-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
   return (
     <>
+      <div className="adm-mini-stats">
+        {stats.map(([text, value]) => <div key={text}><strong>{value}</strong><span>{text}</span></div>)}
+      </div>
       <div className="adm-toolbar">
         <div className="adm-search"><Search size={16} /><input placeholder="Search name, email, phone or city" value={query} onChange={(e) => setQuery(e.target.value)} /></div>
+        <select className="form-input adm-select" value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="Sort customers">
+          {CUSTOMER_SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <button type="button" className="btn btn-outline" onClick={download} disabled={shown.length === 0}>Download list (CSV)</button>
       </div>
-      {shown.length === 0 ? <Empty>No customers found.</Empty> : (
+      {shown.length === 0 ? <Empty>{q ? 'No customers match your search.' : 'No customers yet.'}</Empty> : (
         <div className="adm-table-wrap">
-          <table className="adm-table">
-            <thead><tr><th>Name</th><th>Contact</th><th>City</th><th>Joined</th><th>Orders</th><th>Invited</th><th>Store credit</th></tr></thead>
+          <table className="adm-table adm-stack">
+            <thead><tr><th>Name</th><th>City</th><th>Joined</th><th>Orders</th><th>Invited</th><th>Store credit</th><th /></tr></thead>
             <tbody>
               {shown.map((c) => (
                 <tr key={c.id}>
-                  <td><div className="adm-strong">{c.name}</div>{c.role === 'ADMIN' && <div className="adm-muted">Admin</div>}</td>
-                  <td><div>{c.email}</div><div className="adm-muted">{c.phone || '—'}</div></td>
-                  <td>{c.city || '—'}</td>
-                  <td>{date(c.createdAt)}</td>
-                  <td>{c._count?.orders ?? 0}</td>
-                  <td>{c._count?.referrals ?? 0}</td>
-                  <td>{money(c.creditBalance)}</td>
+                  <td>
+                    <div className="adm-strong">{c.name} {c.role === 'ADMIN' && <span className="adm-pill is-info">Admin</span>}</div>
+                    <div className="adm-muted adm-cust-contact">
+                      <a href={`mailto:${c.email}`}>{c.email}</a>
+                      {c.phone && <a href={`tel:${String(c.phone).replace(/\s/g, '')}`}>{c.phone}</a>}
+                    </div>
+                  </td>
+                  <td data-label="City">{c.city || '—'}</td>
+                  <td data-label="Joined">{date(c.createdAt)}</td>
+                  <td data-label="Orders">{orderCount(c)}</td>
+                  <td data-label="Invited">{c._count?.referrals ?? 0}</td>
+                  <td data-label="Store credit">{c.creditBalance ? money(c.creditBalance) : '—'}</td>
+                  <td className="adm-row-actions">
+                    {orderCount(c) > 0 && <button type="button" className="btn btn-outline btn-sm" onClick={() => onViewOrders(c.phone || c.email)}>View orders</button>}
+                    {c.phone && (
+                      <a className="btn btn-whatsapp btn-sm" target="_blank" rel="noreferrer" href={waLink(c.phone, `Hello ${String(c.name).split(' ')[0]}, this is CHARI. `)} aria-label={`WhatsApp ${c.name}`}>
+                        <MessageCircle size={14} />
+                      </a>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -945,14 +1547,16 @@ const dateTime = (d) => new Date(d).toLocaleString('en-GB', { day: 'numeric', mo
 
 const DealsTab = ({ products, onCatalogChange }) => {
   const { showToast } = useStore();
-  const [form, setForm] = useState(null);
+  const ed = useEditor();
   const [saving, setSaving] = useState(false);
   const normalPrice = (p) => p.listPrice ?? p.price;
   const live = products.filter((p) => p.onDeal).sort((a, b) => new Date(a.dealEndsAt) - new Date(b.dealEndsAt));
+  const form = ed.form;
 
   const openForm = (preselect = []) => {
     const end = new Date(Date.now() + 7 * 86400000);
-    setForm({
+    ed.open({
+      editing: preselect.length > 0,
       selected: Object.fromEntries(preselect.map((p) => [p.id, String(p.onDeal ? p.price : '')])),
       mode: preselect.length === 1 && preselect[0].onDeal ? 'price' : 'percent',
       percent: '20',
@@ -964,7 +1568,8 @@ const DealsTab = ({ products, onCatalogChange }) => {
 
   const setEnd = (days) => {
     const d = new Date(Date.now() + days * 86400000);
-    setForm((f) => ({ ...f, endDate: toDateInput(d), endTime: '23:59' }));
+    ed.setForm((f) => ({ ...f, endDate: toDateInput(d), endTime: '23:59' }));
+    ed.setErrors((e) => ({ ...e, end: undefined }));
   };
 
   const dealPriceFor = (p) => {
@@ -977,19 +1582,31 @@ const DealsTab = ({ products, onCatalogChange }) => {
     return Number.isFinite(v) && v > 0 ? v : null;
   };
 
+  const chosen = form ? products.filter((p) => p.id in form.selected) : [];
+  const pickable = form ? products.filter((p) => p.inStock !== false && p.name.toLowerCase().includes(form.search.toLowerCase())) : [];
+  const endsAt = form ? new Date(`${form.endDate}T${form.endTime || '23:59'}`) : null;
+
   const save = async (e) => {
     e.preventDefault();
-    const chosen = products.filter((p) => p.id in form.selected);
-    if (!chosen.length) { showToast('Choose at least one product.', 'error'); return; }
+    const found = {};
+    if (!chosen.length) found.products = 'Choose at least one product.';
+    if (form.mode === 'percent' && !(Number(form.percent) > 0 && Number(form.percent) < 100)) found.percent = 'Choose a discount between 1% and 99%.';
+    const badPrices = {};
+    chosen.forEach((p) => {
+      const dp = dealPriceFor(p);
+      if (form.mode === 'price' && (!dp || dp >= normalPrice(p))) badPrices[p.id] = `Must be below ${money(normalPrice(p))}`;
+    });
+    if (Object.keys(badPrices).length) found.prices = badPrices;
+    if (!form.endDate || Number.isNaN(endsAt.getTime()) || endsAt <= new Date()) found.end = 'Choose an end time in the future.';
+    ed.setErrors(found);
+    if (Object.keys(found).length) return;
+
     const items = chosen.map((p) => ({ productId: p.id, dealPrice: dealPriceFor(p) }));
-    const bad = chosen.find((p, i) => !items[i].dealPrice || items[i].dealPrice >= normalPrice(p));
-    if (bad) { showToast(`Deal price for "${bad.name}" must be below GH₵${normalPrice(bad).toFixed(2)}.`, 'error'); return; }
-    const endsAt = new Date(`${form.endDate}T${form.endTime || '23:59'}`);
     setSaving(true);
     try {
       await admin.startDeals(endsAt.toISOString(), items);
       showToast(`${items.length} deal${items.length === 1 ? '' : 's'} live until ${dateTime(endsAt)}`, 'success');
-      setForm(null);
+      ed.close(true);
       onCatalogChange();
     } catch (err) {
       showToast(err.message, 'error');
@@ -1009,14 +1626,23 @@ const DealsTab = ({ products, onCatalogChange }) => {
     }
   };
 
-  const toggle = (p) => setForm((f) => {
+  const toggle = (p) => {
+    ed.setForm((f) => {
+      const selected = { ...f.selected };
+      if (p.id in selected) delete selected[p.id]; else selected[p.id] = '';
+      return { ...f, selected };
+    });
+    ed.setErrors((e) => ({ ...e, products: undefined }));
+  };
+  const selectShown = (on) => ed.setForm((f) => {
     const selected = { ...f.selected };
-    if (p.id in selected) delete selected[p.id]; else selected[p.id] = '';
+    pickable.forEach((p) => { if (on) { if (!(p.id in selected)) selected[p.id] = ''; } else delete selected[p.id]; });
     return { ...f, selected };
   });
-
-  const pickable = form ? products.filter((p) => p.inStock !== false && p.name.toLowerCase().includes(form.search.toLowerCase())) : [];
-  const chosen = form ? products.filter((p) => p.id in form.selected) : [];
+  const setPrice = (id, value) => {
+    ed.setForm((f) => ({ ...f, selected: { ...f.selected, [id]: value } }));
+    ed.setErrors((e) => (e.prices?.[id] ? { ...e, prices: { ...e.prices, [id]: undefined } } : e));
+  };
 
   return (
     <>
@@ -1027,15 +1653,20 @@ const DealsTab = ({ products, onCatalogChange }) => {
 
       {live.length === 0 ? <Empty>No deals right now. Start one to show it on the home page with a countdown.</Empty> : (
         <div className="adm-table-wrap">
-          <table className="adm-table">
+          <table className="adm-table adm-stack">
             <thead><tr><th>Product</th><th>Normal price</th><th>Deal price</th><th>Ends</th><th /></tr></thead>
             <tbody>
               {live.map((p) => (
                 <tr key={p.id}>
-                  <td><div className="adm-product-cell"><img src={sizedImage(p.image, 96)} alt="" /><div className="adm-strong">{p.name}</div></div></td>
-                  <td className="adm-muted">{money(normalPrice(p))}</td>
-                  <td className="adm-strong">{money(p.price)} <span className="adm-muted">(−{Math.round((1 - p.price / normalPrice(p)) * 100)}%)</span></td>
-                  <td>{dateTime(p.dealEndsAt)}</td>
+                  <td>
+                    <div className="adm-product-cell">
+                      <SmartImage src={sizedImage(p.image || p.images?.[0] || '', 96)} alt="" className="adm-product-thumb" />
+                      <span className="adm-strong">{p.name}</span>
+                    </div>
+                  </td>
+                  <td className="adm-muted" data-label="Normal price">{money(normalPrice(p))}</td>
+                  <td className="adm-strong" data-label="Deal price">{money(p.price)} <span className="adm-pill is-warning">−{Math.round((1 - p.price / normalPrice(p)) * 100)}%</span></td>
+                  <td data-label="Ends">{dateTime(p.dealEndsAt)}</td>
                   <td className="adm-row-actions">
                     <button type="button" className="btn btn-outline btn-sm" onClick={() => openForm([p])}>Change</button>
                     <button type="button" className="btn btn-outline btn-sm adm-danger" onClick={() => stop(p)}>End now</button>
@@ -1050,46 +1681,69 @@ const DealsTab = ({ products, onCatalogChange }) => {
 
       {form && (
         <Modal
-          title="Deal"
-          onClose={() => !saving && setForm(null)}
+          title={form.editing ? 'Change deal' : 'Start a deal'}
+          onClose={() => !saving && ed.close()}
           footer={(
             <>
-              <button type="button" className="btn btn-outline" onClick={() => setForm(null)} disabled={saving}>Cancel</button>
-              <button type="submit" form="deal-form" className="btn btn-primary" disabled={saving || chosen.length === 0}>
-                {saving ? 'Saving…' : `Start deal${chosen.length > 1 ? `s (${chosen.length})` : ''}`}
+              <DirtyNote dirty={ed.dirty} />
+              <button type="button" className="btn btn-outline" onClick={() => ed.close()} disabled={saving}>Cancel</button>
+              <button type="submit" form="deal-form" className={`btn btn-primary ${saving ? 'is-loading' : ''}`}>
+                {chosen.length > 1 ? `Start ${chosen.length} deals` : 'Start deal'}
               </button>
             </>
           )}
         >
-          <form id="deal-form" onSubmit={save}>
-            <Field label="1. Choose products">
-              <div className="adm-search" style={{ marginBottom: 8 }}><Search size={16} /><input placeholder="Search products" value={form.search} onChange={(e) => setForm({ ...form, search: e.target.value })} /></div>
+          <form id="deal-form" onSubmit={save} noValidate>
+            <div className="form-field">
+              <div className="adm-pick-head">
+                <span className="form-label">1. Choose products {chosen.length > 0 && <span className="adm-pill is-info">{chosen.length} chosen</span>}</span>
+                <span className="adm-inline">
+                  <button type="button" className="shop-link-btn" onClick={() => selectShown(true)}>Select all shown</button>
+                  {chosen.length > 0 && <button type="button" className="shop-link-btn" onClick={() => selectShown(false)}>Clear</button>}
+                </span>
+              </div>
+              <div className="adm-search" style={{ marginBottom: 8 }}><Search size={16} /><input placeholder="Search products" value={form.search} onChange={(e) => ed.set('search', e.target.value)} /></div>
               <div className="adm-pick-list">
+                {pickable.length === 0 && <p className="form-hint">No in-stock products match.</p>}
                 {pickable.map((p) => (
-                  <label key={p.id} className="adm-pick">
+                  <label key={p.id} className={`adm-pick ${p.id in form.selected ? 'is-picked' : ''}`}>
                     <input type="checkbox" checked={p.id in form.selected} onChange={() => toggle(p)} />
-                    <span className="adm-pick-name">{p.name}</span>
+                    <SmartImage src={sizedImage(p.image || p.images?.[0] || '', 80)} alt="" className="adm-pick-thumb" />
+                    <span className="adm-pick-name">{p.name}{p.onDeal && <span className="adm-pill is-warning">On deal</span>}</span>
                     <span className="adm-muted">{money(normalPrice(p))}</span>
                   </label>
                 ))}
               </div>
-            </Field>
+              <FieldError message={ed.errors.products} />
+            </div>
 
             <div className="form-field">
               <span className="form-label">2. Discount</span>
               <div className="segmented" role="tablist" style={{ marginBottom: 10 }}>
-                <button type="button" className={form.mode === 'percent' ? 'active' : ''} onClick={() => setForm({ ...form, mode: 'percent' })}>% off</button>
-                <button type="button" className={form.mode === 'price' ? 'active' : ''} onClick={() => setForm({ ...form, mode: 'price' })}>Set each price</button>
+                <button type="button" className={form.mode === 'percent' ? 'active' : ''} onClick={() => ed.set('mode', 'percent')}>Same % off for all</button>
+                <button type="button" className={form.mode === 'price' ? 'active' : ''} onClick={() => ed.set('mode', 'price')}>Set each price</button>
               </div>
               {form.mode === 'percent' ? (
-                <input className="form-input" type="number" min="1" max="95" step="1" value={form.percent} onChange={(e) => setForm({ ...form, percent: e.target.value })} aria-label="Percent off" />
+                <>
+                  <div className="adm-inline">
+                    <input className="form-input adm-price" type="number" inputMode="numeric" min="1" max="99" step="1" value={form.percent} onChange={(e) => ed.set('percent', e.target.value)} aria-label="Percent off" />
+                    <span className="adm-muted">% off</span>
+                    {[10, 20, 30, 50].map((n) => (
+                      <button key={n} type="button" className={`adm-view ${Number(form.percent) === n ? 'is-active' : ''}`} onClick={() => ed.set('percent', String(n))}>{n}%</button>
+                    ))}
+                  </div>
+                  <FieldError message={ed.errors.percent} />
+                </>
               ) : chosen.length === 0 ? <p className="form-hint">Choose products first.</p> : (
                 <div className="adm-pick-list">
                   {chosen.map((p) => (
-                    <label key={p.id} className="adm-pick">
-                      <span className="adm-pick-name">{p.name} <span className="adm-muted">(normal {money(normalPrice(p))})</span></span>
-                      <input className="form-input adm-price" type="number" min="0.01" step="0.01" placeholder="Deal price" value={form.selected[p.id]} onChange={(e) => setForm({ ...form, selected: { ...form.selected, [p.id]: e.target.value } })} />
-                    </label>
+                    <div key={p.id}>
+                      <label className="adm-pick">
+                        <span className="adm-pick-name">{p.name} <span className="adm-muted">(normal {money(normalPrice(p))})</span></span>
+                        <input className="form-input adm-price" type="number" inputMode="decimal" min="0.01" step="0.01" placeholder="Deal price" value={form.selected[p.id]} onChange={(e) => setPrice(p.id, e.target.value)} aria-invalid={Boolean(ed.errors.prices?.[p.id])} />
+                      </label>
+                      <FieldError message={ed.errors.prices?.[p.id]} />
+                    </div>
                   ))}
                 </div>
               )}
@@ -1103,9 +1757,11 @@ const DealsTab = ({ products, onCatalogChange }) => {
                 <button type="button" className="btn btn-outline btn-sm" onClick={() => setEnd(7)}>In 1 week</button>
               </div>
               <div className="form-row">
-                <input className="form-input" type="date" required min={toDateInput(new Date())} value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} aria-label="End date" />
-                <input className="form-input" type="time" required value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} aria-label="End time" />
+                <input className="form-input" type="date" min={toDateInput(new Date())} value={form.endDate} onChange={(e) => { ed.set('endDate', e.target.value); ed.setErrors((x) => ({ ...x, end: undefined })); }} aria-label="End date" />
+                <input className="form-input" type="time" value={form.endTime} onChange={(e) => { ed.set('endTime', e.target.value); ed.setErrors((x) => ({ ...x, end: undefined })); }} aria-label="End time" />
               </div>
+              {!ed.errors.end && endsAt && endsAt > new Date() && <span className="form-hint">Ends {dateTime(endsAt)}</span>}
+              <FieldError message={ed.errors.end} />
             </div>
 
             {chosen.length > 0 && (
@@ -1113,10 +1769,15 @@ const DealsTab = ({ products, onCatalogChange }) => {
                 <div className="adm-label">Customers will see</div>
                 {chosen.map((p) => {
                   const dp = dealPriceFor(p);
+                  const ok = dp && dp < normalPrice(p);
                   return (
                     <div key={p.id} className="adm-deal-row">
                       <span>{p.name}</span>
-                      <span><s className="adm-muted">{money(normalPrice(p))}</s> <strong>{dp ? money(dp) : '—'}</strong></span>
+                      <span>
+                        <s className="adm-muted">{money(normalPrice(p))}</s>{' '}
+                        <strong className={ok ? '' : 'adm-text-danger'}>{dp ? money(dp) : '—'}</strong>
+                        {ok && <span className="adm-pill is-warning">−{Math.round((1 - dp / normalPrice(p)) * 100)}%</span>}
+                      </span>
                     </div>
                   );
                 })}
@@ -1135,44 +1796,78 @@ const DealsTab = ({ products, onCatalogChange }) => {
 const discountUsable = (d) =>
   d && d.isActive && (!d.expiresAt || new Date(d.expiresAt) > new Date()) && (!d.usageLimit || (d.usedCount || 0) < d.usageLimit);
 
+// Shown at the bottom of the screen while a tab has unsaved changes.
+const SaveBar = ({ dirty, saving, onSave, onDiscard, label = 'Save changes' }) => (dirty ? (
+  <div className="adm-savebar" role="region" aria-label="Unsaved changes">
+    <span>You have unsaved changes</span>
+    <button type="button" className="btn btn-outline btn-sm" onClick={onDiscard} disabled={saving}>Discard</button>
+    <button type="button" className={`btn btn-primary btn-sm ${saving ? 'is-loading' : ''}`} onClick={onSave}>{label}</button>
+  </div>
+) : null);
+
+// Warn before closing or reloading the page with unsaved changes.
+const useLeaveWarning = (dirty) => {
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const warn = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
+};
+
+// Which page each hiding spot is on, so the admin can go and look.
+const SPOT_PAGE = {
+  'home-hero': 'home', 'home-categories': 'home', footer: 'home', 'shop-header': 'shop', 'categories-page': 'categories',
+  'about-page': 'about', 'import-tips-page': 'import-tips', 'contact-page': 'contact', 'track-page': 'track-order',
+};
+
 const HuntTab = ({ discounts, products }) => {
-  const { showToast, refreshHunt } = useStore();
+  const { showToast, refreshHunt, navigate, setSelectedProduct } = useStore();
   const [items, setItems] = useState(null);
+  const [saved, setSaved] = useState('[]');
   const [spots, setSpots] = useState({});
   const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
+  const [problems, setProblems] = useState({});
   const [error, setError] = useState('');
 
-  useEffect(() => {
+  const load = () => {
+    setError('');
     admin.getHunt()
-      .then((data) => { setItems(data.items || []); setSpots(data.spots || {}); })
+      .then((data) => { setItems(data.items || []); setSaved(JSON.stringify(data.items || [])); setSpots(data.spots || {}); })
       .catch((err) => setError(err.message));
-  }, []);
+  };
+  useEffect(load, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const dirty = items !== null && JSON.stringify(items) !== saved;
+  useLeaveWarning(dirty);
 
   const byCode = useMemo(() => new Map(discounts.map((d) => [d.code, d])), [discounts]);
-  const productName = (spot) => products.find((p) => `product:${p.id}` === spot)?.name;
-  const spotLabel = (spot) => (spot.startsWith('product:') ? `Inside product: ${productName(spot) || 'deleted product'}` : spots[spot] || spot);
+  const productFor = (spot) => products.find((p) => `product:${p.id}` === spot);
+  const spotLabel = (spot) => (spot.startsWith('product:') ? `Inside product: ${productFor(spot)?.name || 'deleted product'}` : spots[spot] || spot);
 
   const update = (i, changes) => {
     setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, ...changes } : it)));
-    setDirty(true);
+    if (problems[i]) setProblems((p) => ({ ...p, [i]: undefined }));
   };
-  const add = () => {
-    setItems((prev) => [...prev, { code: discounts.find(discountUsable)?.code || '', spot: 'home-hero', clue: '', active: true, finds: 0 }]);
-    setDirty(true);
-  };
+  const add = () => setItems((prev) => [...prev, { code: discounts.find(discountUsable)?.code || '', spot: 'home-hero', clue: '', active: true, finds: 0 }]);
   const remove = (i) => {
     setItems((prev) => prev.filter((_, idx) => idx !== i));
-    setDirty(true);
+    setProblems({});
   };
 
   const save = async () => {
-    if (items.some((it) => !it.code)) { showToast('Pick a promo code for every hidden spot', 'error'); return; }
+    const found = {};
+    items.forEach((it, i) => { if (!it.code) found[i] = 'Choose a promo code to hide here.'; });
+    setProblems(found);
+    if (Object.keys(found).length) {
+      document.querySelector(`[data-hunt="${Object.keys(found)[0]}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
     setSaving(true);
     try {
       const data = await admin.saveHunt(items);
       setItems(data.items);
-      setDirty(false);
+      setSaved(JSON.stringify(data.items));
       refreshHunt();
       showToast('Treasure hunt saved — the gems are live on the site', 'success');
     } catch (err) {
@@ -1182,26 +1877,37 @@ const HuntTab = ({ discounts, products }) => {
     }
   };
 
-  if (error) return <div className="form-error">{error}</div>;
-  if (!items) return <Empty>Loading…</Empty>;
+  // Open the page (or product) where this gem is hidden.
+  const goLook = (spot) => {
+    if (spot.startsWith('product:')) {
+      const p = productFor(spot);
+      if (p) { navigate('shop'); setTimeout(() => setSelectedProduct(p), 200); }
+      return;
+    }
+    navigate(SPOT_PAGE[spot] || 'home');
+  };
+
+  if (error) return <div className="form-error">{error} <button type="button" className="shop-link-btn" onClick={load}>Try again</button></div>;
+  if (!items) {
+    return <div className="adm-list">{[0, 1].map((i) => <div key={i} className="adm-card adm-skeleton" aria-hidden="true"><span /><span /><span /></div>)}</div>;
+  }
+
+  const liveCount = items.filter((it) => it.active !== false && discountUsable(byCode.get(it.code))).length;
 
   return (
     <>
-      <div className="adm-card adm-hunt-intro">
-        <strong>How it works</strong>
+      <details className="adm-card adm-hunt-intro" open={items.length === 0}>
+        <summary><strong>How the treasure hunt works</strong></summary>
         <p className="adm-muted">
-          Promo codes are no longer shown to everyone. Hide a code somewhere on the site and a small gem appears there.
-          When a customer taps the gem, they get the code. A gem disappears by itself when its code is switched off, runs out or expires.
+          Hide a promo code somewhere on the site and a small gem appears there. When a customer taps the gem, they get the code.
+          A gem disappears by itself when its code is switched off, runs out or expires. If two codes are hidden in the same place, the second appears once the first has been found.
           Create the codes first in <em>Promo codes</em> — tip: give hidden codes a usage limit so only the first finders get them.
         </p>
-      </div>
+      </details>
 
       <div className="adm-toolbar">
-        <span className="adm-muted">{items.length} hidden {items.length === 1 ? 'code' : 'codes'}</span>
-        <div className="adm-inline">
-          <button type="button" className="btn btn-outline" onClick={add} disabled={discounts.length === 0 || items.length >= 30}><Plus size={16} /> Hide a code</button>
-          <button type="button" className="btn btn-primary" onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : 'Save'}</button>
-        </div>
+        <span className="adm-muted">{items.length} hidden · <strong>{liveCount}</strong> showing on the site now</span>
+        <button type="button" className="btn btn-primary" onClick={add} disabled={discounts.length === 0 || items.length >= 30}><Plus size={16} /> Hide a code</button>
       </div>
 
       {discounts.length === 0 && <Empty>Create a promo code first, then come back here to hide it.</Empty>}
@@ -1212,39 +1918,52 @@ const HuntTab = ({ discounts, products }) => {
         <div className="adm-hunt-list">
           {items.map((it, i) => {
             const d = byCode.get(it.code);
-            const live = it.active && discountUsable(d);
+            const usable = discountUsable(d);
+            const live = it.active !== false && usable;
+            const sharedSpot = items.findIndex((x) => x.spot === it.spot) !== i;
             return (
-              <div key={it.id || `new-${i}`} className="adm-card adm-hunt-item">
+              <div key={it.id || `new-${i}`} className={`adm-card adm-hunt-item ${live ? 'is-live' : ''}`} data-hunt={i}>
+                <div className="adm-hunt-top">
+                  <span className={`adm-pill is-${live ? 'success' : 'muted'}`}>{live ? 'Showing on the site' : it.active === false ? 'Switched off' : !d ? 'Not showing' : 'Hidden — code is off, used up or expired'}</span>
+                  <span className="adm-muted">Found {it.finds || 0}×{d ? ` · code used ${d.usedCount || 0}×` : ''}</span>
+                </div>
                 <div className="form-row">
-                  <Field label="Promo code">
-                    <select className="form-input" value={it.code} onChange={(e) => update(i, { code: e.target.value })}>
-                      <option value="">Choose a code…</option>
-                      {discounts.map((dc) => (
-                        <option key={dc.id} value={dc.code}>
-                          {dc.code} — {dc.type === 'PERCENTAGE' ? `${dc.value}% off` : `${money(dc.value)} off`}{discountUsable(dc) ? '' : ' (not usable)'}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Hide it on">
-                    <select className="form-input" value={it.spot} onChange={(e) => update(i, { spot: e.target.value })}>
-                      <optgroup label="Pages">
-                        {Object.entries(spots).map(([id, text]) => <option key={id} value={id}>{text}</option>)}
-                      </optgroup>
-                      <optgroup label="Inside a product">
-                        {products.map((p) => <option key={p.id} value={`product:${p.id}`}>{p.name}</option>)}
-                      </optgroup>
-                    </select>
-                  </Field>
+                  <div>
+                    <Field label="Promo code">
+                      <select className="form-input" value={it.code} onChange={(e) => update(i, { code: e.target.value })} aria-invalid={Boolean(problems[i])}>
+                        <option value="">Choose a code…</option>
+                        {discounts.map((dc) => (
+                          <option key={dc.id} value={dc.code}>
+                            {dc.code} — {dc.type === 'PERCENTAGE' ? `${dc.value}% off` : `${money(dc.value)} off`}{discountUsable(dc) ? '' : ' (can’t be used now)'}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <FieldError message={problems[i]} />
+                    {d && !usable && <p className="adm-note">This code is off, used up or expired, so the gem won't show. Fix it in Promo codes.</p>}
+                  </div>
+                  <div>
+                    <Field label="Hide it on">
+                      <select className="form-input" value={it.spot} onChange={(e) => update(i, { spot: e.target.value })}>
+                        <optgroup label="Pages">
+                          {Object.entries(spots).map(([id, text]) => <option key={id} value={id}>{text}</option>)}
+                        </optgroup>
+                        <optgroup label="Inside a product">
+                          {products.map((p) => <option key={p.id} value={`product:${p.id}`}>{p.name}</option>)}
+                        </optgroup>
+                      </select>
+                    </Field>
+                    {sharedSpot && <span className="form-hint">Another code is hidden here too — this one appears after that one is found.</span>}
+                  </div>
                 </div>
                 <Field label="Hint (optional)" hint="Shown when someone hovers over the gem, e.g. “Look where the story begins”">
                   <input className="form-input" maxLength={140} value={it.clue || ''} onChange={(e) => update(i, { clue: e.target.value })} />
                 </Field>
                 <div className="adm-hunt-foot">
                   <label className="adm-switch"><input type="checkbox" checked={it.active !== false} onChange={() => update(i, { active: !(it.active !== false) })} /><span>{it.active !== false ? 'On' : 'Off'}</span></label>
-                  <span className={live ? 'adm-pill adm-pill-ok' : 'adm-pill'}>{live ? 'Showing on the site' : d ? 'Hidden — code is off, used up or expired' : 'Not showing'}</span>
-                  <span className="adm-muted">Found {it.finds || 0}×{d ? ` · code used ${d.usedCount || 0}×` : ''}</span>
-                  <span className="adm-muted adm-hunt-where">{spotLabel(it.spot)}</span>
+                  <button type="button" className="shop-link-btn adm-hunt-look" onClick={() => goLook(it.spot)} disabled={dirty} title={dirty ? 'Save first, then go and look' : undefined}>
+                    See it on the site: {spotLabel(it.spot)}
+                  </button>
                   <button type="button" className="btn btn-outline btn-sm adm-danger" onClick={() => remove(i)} aria-label="Remove this hidden code"><Trash2 size={14} /></button>
                 </div>
               </div>
@@ -1252,7 +1971,7 @@ const HuntTab = ({ discounts, products }) => {
           })}
         </div>
       )}
-      {dirty && <p className="adm-muted" style={{ textAlign: 'right' }}>You have unsaved changes.</p>}
+      <SaveBar dirty={dirty} saving={saving} onSave={save} onDiscard={() => { setItems(JSON.parse(saved)); setProblems({}); }} label="Save treasure hunt" />
     </>
   );
 };
@@ -1389,28 +2108,93 @@ const AlertsCard = () => {
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
+const settingsToForm = (s) => ({
+  phoneDisplay: s.phoneDisplay || '',
+  whatsappNumber: s.whatsappNumber || '',
+  momoNumber: s.momoNumber || '',
+  momoName: s.momoName || '',
+  email: s.email || '',
+  location: s.location || '',
+  pickupPoint: s.pickupPoint || '',
+  openingHours: s.openingHours || '',
+  announcementsText: (s.announcements || []).join('\n'),
+});
+
+// Same rules as the server (SETTING_RULES), checked before saving.
+const settingsProblems = (f) => {
+  const found = {};
+  const len = (v) => v.trim().length;
+  if (len(f.phoneDisplay) < 9 || len(f.phoneDisplay) > 30) found.phoneDisplay = 'Enter the phone number customers should call.';
+  const wa = f.whatsappNumber.replace(/\D/g, '');
+  if (wa.startsWith('0')) found.whatsappNumber = `Start with the country code instead of 0, e.g. 233${wa.slice(1)}.`;
+  else if (wa.length < 10 || wa.length > 15) found.whatsappNumber = 'Use the full number with country code, e.g. 233591440934.';
+  if (f.momoNumber.replace(/\D/g, '').length < 9) found.momoNumber = 'Enter the MoMo number customers pay to.';
+  if (!len(f.momoName) || f.momoName.length > 60) found.momoName = 'Enter the name customers will see on the MoMo account.';
+  if (f.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.trim())) found.email = 'Check this email address, or leave it empty.';
+  if (len(f.location) < 2) found.location = 'Enter your business location.';
+  if (len(f.pickupPoint) < 2) found.pickupPoint = 'Enter where customers collect orders.';
+  if (f.openingHours.length > 120) found.openingHours = 'Keep this under 120 characters.';
+  const lines = f.announcementsText.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (lines.length > 6) found.announcementsText = 'Up to 6 messages — remove a line.';
+  else if (lines.some((l) => l.length > 120)) found.announcementsText = 'Each message must be under 120 characters.';
+  return found;
+};
+
 const SettingsTab = () => {
-  const { showToast, settings, refreshSettings } = useStore();
-  const [form, setForm] = useState(() => ({ ...settings, announcementsText: (settings.announcements || []).join('\n') }));
+  const { showToast, refreshSettings } = useStore();
+  const [form, setForm] = useState(null);
+  const [saved, setSaved] = useState('');
+  const [problems, setProblems] = useState({});
   const [saving, setSaving] = useState(false);
-  const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
+  const [loadError, setLoadError] = useState('');
+
+  // Always start from what's saved on the server, never from a page that may still be loading.
+  const load = async () => {
+    setLoadError('');
+    try {
+      const data = settingsToForm(await admin.getSettings());
+      setForm(data);
+      setSaved(JSON.stringify(data));
+    } catch (err) {
+      setLoadError(err.message);
+    }
+  };
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const dirty = form !== null && JSON.stringify(form) !== saved;
+  useLeaveWarning(dirty);
+
+  const set = (key) => (e) => {
+    const value = e.target.value;
+    setForm((f) => ({ ...f, [key]: value }));
+    if (problems[key]) setProblems((p) => ({ ...p, [key]: undefined }));
+  };
 
   const save = async (e) => {
-    e.preventDefault();
+    e?.preventDefault();
+    const found = settingsProblems(form);
+    setProblems(found);
+    const first = Object.keys(found)[0];
+    if (first) {
+      document.querySelector(`[data-setting="${first}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
     setSaving(true);
     try {
-      const { announcementsText, ...rest } = form;
-      await admin.saveSettings({
-        phoneDisplay: rest.phoneDisplay,
-        whatsappNumber: rest.whatsappNumber,
-        momoNumber: rest.momoNumber,
-        momoName: rest.momoName,
-        email: rest.email,
-        location: rest.location,
-        pickupPoint: rest.pickupPoint,
-        openingHours: rest.openingHours,
-        announcements: announcementsText.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 6),
+      const updated = await admin.saveSettings({
+        phoneDisplay: form.phoneDisplay,
+        whatsappNumber: form.whatsappNumber,
+        momoNumber: form.momoNumber,
+        momoName: form.momoName,
+        email: form.email,
+        location: form.location,
+        pickupPoint: form.pickupPoint,
+        openingHours: form.openingHours,
+        announcements: form.announcementsText.split('\n').map((l) => l.trim()).filter(Boolean),
       });
+      const fresh = settingsToForm(updated);
+      setForm(fresh);
+      setSaved(JSON.stringify(fresh));
       await refreshSettings();
       showToast('Settings saved — the website is updated', 'success');
     } catch (err) {
@@ -1420,41 +2204,77 @@ const SettingsTab = () => {
     }
   };
 
+  const field = (key, labelText, hint, input) => (
+    <div data-setting={key}>
+      <Field label={labelText} hint={problems[key] ? null : hint}>{input}</Field>
+      <FieldError message={problems[key]} />
+    </div>
+  );
+
+  if (loadError) return <div className="form-error">{loadError} <button type="button" className="shop-link-btn" onClick={load}>Try again</button></div>;
+  if (!form) return <div className="adm-list">{[0, 1].map((i) => <div key={i} className="adm-card adm-skeleton" aria-hidden="true"><span /><span /><span /></div>)}</div>;
+
+  const banners = form.announcementsText.split('\n').map((l) => l.trim()).filter(Boolean);
+  const waDigits = form.whatsappNumber.replace(/\D/g, '');
+
   return (
     <>
-    <AlertsCard />
-    <form onSubmit={save} className="adm-card adm-settings">
-      <h3 className="adm-section-title">Contact details</h3>
-      <div className="form-row">
-        <Field label="Phone number shown on the site" hint="Shown in the footer and on the Contact page"><input className="form-input" required value={form.phoneDisplay} onChange={set('phoneDisplay')} /></Field>
-        <Field label="WhatsApp number" hint="With country code, e.g. 233591440934"><input className="form-input" required inputMode="numeric" value={form.whatsappNumber} onChange={set('whatsappNumber')} /></Field>
-      </div>
-      <div className="form-row">
-        <Field label="Email" hint="Leave empty to hide"><input className="form-input" type="email" value={form.email} onChange={set('email')} /></Field>
-        <Field label="Opening hours"><input className="form-input" value={form.openingHours} onChange={set('openingHours')} /></Field>
-      </div>
+      <form onSubmit={save} className="adm-card adm-settings" noValidate>
+        <h3 className="adm-section-title">Contact details</h3>
+        <div className="form-row">
+          {field('phoneDisplay', 'Phone number shown on the site', 'Shown in the footer and on the Contact page',
+            <input className="form-input" type="tel" value={form.phoneDisplay} onChange={set('phoneDisplay')} aria-invalid={Boolean(problems.phoneDisplay)} />)}
+          {field('whatsappNumber', 'WhatsApp number', 'With country code, no + or spaces, e.g. 233591440934',
+            <div className="adm-inline">
+              <input className="form-input" inputMode="numeric" value={form.whatsappNumber} onChange={set('whatsappNumber')} aria-invalid={Boolean(problems.whatsappNumber)} />
+              <a className="btn btn-outline btn-sm" href={`https://wa.me/${waDigits}`} target="_blank" rel="noreferrer" aria-disabled={waDigits.length < 10}>Test</a>
+            </div>)}
+        </div>
+        <div className="form-row">
+          {field('email', 'Email', 'Leave empty to hide it on the site',
+            <input className="form-input" type="email" value={form.email} onChange={set('email')} aria-invalid={Boolean(problems.email)} />)}
+          {field('openingHours', 'Opening hours', 'e.g. Monday – Saturday, 8:00 am – 6:30 pm',
+            <input className="form-input" value={form.openingHours} onChange={set('openingHours')} />)}
+        </div>
 
-      <h3 className="adm-section-title">Location</h3>
-      <div className="form-row">
-        <Field label="Business location" hint="e.g. Kumasi, Ghana"><input className="form-input" required value={form.location} onChange={set('location')} /></Field>
-        <Field label="Pickup point" hint="Where customers collect orders, e.g. Adum, Kumasi"><input className="form-input" required value={form.pickupPoint} onChange={set('pickupPoint')} /></Field>
-      </div>
+        <h3 className="adm-section-title">Location</h3>
+        <div className="form-row">
+          {field('location', 'Business location', 'e.g. Kumasi, Ghana',
+            <input className="form-input" value={form.location} onChange={set('location')} aria-invalid={Boolean(problems.location)} />)}
+          {field('pickupPoint', 'Pickup point', 'Where customers collect orders, e.g. Adum, Kumasi',
+            <input className="form-input" value={form.pickupPoint} onChange={set('pickupPoint')} aria-invalid={Boolean(problems.pickupPoint)} />)}
+        </div>
 
-      <h3 className="adm-section-title">Mobile Money</h3>
-      <div className="form-row">
-        <Field label="MoMo number customers pay to"><input className="form-input" required value={form.momoNumber} onChange={set('momoNumber')} /></Field>
-        <Field label="MoMo account name"><input className="form-input" required value={form.momoName} onChange={set('momoName')} /></Field>
-      </div>
+        <h3 className="adm-section-title">Mobile Money</h3>
+        <div className="form-row">
+          {field('momoNumber', 'MoMo number customers pay to', null,
+            <input className="form-input" type="tel" value={form.momoNumber} onChange={set('momoNumber')} aria-invalid={Boolean(problems.momoNumber)} />)}
+          {field('momoName', 'MoMo account name', 'Exactly as it appears when customers send money',
+            <input className="form-input" value={form.momoName} onChange={set('momoName')} aria-invalid={Boolean(problems.momoName)} />)}
+        </div>
+        <p className="adm-preview-line">Customers see: <strong>Send GH₵… to {form.momoNumber || '—'} ({form.momoName || '—'})</strong> with their order code as the reference.</p>
 
-      <h3 className="adm-section-title">Top banner messages</h3>
-      <Field label="One message per line (up to 6)" hint="These rotate in the blue bar at the top of every page. A deals message is added automatically while a deal is running.">
-        <textarea className="form-input" rows={4} value={form.announcementsText} onChange={set('announcementsText')} />
-      </Field>
+        <h3 className="adm-section-title">Top banner messages</h3>
+        {field('announcementsText', 'One message per line (up to 6)', 'These rotate in the blue bar at the top of every page. A deals message is added automatically while a deal is running.',
+          <textarea className="form-input" rows={4} value={form.announcementsText} onChange={set('announcementsText')} aria-invalid={Boolean(problems.announcementsText)} />)}
+        {banners.length > 0 && (
+          <ul className="adm-banner-preview" aria-label="Banner preview">
+            {banners.map((line, i) => (
+              <li key={i} className={line.length > 120 || i >= 6 ? 'is-bad' : ''}>
+                <span>{line}</span>
+                <small>{i >= 6 ? 'Over the limit' : `${line.length}/120`}</small>
+              </li>
+            ))}
+          </ul>
+        )}
 
-      <div className="adm-inline" style={{ justifyContent: 'flex-end' }}>
-        <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button>
-      </div>
-    </form>
+        <div className="adm-inline adm-settings-actions">
+          <button type="submit" className={`btn btn-primary ${saving ? 'is-loading' : ''}`} disabled={!dirty}>Save settings</button>
+        </div>
+      </form>
+
+      <AlertsCard />
+      <SaveBar dirty={dirty} saving={saving} onSave={save} onDiscard={() => { setForm(JSON.parse(saved)); setProblems({}); }} label="Save settings" />
     </>
   );
 };
@@ -1477,7 +2297,24 @@ const TABS = [
 
 export const AdminPage = () => {
   const { user, openAuth, navigate, showToast, refreshProducts } = useStore();
-  const [tab, setTab] = useState('orders');
+  const [tab, setTabState] = useState(() => {
+    try { return sessionStorage.getItem('chari_admin_tab') || 'orders'; } catch { return 'orders'; }
+  });
+  const [orderView, setOrderView] = useState('all');
+  const [failed, setFailed] = useState([]);
+  const tabsRef = useRef(null);
+  const setTab = (id) => {
+    setTabState(id);
+    try { sessionStorage.setItem('chari_admin_tab', id); } catch {}
+  };
+  // Keep the chosen section visible in the scrolling tab bar on phones.
+  useEffect(() => {
+    tabsRef.current?.querySelector('.active')?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+  }, [tab]);
+  const openOrders = (view) => { setOrderView(view); setTab('orders'); };
+  // "View orders" on a customer: all orders, searched by their phone or email.
+  const [orderSearch, setOrderSearch] = useState(null);
+  const viewCustomerOrders = (text) => { setOrderView('all'); setOrderSearch({ text, at: Date.now() }); setTab('orders'); };
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [orders, setOrders] = useState([]);
@@ -1491,17 +2328,26 @@ export const AdminPage = () => {
   const load = async () => {
     setLoading(true);
     setLoadError('');
-    try {
-      const [o, p, c, d, b, m, u] = await Promise.all([
-        admin.listOrders(), admin.listProducts(), admin.listCategories(), admin.listDiscounts(),
-        admin.listBatches(), admin.listMessages(), admin.listCustomers(),
-      ]);
-      setOrders(o); setProducts(p); setCategories(c); setDiscounts(d); setBatches(b); setMessages(m); setCustomers(u);
-    } catch (err) {
-      setLoadError(err.message);
-    } finally {
-      setLoading(false);
-    }
+    // Each section loads on its own, so one failing (e.g. Shipments) doesn't hide the orders.
+    const sections = [
+      ['Orders', admin.listOrders, setOrders],
+      ['Products', admin.listProducts, setProducts],
+      ['Categories', admin.listCategories, setCategories],
+      ['Promo codes', admin.listDiscounts, setDiscounts],
+      ['Shipments', admin.listBatches, setBatches],
+      ['Messages', admin.listMessages, setMessages],
+      ['Customers', admin.listCustomers, setCustomers],
+    ];
+    const results = await Promise.allSettled(sections.map(([, fetcher]) => fetcher()));
+    const failedNames = [];
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled') sections[i][2](r.value);
+      else failedNames.push(sections[i][0]);
+    });
+    setFailed(failedNames);
+    // Everything failed: most likely signed out or offline, so show that message on its own.
+    if (failedNames.length === sections.length) setLoadError(results[0].reason?.message || 'Could not load the dashboard.');
+    setLoading(false);
   };
 
   // Product/category changes also refresh the shop the admin sees.
@@ -1524,8 +2370,8 @@ export const AdminPage = () => {
   const stats = useMemo(() => {
     const live = orders.filter((o) => o.orderStatus !== 'CANCELLED');
     return {
-      awaitingPayment: live.filter((o) => o.paymentStatus !== 'PAID' && o.paymentStatus !== 'REFUNDED').length,
-      toShip: live.filter((o) => o.paymentStatus === 'PAID' && ['PROCESSING', 'CONFIRMED'].includes(o.orderStatus)).length,
+      checkPayment: orders.filter(ORDER_VIEWS.find(([id]) => id === 'check')[2]).length,
+      toShip: orders.filter(ORDER_VIEWS.find(([id]) => id === 'toShip')[2]).length,
       paidSales: live.filter((o) => o.paymentStatus === 'PAID').reduce((s, o) => s + (o.total || 0), 0),
       newMessages: messages.filter((m) => (m.status || 'NEW') === 'NEW').length,
     };
@@ -1560,13 +2406,19 @@ export const AdminPage = () => {
         </div>
 
         <div className="adm-stats">
-          <button type="button" onClick={() => setTab('orders')}><strong>{stats.awaitingPayment}</strong><span>Waiting for payment</span></button>
-          <button type="button" onClick={() => setTab('orders')}><strong>{stats.toShip}</strong><span>Paid, not yet shipped</span></button>
+          <button type="button" className={stats.checkPayment ? 'needs-action' : ''} onClick={() => openOrders('check')}>
+            <strong>{stats.checkPayment}</strong><span>Payments to check</span>
+          </button>
+          <button type="button" className={stats.toShip ? 'needs-action' : ''} onClick={() => openOrders('toShip')}>
+            <strong>{stats.toShip}</strong><span>Ready to ship</span>
+          </button>
           <div><strong>{money(stats.paidSales)}</strong><span>Paid sales (all time)</span></div>
-          <button type="button" onClick={() => setTab('messages')}><strong>{stats.newMessages}</strong><span>New messages</span></button>
+          <button type="button" className={stats.newMessages ? 'needs-action' : ''} onClick={() => setTab('messages')}>
+            <strong>{stats.newMessages}</strong><span>New messages</span>
+          </button>
         </div>
 
-        <nav className="adm-tabs" aria-label="Admin sections">
+        <nav className="adm-tabs" aria-label="Admin sections" ref={tabsRef}>
           {TABS.map(([id, text]) => (
             <button key={id} type="button" className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>
               {text}{counts[id] ? <span className="adm-count">{counts[id]}</span> : null}
@@ -1574,20 +2426,30 @@ export const AdminPage = () => {
           ))}
         </nav>
 
+        {!loading && !loadError && failed.length > 0 && (
+          <div className="adm-warning" role="alert">
+            <AlertTriangle size={16} />
+            <span>Couldn't load: {failed.join(', ')}. Everything else is up to date.</span>
+            <button type="button" className="shop-link-btn" onClick={load}>Try again</button>
+          </div>
+        )}
+
         {loadError ? (
           <div className="form-error">{loadError} <button type="button" className="shop-link-btn" onClick={load}>Try again</button></div>
         ) : loading ? (
-          <Empty>Loading…</Empty>
+          <div className="adm-list" aria-label="Loading">
+            {[0, 1, 2].map((i) => <div key={i} className="adm-card adm-skeleton" aria-hidden="true"><span /><span /><span /></div>)}
+          </div>
         ) : (
           <div className="adm-panel">
-            {tab === 'orders' && <OrdersTab orders={orders} setOrders={setOrders} />}
+            {tab === 'orders' && <OrdersTab orders={orders} setOrders={setOrders} view={orderView} setView={setOrderView} searchRequest={orderSearch} />}
             {tab === 'products' && <ProductsTab products={products} setProducts={setProducts} categories={categories} onCatalogChange={onCatalogChange} />}
             {tab === 'categories' && <CategoriesTab categories={categories} products={products} onCatalogChange={onCatalogChange} />}
             {tab === 'promos' && <PromoTab discounts={discounts} setDiscounts={setDiscounts} />}
             {tab === 'hunt' && <HuntTab discounts={discounts} products={products} />}
             {tab === 'shipments' && <ShipmentsTab batches={batches} setBatches={setBatches} />}
             {tab === 'messages' && <MessagesTab messages={messages} setMessages={setMessages} />}
-            {tab === 'customers' && <CustomersTab customers={customers} />}
+            {tab === 'customers' && <CustomersTab customers={customers} onViewOrders={viewCustomerOrders} />}
             {tab === 'deals' && <DealsTab products={products} onCatalogChange={onCatalogChange} />}
             {tab === 'settings' && <SettingsTab />}
           </div>

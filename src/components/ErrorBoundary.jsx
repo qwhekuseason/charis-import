@@ -25,8 +25,8 @@ export class ErrorBoundary extends React.Component {
             justifyContent: 'center',
             flexDirection: 'column',
             gap: '16px',
-            background: 'var(--bg-base, #0f172a)',
-            color: 'var(--text-primary, #f1f5f9)',
+            background: 'var(--bg-base, #17140f)',
+            color: 'var(--text-primary, #f3eee4)',
             padding: '32px',
             textAlign: 'center',
             fontFamily: 'inherit',
@@ -37,8 +37,8 @@ export class ErrorBoundary extends React.Component {
               width: '72px',
               height: '72px',
               borderRadius: '20px',
-              background: 'rgba(37, 99, 235,0.15)',
-              border: '1.5px solid rgba(37, 99, 235,0.4)',
+              background: 'rgba(138, 106, 34,0.15)',
+              border: '1.5px solid rgba(138, 106, 34,0.4)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -51,7 +51,7 @@ export class ErrorBoundary extends React.Component {
           <h2 style={{ fontSize: '1.6rem', fontWeight: 800, margin: 0 }}>
             Something went wrong
           </h2>
-          <p style={{ fontSize: '0.95rem', color: '#94a3b8', maxWidth: '420px', lineHeight: 1.6, margin: 0 }}>
+          <p style={{ fontSize: '0.95rem', color: '#a39a8b', maxWidth: '420px', lineHeight: 1.6, margin: 0 }}>
             An unexpected error occurred. Please refresh the page — your cart and session are safely stored.
           </p>
           <button
@@ -59,7 +59,7 @@ export class ErrorBoundary extends React.Component {
             style={{
               marginTop: '8px',
               padding: '12px 28px',
-              background: '#2563eb',
+              background: '#8a6a22',
               color: '#060d1a',
               border: 'none',
               borderRadius: '12px',

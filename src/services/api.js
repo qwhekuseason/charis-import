@@ -19,6 +19,16 @@ export const removeAuthToken = () => {
   localStorage.removeItem('charis_jwt_token');
 };
 
+// A sleeping or crashed server can answer with an HTML error page — read that as "no data"
+// so callers show their own friendly message instead of "Unexpected token '<'".
+const readJson = async (res) => {
+  try {
+    return await res.json();
+  } catch {
+    return {};
+  }
+};
+
 const getAuthHeaders = () => {
   const token = getAuthToken();
   const headers = { 'Content-Type': 'application/json' };
@@ -41,7 +51,7 @@ export async function registerUser(userData) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(userData),
   });
-  const data = await res.json();
+  const data = await readJson(res);
   if (!res.ok) {
     throw new Error(data.error || 'Failed to register account');
   }
@@ -60,7 +70,7 @@ export async function loginUser(email, password) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
   });
-  const data = await res.json();
+  const data = await readJson(res);
   if (!res.ok) {
     throw new Error(data.error || 'Invalid email or password');
   }
@@ -85,7 +95,7 @@ export async function getCurrentUser() {
       removeAuthToken();
       return null;
     }
-    const data = await res.json();
+    const data = await readJson(res);
     return data.user;
   } catch (error) {
     console.warn('Failed to fetch authenticated user:', error);
@@ -102,7 +112,7 @@ export async function updateUserProfile(profileData) {
     headers: getAuthHeaders(),
     body: JSON.stringify(profileData),
   });
-  const data = await res.json();
+  const data = await readJson(res);
   if (!res.ok) {
     throw new Error(data.error || 'Failed to update profile');
   }
@@ -128,7 +138,7 @@ export async function getProducts(queryParams = {}) {
 
     const res = await fetch(`${API_BASE}/products?${params.toString()}`);
     if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-    const data = await res.json();
+    const data = await readJson(res);
     return data.data || [];
   } catch (error) {
     console.warn('API error fetching products, using fallback:', error);
@@ -143,7 +153,7 @@ export async function getProduct(idOrSlug) {
   try {
     const res = await fetch(`${API_BASE}/products/${idOrSlug}`);
     if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-    const data = await res.json();
+    const data = await readJson(res);
     return data.data;
   } catch (error) {
     console.warn('API error fetching product:', error);
@@ -158,7 +168,7 @@ export async function getCategories() {
   try {
     const res = await fetch(`${API_BASE}/categories`);
     if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-    const data = await res.json();
+    const data = await readJson(res);
     return data.data || [];
   } catch (error) {
     console.warn('API error fetching categories:', error);
@@ -181,10 +191,10 @@ export async function createOrder(orderPayload) {
       body: JSON.stringify(orderPayload),
     });
     if (!res.ok) {
-      const err = await res.json();
+      const err = await readJson(res);
       throw new Error(err.error || 'Failed to place order');
     }
-    return await res.json();
+    return await readJson(res);
   } catch (error) {
     console.error('API error creating order:', error);
     throw error;
@@ -201,7 +211,7 @@ export async function trackOrder(orderCode, phone = '') {
     const res = await fetch(`${API_BASE}/orders/${encodeURIComponent(orderCode.trim())}${query}`, {
       headers: getAuthHeaders(),
     });
-    const data = await res.json();
+    const data = await readJson(res);
     if (!res.ok) {
       throw new Error(data.error || 'Order not found');
     }
@@ -221,8 +231,49 @@ export async function changePassword(currentPassword, newPassword) {
     headers: getAuthHeaders(),
     body: JSON.stringify({ currentPassword, newPassword }),
   });
-  const data = await res.json().catch(() => ({}));
+  const data = await readJson(res);
   if (!res.ok) throw new Error(data.error || 'Could not change the password.');
+  // Other devices are signed out; keep this one signed in with the fresh token.
+  if (data.token) setAuthToken(data.token);
+  return data;
+}
+
+/**
+ * Email a password-reset link. Resolves the same way whether or not the account exists.
+ */
+export async function requestPasswordReset(email) {
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/auth/forgot-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+  } catch {
+    throw new Error('Could not reach the server. Check your connection and try again.');
+  }
+  const data = await readJson(res);
+  if (!res.ok) throw Object.assign(new Error(data.error || 'Could not send the reset email.'), { emailUnavailable: Boolean(data.emailUnavailable) });
+  return data;
+}
+
+/**
+ * Set a new password using the code from the reset email. Signs the user in on success.
+ */
+export async function resetPassword(token, password) {
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/auth/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, password }),
+    });
+  } catch {
+    throw new Error('Could not reach the server. Check your connection and try again.');
+  }
+  const data = await readJson(res);
+  if (!res.ok) throw Object.assign(new Error(data.error || 'Could not reset the password.'), { expired: Boolean(data.expired) });
+  if (data.token) setAuthToken(data.token);
   return data;
 }
 
@@ -236,7 +287,7 @@ export async function submitInquiry(inquiryData) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(inquiryData),
     });
-    const data = await res.json();
+    const data = await readJson(res);
     if (!res.ok) throw new Error(data.error || 'Failed to submit inquiry');
     return data;
   } catch (error) {
@@ -246,13 +297,30 @@ export async function submitInquiry(inquiryData) {
 }
 
 /**
+ * Upload a customer's screenshot for "Request an item". Returns the stored photo link.
+ */
+export async function uploadRequestPhoto(file) {
+  const form = new FormData();
+  form.append('image', file);
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/inquiries/photo`, { method: 'POST', body: form });
+  } catch {
+    throw new Error('Could not upload the photo. Check your connection and try again.');
+  }
+  const data = await readJson(res);
+  if (!res.ok) throw new Error(data.error || 'Could not upload the photo.');
+  return data.url;
+}
+
+/**
  * Backend health check
  */
 export async function checkServerHealth() {
   try {
     const res = await fetch(`${API_BASE}/health`);
     if (!res.ok) return { online: false };
-    const data = await res.json();
+    const data = await readJson(res);
     return { online: true, ...data };
   } catch {
     return { online: false };
@@ -271,7 +339,7 @@ export async function getAllOrders() {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch orders');
-  const data = await res.json();
+  const data = await readJson(res);
   return data.data || [];
 }
 
@@ -284,8 +352,8 @@ export async function updateOrderStatus(orderId, orderStatus, paymentStatus) {
     headers: getAuthHeaders(),
     body: JSON.stringify({ orderStatus, paymentStatus }),
   });
-  if (!res.ok) throw new Error('Failed to update order status');
-  const data = await res.json();
+  if (!res.ok) throw new Error((await readJson(res)).error || 'Failed to update order status');
+  const data = await readJson(res);
   return data.data;
 }
 
@@ -298,7 +366,7 @@ export async function createProduct(productData) {
     headers: getAuthHeaders(),
     body: JSON.stringify(productData),
   });
-  const data = await res.json();
+  const data = await readJson(res);
   if (!res.ok) throw new Error(data.error || 'Failed to create product');
   return data.data;
 }
@@ -312,7 +380,7 @@ export async function updateProduct(productId, productData) {
     headers: getAuthHeaders(),
     body: JSON.stringify(productData),
   });
-  const data = await res.json();
+  const data = await readJson(res);
   if (!res.ok) throw new Error(data.error || 'Failed to update product');
   return data.data;
 }
@@ -326,7 +394,7 @@ export async function deleteProduct(productId) {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to delete product');
-  return await res.json();
+  return await readJson(res);
 }
 
 /**
@@ -337,7 +405,7 @@ export async function getAllInquiries() {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch inquiries');
-  const data = await res.json();
+  const data = await readJson(res);
   return data.data || [];
 }
 
@@ -349,7 +417,7 @@ export async function getAllUsers() {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch users');
-  const data = await res.json();
+  const data = await readJson(res);
   return data.data || [];
 }
 
@@ -372,7 +440,7 @@ export async function uploadImage(file) {
     body: formData,
   });
 
-  const data = await res.json();
+  const data = await readJson(res);
   if (!res.ok) {
     throw new Error(data.error || 'Failed to upload image file');
   }
@@ -388,7 +456,7 @@ export async function getAllDiscounts() {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch discounts');
-  const data = await res.json();
+  const data = await readJson(res);
   return data.data || [];
 }
 
@@ -401,7 +469,7 @@ export async function createDiscount(discountData) {
     headers: getAuthHeaders(),
     body: JSON.stringify(discountData),
   });
-  const data = await res.json();
+  const data = await readJson(res);
   if (!res.ok) throw new Error(data.error || 'Failed to create discount');
   return data.data;
 }
@@ -415,7 +483,7 @@ export async function updateDiscount(id, discountData) {
     headers: getAuthHeaders(),
     body: JSON.stringify(discountData),
   });
-  const data = await res.json();
+  const data = await readJson(res);
   if (!res.ok) throw new Error(data.error || 'Failed to update discount');
   return data.data;
 }
@@ -428,7 +496,7 @@ export async function deleteDiscount(id) {
     method: 'DELETE',
     headers: getAuthHeaders(),
   });
-  const data = await res.json();
+  const data = await readJson(res);
   if (!res.ok) throw new Error(data.error || 'Failed to delete discount');
   return data;
 }
@@ -442,7 +510,7 @@ export async function validateDiscountCode(code, subtotal) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ code, subtotal }),
   });
-  const data = await res.json();
+  const data = await readJson(res);
   if (!res.ok) throw new Error(data.error || 'Invalid promo code');
   return data;
 }
@@ -459,7 +527,7 @@ export async function getAllBatches() {
     const res = await fetch(`${API_BASE}/batches`, {
       headers: getAuthHeaders(),
     });
-    const data = await res.json();
+    const data = await readJson(res);
     return data.data || [];
   } catch (error) {
     console.error('API error fetching batches:', error);
@@ -473,7 +541,7 @@ export async function getAllBatches() {
 export async function getActiveBatches() {
   try {
     const res = await fetch(`${API_BASE}/batches/active`);
-    const data = await res.json();
+    const data = await readJson(res);
     return data.data || null;
   } catch (error) {
     console.warn('API error fetching active batches:', error);
@@ -490,7 +558,7 @@ export async function createBatch(batchData) {
     headers: getAuthHeaders(),
     body: JSON.stringify(batchData),
   });
-  const data = await res.json();
+  const data = await readJson(res);
   if (!res.ok) throw new Error(data.error || 'Failed to create batch');
   return data.data;
 }
@@ -504,7 +572,7 @@ export async function updateBatch(batchId, batchData) {
     headers: getAuthHeaders(),
     body: JSON.stringify(batchData),
   });
-  const data = await res.json();
+  const data = await readJson(res);
   if (!res.ok) throw new Error(data.error || 'Failed to update batch');
   return data.data;
 }
@@ -517,7 +585,7 @@ export async function deleteBatch(batchId) {
     method: 'DELETE',
     headers: getAuthHeaders(),
   });
-  const data = await res.json();
+  const data = await readJson(res);
   if (!res.ok) throw new Error(data.error || 'Failed to delete batch');
   return data;
 }
@@ -528,7 +596,7 @@ export async function deleteBatch(batchId) {
 
 export async function claimHiddenCode(huntId) {
   const res = await fetch(`${API_BASE}/hunt/${encodeURIComponent(huntId)}/claim`, { method: 'POST' });
-  const data = await res.json().catch(() => ({}));
+  const data = await readJson(res);
   if (!res.ok) throw new Error(data.error || 'This code is no longer available');
   return data.data;
 }
@@ -544,7 +612,7 @@ export async function getReviews(productId) {
   try {
     const url = productId ? `${API_BASE}/reviews?productId=${encodeURIComponent(productId)}` : `${API_BASE}/reviews`;
     const res = await fetch(url);
-    const data = await res.json();
+    const data = await readJson(res);
     return data.data || [];
   } catch (error) {
     console.warn('Could not fetch reviews:', error);
@@ -557,7 +625,7 @@ export async function getReviews(productId) {
  */
 export async function getMyReferrals() {
   const res = await fetch(`${API_BASE}/referrals/me`, { headers: getAuthHeaders() });
-  const data = await res.json();
+  const data = await readJson(res);
   if (!res.ok) throw new Error(data.error || 'Could not load referral details');
   return data.data;
 }
@@ -571,7 +639,7 @@ export async function submitReview(reviewData) {
     headers: getAuthHeaders(),
     body: JSON.stringify(reviewData),
   });
-  const data = await res.json();
+  const data = await readJson(res);
   if (!res.ok) throw new Error(data.error || 'Failed to submit review');
   return data.data;
 }

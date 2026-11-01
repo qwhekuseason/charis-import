@@ -144,7 +144,7 @@ const layout = ({ heading, intro, order, extra = '' }) => {
         <tr><td style="padding:10px 0 0;border-top:1px solid #e2e8f0;font-weight:700">Total</td><td style="padding:10px 0 0;border-top:1px solid #e2e8f0;text-align:right;font-weight:700">${money(order.total)}</td></tr>
       </table>
       ${extra}
-      <a href="${trackUrl}" style="display:inline-block;margin-top:20px;background:#2563eb;color:#fff;text-decoration:none;padding:12px 18px;border-radius:10px;font-weight:700">Track your order</a>
+      <a href="${trackUrl}" style="display:inline-block;margin-top:20px;background:#17140f;color:#d4af5a;text-decoration:none;padding:12px 18px;border-radius:10px;font-weight:700">Track your order</a>
       <p style="margin:16px 0 0;font-size:13px;color:#64748b">To track, enter your order code and the phone number you used.</p>
     </div>
     <p style="font-size:12px;color:#94a3b8;text-align:center;margin-top:16px">You are getting this email because you placed an order with CHARI.</p>
@@ -162,9 +162,25 @@ const send = async (to, subject, html) => {
   }
 };
 
+// Link a customer opens to choose a new password.
+export const passwordResetUrl = (token) => `${SITE_URL}/?page=reset-password&token=${encodeURIComponent(token)}`;
+
+// Sent when someone asks to reset their password. Returns true if the email went out.
+export const emailPasswordReset = (user, link) => send(user.email, 'Reset your CHARI password', `<!doctype html><html><body style="margin:0;background:#f1f5f9;font-family:Arial,Helvetica,sans-serif">
+  <div style="max-width:520px;margin:0 auto;padding:24px 16px">
+    <div style="font-size:22px;font-weight:800;color:#0f172a;margin-bottom:16px">CHARI</div>
+    <div style="background:#fff;border-radius:14px;padding:24px">
+      <h1 style="font-size:20px;margin:0 0 8px;color:#0f172a">Reset your password</h1>
+      <p style="margin:0 0 20px;color:#475569;line-height:1.5">Hi ${esc(firstName(user.name))}, we got a request to reset the password for your CHARI account. Tap the button to choose a new one.</p>
+      <a href="${esc(link)}" style="display:inline-block;background:#17140f;color:#d4af5a;text-decoration:none;padding:12px 18px;border-radius:10px;font-weight:700">Choose a new password</a>
+      <p style="margin:20px 0 0;font-size:13px;color:#64748b;line-height:1.5">This link works once and expires in 1 hour. If you didn't ask for this, you can ignore this email — your password won't change.</p>
+      <p style="margin:12px 0 0;font-size:12px;color:#94a3b8;word-break:break-all">Button not working? Copy this link: ${esc(link)}</p>
+    </div>
+  </div></body></html>`);
+
 // Sent when an order is placed.
 export const emailOrderPlaced = (order, settings = {}) => {
-  const payNote = order.paymentStatus === 'PAID' || /cash/i.test(order.paymentMethod || '')
+  const payNote = order.paymentStatus === 'PAID'
     ? ''
     : `<p style="margin:16px 0 0;color:#475569;line-height:1.5"><strong>How to pay:</strong> send ${money(order.total)} by MoMo to <strong>${esc(settings.momoNumber || '')}</strong>${settings.momoName ? ` (${esc(settings.momoName)})` : ''} and use <strong>${esc(order.orderCode)}</strong> as the reference.</p>`;
   return send(order.email, `Order ${order.orderCode} received`, layout({

@@ -1,13 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../context/StoreContext';
 import { ProductCard } from '../components/ProductCard';
 import { SmartImage } from '../components/SmartImage';
 import { getActiveBatches } from '../services/api';
-import { sizedImage, imageSrcSet } from '../utils/images';
-import { ArrowRight } from 'lucide-react';
+import { sizedImage } from '../utils/images';
+import { ArrowRight, Search, Smartphone, ShieldCheck, Truck, ChevronLeft, ChevronRight, Plane, PackagePlus, Link2, Gift, MessageCircle, Clock } from 'lucide-react';
+import './HomePage.css';
 import { HiddenGem } from '../components/HiddenGem';
-
-const HERO_IMAGE = 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?fit=crop&auto=format';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -32,6 +31,53 @@ const formatCountdown = (ms) => {
   const days = Math.floor(totalSeconds / 86400);
   const clock = `${pad(Math.floor((totalSeconds % 86400) / 3600))}:${pad(Math.floor((totalSeconds % 3600) / 60))}:${pad(totalSeconds % 60)}`;
   return days > 0 ? `${days}d ${clock}` : clock;
+};
+
+// Ticks on its own so the rest of the home page doesn't redraw every second.
+const DealCountdown = ({ endsAt }) => {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return <span className="countdown">{formatCountdown(endsAt - now)}</span>;
+};
+
+// A row of products that slides sideways (arrows on desktop, swipe on phones), so it never ends in a lone card.
+const ProductRail = ({ products, onSeeAll, seeAllLabel, label, showMore = true }) => {
+  const railRef = useRef(null);
+  const [edges, setEdges] = useState({ start: true, end: false });
+  const updateEdges = () => {
+    const el = railRef.current;
+    if (!el) return;
+    setEdges({ start: el.scrollLeft < 8, end: el.scrollLeft + el.clientWidth >= el.scrollWidth - 8 });
+  };
+  useEffect(() => {
+    updateEdges();
+    window.addEventListener('resize', updateEdges);
+    return () => window.removeEventListener('resize', updateEdges);
+  }, [products.length]);
+  const scrollRail = (dir) => {
+    const el = railRef.current;
+    if (el) el.scrollBy({ left: dir * el.clientWidth * 0.9, behavior: 'smooth' });
+  };
+  return (
+    <div className="hm-rail-wrap">
+      <button type="button" className="hm-rail-arrow is-prev" onClick={() => scrollRail(-1)} disabled={edges.start} aria-label={`Scroll ${label} back`}><ChevronLeft size={20} /></button>
+      <div className="hm-rail" ref={railRef} onScroll={updateEdges} role="list" aria-label={label}>
+        {products.map((product) => <div role="listitem" key={product.id}><ProductCard product={product} /></div>)}
+        {showMore && (
+          <div role="listitem">
+            <button type="button" className="hm-rail-more" onClick={onSeeAll}>
+              <span className="hm-rail-more-icon"><ArrowRight size={20} /></span>
+              {seeAllLabel}
+            </button>
+          </div>
+        )}
+      </div>
+      <button type="button" className="hm-rail-arrow is-next" onClick={() => scrollRail(1)} disabled={edges.end} aria-label={`Scroll ${label} forward`}><ChevronRight size={20} /></button>
+    </div>
+  );
 };
 
 // Turns a live batch record into the copy shown on the hero card.
@@ -75,11 +121,13 @@ export const HomePage = () => {
     setQuoteModalOpen,
     setReferralModalOpen,
     reviews,
-    catalogStatus
+    catalogStatus,
+    setSearchQuery
   } = useStore();
   const [moreFilter, setMoreFilter] = useState('all');
   const [activeBatch, setActiveBatch] = useState(null);
-  const [now, setNow] = useState(Date.now());
+  const [heroSearch, setHeroSearch] = useState('');
+  const now = Date.now();
 
   useEffect(() => {
     let cancelled = false;
@@ -93,17 +141,19 @@ export const HomePage = () => {
     return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
   const batchInfo = describeBatch(activeBatch);
 
   // Only real reviews written by customers — the section stays hidden until there are some.
   const customerReviews = (reviews || [])
     .filter((r) => r.rating >= 4 && (r.comment || '').trim().length >= 20)
     .slice(0, 3);
+
+  const runSearch = (e) => {
+    e.preventDefault();
+    setSearchQuery(heroSearch.trim());
+    setSelectedCategory('all');
+    navigate('shop');
+  };
 
   const openCategory = (slug) => {
     setSelectedCategory(slug);
@@ -116,9 +166,13 @@ export const HomePage = () => {
   // Deals set in Admin (with an end time) come first; otherwise show products that are simply on sale.
   const liveDeals = products.filter((p) => p.onDeal && p.dealEndsAt && new Date(p.dealEndsAt).getTime() > now);
   const hasLiveDeals = liveDeals.length > 0;
-  const dealProducts = (hasLiveDeals ? liveDeals : products.filter((p) => discountOf(p) > 0))
-    .sort((a, b) => discountOf(b) - discountOf(a))
-    .slice(0, 10);
+  // Timed deals first, topped up with other discounted products so the row is never half empty.
+  const byDiscount = (a, b) => discountOf(b) - discountOf(a);
+  const liveDealIds = new Set(liveDeals.map((p) => p.id));
+  const dealProducts = [
+    ...[...liveDeals].sort(byDiscount),
+    ...products.filter((p) => !liveDealIds.has(p.id) && discountOf(p) > 0).sort(byDiscount),
+  ].slice(0, 10);
   const soonestDealEnd = hasLiveDeals ? Math.min(...liveDeals.map((p) => new Date(p.dealEndsAt).getTime())) : null;
   const dealIds = new Set(dealProducts.map((p) => p.id));
   const maxDealPercent = Math.round(Math.max(0, ...dealProducts.map(discountOf)) * 100);
@@ -126,7 +180,7 @@ export const HomePage = () => {
   const popularProducts = [...products]
     .filter((p) => !dealIds.has(p.id))
     .sort((a, b) => (b.reviewsCount || b.reviewCount || 0) - (a.reviewsCount || a.reviewCount || 0))
-    .slice(0, 5);
+    .slice(0, 8);
   const shownAbove = new Set([...dealIds, ...popularProducts.map((p) => p.id)]);
 
   const matchesMoreFilter = (p) => {
@@ -138,105 +192,159 @@ export const HomePage = () => {
   const moreProducts = [...products]
     .sort((a, b) => Number(shownAbove.has(a.id)) - Number(shownAbove.has(b.id)))
     .filter(matchesMoreFilter)
-    .slice(0, 10);
+    .slice(0, 8);
+
+  // Four category photos make the hero picture — real products, not a stock photo.
+  const heroCategories = categories.filter((c) => c.image).slice(0, 4);
+  const tileCategories = categories.slice(0, 7);
 
   return (
-    <div className="home">
-      {/* Hero */}
-      <section className="home-hero">
-        <div className="container home-hero-grid">
-          <div>
-            <h1 className="home-hero-title">
+    <div className="home hm">
+      {/* Hero — ink, like the logo */}
+      <section className="hm-hero">
+        <div className="container hm-hero-grid">
+          <div className="hm-hero-copy">
+            <span className="hm-eyebrow"><Plane size={14} aria-hidden="true" /> Direct imports, delivered across Ghana</span>
+            <h1 className="hm-hero-title">
               See it. Send it.<br />
-              <span>We'll source it.</span>
+              <em>We'll source it.</em>
               <HiddenGem spot="home-hero" />
             </h1>
-            <p className="home-hero-text">
-              Clothes, kitchen appliances, mannequins and more — ordered from trusted overseas suppliers and delivered anywhere in Ghana.
+            <p className="hm-hero-text">
+              Clothes, kitchen appliances, mannequins and more — bought from trusted overseas suppliers, checked, and delivered to your door.
             </p>
-            <div className="home-actions">
-              <button type="button" className="btn btn-primary btn-lg" onClick={() => navigate('shop')}>
+            <form className="hm-search" role="search" onSubmit={runSearch}>
+              <Search size={18} aria-hidden="true" />
+              <input
+                type="search"
+                enterKeyHint="search"
+                placeholder="Search air fryers, dresses, mannequins…"
+                aria-label="Search products"
+                value={heroSearch}
+                onChange={(e) => setHeroSearch(e.target.value)}
+              />
+              <button type="submit" className="btn btn-gold">Search</button>
+            </form>
+            <div className="hm-hero-actions">
+              <button type="button" className="btn btn-gold btn-lg" onClick={() => navigate('shop')}>
                 Shop now <ArrowRight size={17} />
               </button>
-              <button type="button" className="btn btn-outline btn-lg" onClick={() => setQuoteModalOpen(true)}>
-                Request an item
+              <button type="button" className="btn hm-btn-ghost btn-lg" onClick={() => setQuoteModalOpen(true)}>
+                <PackagePlus size={17} /> Request an item
               </button>
             </div>
-            <p className="home-meta">Pay with MoMo or bank transfer · Customs included · Delivery anywhere in Ghana</p>
+            <ul className="hm-trust">
+              <li><Smartphone size={15} aria-hidden="true" /> Pay with MoMo</li>
+              <li><ShieldCheck size={15} aria-hidden="true" /> Customs included</li>
+              <li><Truck size={15} aria-hidden="true" /> Delivery across Ghana</li>
+            </ul>
+          </div>
 
+          <div className="hm-hero-visual">
+            {heroCategories.length === 4 ? (
+              <div className="hm-mosaic">
+                {heroCategories.map((cat, i) => (
+                  <button type="button" key={cat.id} className={`hm-mosaic-tile is-${i}`} onClick={() => openCategory(cat.slug)}>
+                    <SmartImage src={sizedImage(cat.image, i === 0 ? 640 : 360)} alt="" loading={i === 0 ? 'eager' : 'lazy'} />
+                    <span>{cat.name} <ArrowRight size={14} aria-hidden="true" /></span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="hm-mosaic is-empty" aria-hidden="true">
+                {[0, 1, 2, 3].map((i) => <span key={i} className={`hm-mosaic-tile is-${i}`} />)}
+              </div>
+            )}
             {batchInfo && (
-              <div className="shipment-card">
-                <div className="shipment-card-row">
+              <div className="hm-shipment">
+                <span className="hm-shipment-icon"><Plane size={16} aria-hidden="true" /></span>
+                <div className="hm-shipment-text">
                   <strong>{batchInfo.title}</strong>
                   <span>{batchInfo.status}</span>
+                  {batchInfo.progress !== null && (
+                    <span className="hm-shipment-bar" aria-hidden="true"><span style={{ width: `${batchInfo.progress}%` }} /></span>
+                  )}
                 </div>
-                {batchInfo.progress !== null && (
-                  <div className="shipment-bar" aria-hidden="true">
-                    <div style={{ width: `${batchInfo.progress}%` }} />
-                  </div>
-                )}
               </div>
             )}
           </div>
-
-          <div className="home-hero-media">
-            <img
-              src={sizedImage(HERO_IMAGE, 900)}
-              srcSet={imageSrcSet(HERO_IMAGE, [480, 720, 900, 1200])}
-              sizes="(max-width: 900px) 100vw, 560px"
-              alt="A customer paying for her order in a shop"
-              width="900"
-              height="600"
-              fetchpriority="high"
-              decoding="async"
-            />
-          </div>
         </div>
       </section>
 
-      {/* Ordering notice */}
-      <section className="container">
-        <button type="button" className="home-notice" onClick={() => setPreorderTermsOpen(true)}>
-          <span>
-            <strong>Before you order:</strong> pre-orders are paid in full, sea shipping takes 30–50 days and orders can't be changed once placed with the supplier.
-          </span>
-          <span className="home-notice-link">Read terms</span>
+      {/* How it works — replaces the small-print notice */}
+      <section className="container hm-how" aria-labelledby="hm-how-title">
+        <h2 id="hm-how-title" className="sr-only">How ordering works</h2>
+        <ol className="hm-how-steps">
+          <li>
+            <span className="hm-how-num">1</span>
+            <div>
+              <strong>Pick it or send a link</strong>
+              <span>Shop here, or send a link or photo from 1688, Shein, TikTok or Instagram.</span>
+            </div>
+          </li>
+          <li>
+            <span className="hm-how-num">2</span>
+            <div>
+              <strong>Pay in full by MoMo</strong>
+              <span>The price is fixed in cedis, and customs is included.</span>
+            </div>
+          </li>
+          <li>
+            <span className="hm-how-num">3</span>
+            <div>
+              <strong>We ship and deliver</strong>
+              <span>Sea 35–45 working days, air 7–12. Track it here all the way.</span>
+            </div>
+          </li>
+        </ol>
+        <button type="button" className="hm-how-terms" onClick={() => setPreorderTermsOpen(true)}>
+          <Clock size={14} aria-hidden="true" /> <span>Pre-orders can't be changed once placed with the supplier — <u>read the terms</u></span>
         </button>
       </section>
 
-      {/* Categories */}
+      {/* Categories — one tidy row of tiles; the last one opens the full list */}
       <section className="container home-section">
-        <div className="section-head">
+        <div className="hm-head">
           <h2>Shop by category <HiddenGem spot="home-categories" /></h2>
-          <button type="button" className="section-head-link" onClick={() => navigate('categories')}>See all</button>
+          <button type="button" className="hm-head-link" onClick={() => navigate('categories')}>All categories <ArrowRight size={15} /></button>
         </div>
-        <div className="category-tiles">
-          {catalogStatus === 'loading' && categories.length === 0 && [...Array(6)].map((_, i) => (
-            <div key={i} className="category-tile is-loading" aria-hidden="true"><span className="skeleton-box" /><span className="skeleton-line" /></div>
+        <div className="hm-cats">
+          {catalogStatus === 'loading' && categories.length === 0 && [...Array(8)].map((_, i) => (
+            <div key={i} className="hm-cat is-loading" aria-hidden="true"><span className="hm-cat-img" /><span className="hm-cat-name">&nbsp;</span></div>
           ))}
-          {categories.map((cat) => (
-            <button type="button" key={cat.id} className="category-tile" onClick={() => openCategory(cat.slug)}>
-              <SmartImage src={sizedImage(cat.image, 240)} alt="" width="120" height="120" loading="lazy" />
-              <span>{cat.name}</span>
+          {tileCategories.map((cat) => (
+            <button type="button" key={cat.id} className="hm-cat" onClick={() => openCategory(cat.slug)}>
+              <span className="hm-cat-img"><SmartImage src={sizedImage(cat.image, 240)} alt="" width="120" height="120" loading="lazy" /></span>
+              <span className="hm-cat-name">{cat.name}</span>
             </button>
           ))}
+          {categories.length > tileCategories.length && (
+            <button type="button" className="hm-cat is-more" onClick={() => navigate('categories')}>
+              <span className="hm-cat-img"><span>+{categories.length - tileCategories.length}</span></span>
+              <span className="hm-cat-name">More</span>
+            </button>
+          )}
         </div>
       </section>
 
-      {/* Deals */}
+      {/* Deals — an ink panel with the countdown, beside the deal products */}
       {dealProducts.length > 0 && (
         <section className="container home-section">
-          <div className="section-head">
-            <div>
+          <div className="hm-deals">
+            <div className="hm-deals-intro">
+              <span className="hm-eyebrow">{hasLiveDeals ? 'Limited time' : 'Price drops'}</span>
               <h2>{hasLiveDeals ? 'Deals' : 'On sale'}</h2>
-              <p className="section-head-sub">
-                Up to {maxDealPercent}% off{hasLiveDeals && <> · ends in <span className="countdown">{formatCountdown(soonestDealEnd - now)}</span></>}
-              </p>
+              <p>Up to <strong>{maxDealPercent}% off</strong> selected items.</p>
+              {hasLiveDeals && (
+                <div className="hm-countdown"><Clock size={15} aria-hidden="true" /> Ends in <DealCountdown endsAt={soonestDealEnd} /></div>
+              )}
+              <button type="button" className="btn btn-gold" onClick={() => navigate('shop', { filter: 'deals' })}>
+                See all deals <ArrowRight size={16} />
+              </button>
             </div>
-            <button type="button" className="section-head-link" onClick={() => navigate('shop', { filter: 'deals' })}>See all deals</button>
-          </div>
-          <div className="products-grid">
-            {dealProducts.map((product) => <ProductCard key={product.id} product={product} />)}
+            <div className="hm-deals-products">
+              <ProductRail products={dealProducts} label="Deals" showMore={false} onSeeAll={() => navigate('shop', { filter: 'deals' })} seeAllLabel="See all deals" />
+            </div>
           </div>
         </section>
       )}
@@ -244,37 +352,37 @@ export const HomePage = () => {
       {/* Popular */}
       {popularProducts.length > 0 && (
         <section className="container home-section">
-          <div className="section-head">
+          <div className="hm-head">
             <h2>Popular right now</h2>
-            <button type="button" className="section-head-link" onClick={() => navigate('shop')}>See all</button>
+            <button type="button" className="hm-head-link" onClick={() => navigate('shop')}>See all <ArrowRight size={15} /></button>
           </div>
-          <div className="products-grid">
-            {popularProducts.map((product) => <ProductCard key={product.id} product={product} />)}
-          </div>
+          <ProductRail products={popularProducts} label="Popular products" onSeeAll={() => navigate('shop')} seeAllLabel="See all products" />
         </section>
       )}
 
-      {/* Custom orders + referrals */}
-      <section className="container home-section home-banners">
-        <div className="home-banner home-banner-dark">
+      {/* Request an item + invite a friend */}
+      <section className="container home-section hm-promos">
+        <div className="hm-promo is-ink">
+          <span className="hm-promo-icon"><Link2 size={20} aria-hidden="true" /></span>
           <h2>Can't find what you want?</h2>
-          <p>Send us a link or photo from 1688, Taobao, Shein or Instagram. We'll buy it, handle customs and deliver it to you.</p>
-          <div className="home-actions">
-            <button type="button" className="btn btn-light" onClick={() => setQuoteModalOpen(true)}>Request an item</button>
+          <p>Send us a link or photo from 1688, Taobao, Shein or Instagram. We'll buy it, clear customs and deliver it to you.</p>
+          <div className="hm-promo-actions">
+            <button type="button" className="btn btn-gold" onClick={() => setQuoteModalOpen(true)}>Request an item</button>
             <a
-              className="btn btn-outline-light"
+              className="btn hm-btn-ghost"
               href={`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent('Hello CHARI, I would like to request an item.')}`}
               target="_blank"
               rel="noreferrer"
             >
-              Ask on WhatsApp
+              <MessageCircle size={16} /> Ask on WhatsApp
             </a>
           </div>
         </div>
-        <div className="home-banner">
+        <div className="hm-promo is-gold">
+          <span className="hm-promo-icon"><Gift size={20} aria-hidden="true" /></span>
           <h2>Give GH₵25, get GH₵25</h2>
           <p>Your friend gets GH₵25 off their first order. You get GH₵25 store credit when they pay.</p>
-          <div className="home-actions">
+          <div className="hm-promo-actions">
             <button type="button" className="btn btn-primary" onClick={() => setReferralModalOpen(true)}>Get my invite link</button>
           </div>
         </div>
@@ -282,9 +390,9 @@ export const HomePage = () => {
 
       {/* More products */}
       <section className="container home-section">
-        <div className="section-head">
-          <h2>More products</h2>
-          <div className="segmented segmented-inline" role="tablist">
+        <div className="hm-head">
+          <h2>More to explore</h2>
+          <div className="hm-chips" role="tablist" aria-label="Filter products">
             {[
               { id: 'all', label: 'All' },
               { id: 'fashion', label: 'Fashion' },
@@ -295,7 +403,7 @@ export const HomePage = () => {
                 role="tab"
                 key={tab.id}
                 aria-selected={moreFilter === tab.id}
-                className={moreFilter === tab.id ? 'active' : ''}
+                className={moreFilter === tab.id ? 'is-active' : ''}
                 onClick={() => setMoreFilter(tab.id)}
               >
                 {tab.label}
@@ -304,13 +412,22 @@ export const HomePage = () => {
           </div>
         </div>
         {catalogStatus === 'loading' && products.length === 0 ? (
-          <div className="products-grid" aria-label="Loading products">
-            {[...Array(5)].map((_, i) => <div key={i} className="pcard-skeleton" aria-hidden="true" />)}
+          <div className="products-grid hm-grid" aria-label="Loading products">
+            {[...Array(8)].map((_, i) => <div key={i} className="pcard-skeleton" aria-hidden="true" />)}
           </div>
         ) : moreProducts.length > 0 ? (
-          <div className="products-grid">
-            {moreProducts.map((product) => <ProductCard key={product.id} product={product} />)}
-          </div>
+          <>
+            <div className="products-grid hm-grid">
+              {moreProducts.map((product) => <ProductCard key={product.id} product={product} />)}
+            </div>
+            {products.length > moreProducts.length && (
+              <div className="hm-more">
+                <button type="button" className="btn btn-outline btn-lg" onClick={() => navigate('shop')}>
+                  Browse all {products.length} products <ArrowRight size={17} />
+                </button>
+              </div>
+            )}
+          </>
         ) : (
           <p className="empty-note">
             {catalogStatus === 'error' ? 'We couldn’t load products. Please refresh the page.' : 'New products are coming soon.'}
@@ -321,12 +438,13 @@ export const HomePage = () => {
       {/* Reviews — real customer reviews only */}
       {customerReviews.length > 0 && (
         <section className="container home-section">
-          <div className="section-head">
+          <div className="hm-head">
             <h2>What customers say</h2>
           </div>
-          <div className="review-grid">
+          <div className="hm-reviews">
             {customerReviews.map((r) => (
-              <figure key={r.id} className="review-quote">
+              <figure key={r.id} className="hm-review">
+                <span className="hm-review-stars" aria-label={`${r.rating} out of 5 stars`}>{'★'.repeat(Math.round(r.rating))}</span>
                 <blockquote>“{r.comment}”</blockquote>
                 <figcaption>{r.userName}{r.userCity ? ` · ${r.userCity}` : ''}</figcaption>
               </figure>
@@ -337,19 +455,19 @@ export const HomePage = () => {
 
       {/* Contact */}
       <section className="container home-section">
-        <div className="home-contact">
+        <div className="hm-contact">
           <div>
             <h2>Have a question?</h2>
             <p>Ask about sizes, bulk orders or delivery. We reply on WhatsApp every day.</p>
           </div>
-          <div className="home-actions">
+          <div className="hm-promo-actions">
             <a
               className="btn btn-whatsapp"
               href={`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent('Hello CHARI, I have a question.')}`}
               target="_blank"
               rel="noreferrer"
             >
-              Chat on WhatsApp
+              <MessageCircle size={16} /> Chat on WhatsApp
             </a>
             <button type="button" className="btn btn-outline" onClick={() => navigate('contact')}>Contact us</button>
           </div>

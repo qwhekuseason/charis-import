@@ -1,7 +1,8 @@
 import React from 'react';
 import { useStore } from '../context/StoreContext';
 import { HiddenGem } from './HiddenGem';
-import { MtnMomoIcon, TelecelCashIcon, AtMoneyIcon, CashOnDeliveryIcon } from './PaymentIcons';
+import { MtnMomoIcon, TelecelCashIcon, AtMoneyIcon } from './PaymentIcons';
+import { MessageCircle, Phone, Mail, MapPin, Clock, ArrowUp } from 'lucide-react';
 
 export const Footer = () => {
   const { navigate, setQuoteModalOpen, WHATSAPP_NUMBER, settings } = useStore();
@@ -34,23 +35,29 @@ export const Footer = () => {
     },
   ];
 
+  const phoneDigits = String(settings.whatsappNumber || '').replace(/\D/g, '');
+
   return (
     <footer className="site-footer">
       <div className="container">
         <div className="site-footer-grid">
-          <div>
-            <button type="button" className="site-footer-brand" onClick={() => navigate('home')}>
+          <div className="site-footer-about-col">
+            <a href="#/home" className="site-footer-brand" onClick={(e) => { e.preventDefault(); navigate('home'); }}>
               <img src="/chari-mark.jpg" alt="" width="44" height="44" />
               <span>CHARI</span>
-            </button>
+            </a>
             <p className="site-footer-about">
               Quality products bought from overseas suppliers and delivered anywhere in Ghana.
             </p>
-            <p className="site-footer-contact">
-              {settings.location}
-              <br />
-              <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noreferrer">{settings.phoneDisplay}</a>
-            </p>
+            <ul className="site-footer-contact">
+              <li><MapPin size={15} aria-hidden="true" /> {settings.location}</li>
+              <li><Phone size={15} aria-hidden="true" /> <a href={`tel:+${phoneDigits}`}>{settings.phoneDisplay}</a></li>
+              {settings.email && <li><Mail size={15} aria-hidden="true" /> <a href={`mailto:${settings.email}`}>{settings.email}</a></li>}
+              {settings.openingHours && <li><Clock size={15} aria-hidden="true" /> {settings.openingHours}</li>}
+            </ul>
+            <a className="site-footer-wa" href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noreferrer">
+              <MessageCircle size={16} /> Chat on WhatsApp
+            </a>
           </div>
 
           {columns.map((col) => (
@@ -78,8 +85,10 @@ export const Footer = () => {
             <MtnMomoIcon />
             <TelecelCashIcon />
             <AtMoneyIcon />
-            <CashOnDeliveryIcon />
           </div>
+          <button type="button" className="site-footer-top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
+            <ArrowUp size={15} /> Back to top
+          </button>
         </div>
       </div>
     </footer>

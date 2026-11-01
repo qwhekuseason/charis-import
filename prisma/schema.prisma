@@ -58,6 +58,12 @@ model User {
   creditBalance Float               @default(0)
   credits       CreditTransaction[]
 
+  // Password reset: only a hash of the emailed code is stored; it expires after an hour.
+  resetTokenHash    String?   @unique
+  resetTokenExpires DateTime?
+  // Goes up when the password changes, which signs out every other device.
+  tokenVersion      Int       @default(0)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
