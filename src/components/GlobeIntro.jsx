@@ -2,12 +2,15 @@ import React, { useEffect, useRef, useState } from 'react';
 import { LAND_MASK, PRODUCT_ICONS } from './globeData';
 import './GlobeIntro.css';
 
-// The opening scene: a globe made of tiny products, and a plane flying from supplier countries to Ghana.
-// Drawn on a canvas so hundreds of icons stay smooth. Shown once per visit; "Skip intro" ends it at any time.
+// The opening scene: a globe whose continents are made of real product photos from the shop,
+// a plane flying from supplier countries to Ghana, then a dive into Ghana close enough to see
+// the products. Drawn on a canvas so hundreds of photos stay smooth. Shown once per visit;
+// "Skip intro" ends it at any time.
 
 const GOLD = '#d4af5a';
 const CREAM = '#f3e2b0';
 const DEG = Math.PI / 180;
+const TILE_PX = 192; // each photo is pre-cut to this size, sharp even when zoomed in
 
 // Where the plane stops, in order. [longitude, latitude]
 const STOPS = [
@@ -18,13 +21,17 @@ const STOPS = [
   { name: 'Kumasi', country: 'Ghana', at: [-1.62, 6.69] },
 ];
 
-// Timeline (ms)
-const FADE_IN = 900;
+// Timeline (ms, counted from when the photos are ready)
+const FADE_IN = 1000;
 const LEG = 1050;
 const FLIGHT_END = FADE_IN + LEG * (STOPS.length - 1);
-const TITLE_AT = FLIGHT_END + 250;
-const LEAVE_AT = FLIGHT_END + 1900;
+const ZOOM_TIME = 1900; // the dive into Ghana
+const ZOOM_TO = 4.6; // how close it gets
+const TITLE_AT = FLIGHT_END + 1100;
+const LEAVE_AT = FLIGHT_END + ZOOM_TIME + 700;
 const DONE_AT = LEAVE_AT + 750;
+// How long to wait for photos before starting anyway (icons fill any gaps).
+const PHOTO_WAIT = 2200;
 
 const landBits = (() => {
   const bin = atob(LAND_MASK);
@@ -55,7 +62,7 @@ const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const clamp01 = (t) => Math.max(0, Math.min(1, t));
 const shortestLon = (from, to) => from + ((((to - from) % 360) + 540) % 360) - 180;
 
-// Points spread evenly over the sphere; land ones become product icons, a few sea ones become faint dots.
+// Points spread evenly over the sphere; land ones become product tiles, a few sea ones faint dots.
 const buildPoints = (count) => {
   const points = [];
   const golden = Math.PI * (3 - Math.sqrt(5));
@@ -65,31 +72,62 @@ const buildPoints = (count) => {
     const lon = ((((i * golden) / DEG) % 360) + 360) % 360 - 180;
     const land = isLand(lon, lat);
     if (!land && i % 5 !== 0) continue;
-    points.push({ lon, lat, land, icon: (i * 7) % PRODUCT_ICONS.length, cream: i % 6 === 0, size: 0.8 + ((i * 37) % 10) / 25, phase: (i * 1.7) % 6.28 });
+    points.push({ lon, lat, land, pick: (i * 7919) % 9973, size: 0.85 + ((i * 37) % 10) / 33, phase: (i * 1.7) % 6.28 });
   }
   return points;
 };
 
-const makeSprites = (color) => PRODUCT_ICONS.map((inner) => {
+// A product photo cut into a round tile with a thin gold rim — like a little coin.
+const makePhotoTile = (img) => {
+  const c = document.createElement('canvas');
+  c.width = TILE_PX; c.height = TILE_PX;
+  const g = c.getContext('2d');
+  const r = TILE_PX / 2;
+  g.save();
+  g.beginPath(); g.arc(r, r, r - 4, 0, Math.PI * 2); g.clip();
+  g.fillStyle = '#fff'; g.fillRect(0, 0, TILE_PX, TILE_PX);
+  const scale = Math.max(TILE_PX / img.naturalWidth, TILE_PX / img.naturalHeight);
+  const w = img.naturalWidth * scale; const h = img.naturalHeight * scale;
+  g.drawImage(img, (TILE_PX - w) / 2, (TILE_PX - h) / 2, w, h);
+  g.restore();
+  g.lineWidth = 6; g.strokeStyle = GOLD;
+  g.beginPath(); g.arc(r, r, r - 4, 0, Math.PI * 2); g.stroke();
+  return c;
+};
+const loadPhoto = (url) => new Promise((resolve) => {
   const img = new Image();
-  img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`)}`;
+  img.decoding = 'async';
+  img.onload = () => { try { resolve(img.naturalWidth ? makePhotoTile(img) : null); } catch { resolve(null); } };
+  img.onerror = () => resolve(null);
+  img.src = url;
+});
+
+// Fallback tiles (gold outlines) if photos can't load — e.g. offline.
+const makeIconTiles = () => PRODUCT_ICONS.map((inner) => {
+  const img = new Image();
+  img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="${GOLD}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`)}`;
   return img;
 });
 
 const PLANE = new Path2D('M14 0 L-6 -3.2 L-10 -12 L-14 -12 L-10 -2.6 L-16 -2 L-19 -6 L-21 -6 L-19.5 0 L-21 6 L-19 6 L-16 2 L-10 2.6 L-14 12 L-10 12 L-6 3.2 Z');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export const GlobeIntro = ({ onDone }) => {
+export const GlobeIntro = ({ onDone, photos = [] }) => {
   const canvasRef = useRef(null);
-  const [phase, setPhase] = useState('flying'); // flying → title → leaving
+  const [phase, setPhase] = useState('loading'); // loading → flying → title → leaving
   const doneRef = useRef(false);
   const finish = useRef(() => {});
+  // The shop's products may still be arriving when the intro starts — always read the latest list.
+  const photosRef = useRef(photos);
+  photosRef.current = photos;
 
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     const isPhone = window.innerWidth < 640;
-    const points = buildPoints(isPhone ? 2600 : 4200);
-    const sprites = [makeSprites(GOLD), makeSprites(CREAM)];
+    const points = buildPoints(isPhone ? 2400 : 3800);
+    const iconTiles = makeIconTiles();
+    let photoTiles = [];
     const stops = STOPS.map((s) => ({ ...s, vec: toVec(s.at) }));
     let width = 0; let height = 0; let dpr = 1;
     const resize = () => {
@@ -101,9 +139,8 @@ export const GlobeIntro = ({ onDone }) => {
     resize();
     window.addEventListener('resize', resize);
 
-    // Camera starts east of China and turns towards each stop.
     const cam = { lon: STOPS[0].at[0] + 70, lat: 18 };
-    let start = 0; let prev = 0; let raf = 0; let titled = false; let leaving = false;
+    let start = 0; let prev = 0; let raf = 0; let titled = false; let leaving = false; let cancelled = false;
 
     const end = () => {
       if (doneRef.current) return;
@@ -121,26 +158,28 @@ export const GlobeIntro = ({ onDone }) => {
       const legFloat = clamp01((t - FADE_IN) / (FLIGHT_END - FADE_IN)) * (stops.length - 1);
       const leg = Math.min(stops.length - 2, Math.floor(legFloat));
       const legT = ease(clamp01(legFloat - leg));
-      const planeVec = slerp(stops[leg].vec, stops[leg + 1].vec, legT);
-      const [planeLon, planeLat] = toLonLat(planeVec);
+      const [planeLon, planeLat] = toLonLat(slerp(stops[leg].vec, stops[leg + 1].vec, legT));
 
-      // Camera follows the plane (gently), and spins in during the fade.
+      // Camera: spins in, follows the plane, then settles right on Kumasi for the dive.
+      const diving = t >= FLIGHT_END;
       const targetLon = t < FADE_IN ? STOPS[0].at[0] + 70 * (1 - ease(t / FADE_IN)) : planeLon;
-      const targetLat = t < FADE_IN ? 18 : planeLat * 0.65;
-      // Time-based easing, so the camera keeps up the same on slow phones (fewer frames) and fast screens.
+      const targetLat = t < FADE_IN ? 18 : diving ? planeLat : planeLat * 0.65;
       const dt = Math.min(250, prev ? now - prev : 16);
       prev = now;
-      const follow = 1 - Math.pow(0.86, dt / 16.7);
-      cam.lon += (shortestLon(cam.lon, targetLon) - cam.lon) * follow; // turn the short way round
+      // During the dive the camera locks onto Kumasi, so it always lands dead centre.
+      const diveLock = ease(clamp01((t - FLIGHT_END) / (ZOOM_TIME * 0.6)));
+      const follow = Math.max(1 - Math.pow(0.86, dt / 16.7), diveLock);
+      cam.lon += (shortestLon(cam.lon, targetLon) - cam.lon) * follow;
       cam.lat += (targetLat - cam.lat) * follow;
 
-      // Size: the globe grows in, then leans in on Ghana at the end.
+      // Size: grows in, then dives towards Ghana.
       const base = Math.min(width, height) * (isPhone ? 0.4 : 0.34);
       const intro = ease(clamp01(t / FADE_IN));
-      const zoom = 1 + 0.35 * ease(clamp01((t - FLIGHT_END) / 1200));
-      const R = base * (0.82 + 0.18 * intro) * zoom;
+      const dive = ease(clamp01((t - FLIGHT_END) / ZOOM_TIME));
+      const R = base * (0.82 + 0.18 * intro) * (1 + (ZOOM_TO - 1) * dive);
       const cx = width / 2;
-      const cy = height / 2 - (isPhone ? 40 : 10);
+      // Ghana sits a little above the middle at the end, leaving room for the name below.
+      const cy = height / 2 - (isPhone ? 40 : 10) - dive * height * 0.08;
 
       const lam0 = cam.lon * DEG; const phi0 = cam.lat * DEG;
       const sinP0 = Math.sin(phi0); const cosP0 = Math.cos(phi0);
@@ -157,7 +196,7 @@ export const GlobeIntro = ({ onDone }) => {
       ctx.clearRect(0, 0, width, height);
       ctx.globalAlpha = intro;
 
-      // Glow and the dark sphere behind the icons.
+      // Glow and the dark sphere behind the tiles.
       const glow = ctx.createRadialGradient(cx, cy, R * 0.9, cx, cy, R * 1.35);
       glow.addColorStop(0, 'rgba(212,175,90,0.16)');
       glow.addColorStop(1, 'rgba(212,175,90,0)');
@@ -172,31 +211,41 @@ export const GlobeIntro = ({ onDone }) => {
       ctx.lineWidth = 1;
       ctx.stroke();
 
-      // The products.
-      const iconSize = R * (isPhone ? 0.072 : 0.062);
+      // The products: collect what's visible, draw far ones first so near ones sit on top.
+      const tileBase = R * (isPhone ? 0.085 : 0.072);
+      const visible = [];
       for (const p of points) {
         const s = project(p.lon, p.lat);
         if (s.z <= 0.02) continue;
-        const twinkle = 0.82 + 0.18 * Math.sin(t * 0.003 + p.phase);
+        const size = p.land ? tileBase * p.size * (0.45 + 0.55 * s.z) : 1.6;
+        if (s.x < -size || s.x > width + size || s.y < -size || s.y > height + size) continue;
+        visible.push({ p, s, size });
+      }
+      visible.sort((a, b) => a.s.z - b.s.z);
+      for (const { p, s, size } of visible) {
         if (!p.land) {
           ctx.globalAlpha = intro * s.z * 0.35;
           ctx.fillStyle = GOLD;
           ctx.fillRect(s.x - 0.75, s.y - 0.75, 1.5, 1.5);
           continue;
         }
-        const size = iconSize * p.size * (0.45 + 0.55 * s.z);
-        ctx.globalAlpha = intro * Math.min(1, 0.15 + s.z) * twinkle;
-        const sprite = sprites[p.cream ? 1 : 0][p.icon];
-        if (sprite.complete && sprite.naturalWidth) ctx.drawImage(sprite, s.x - size / 2, s.y - size / 2, size, size);
-        else { ctx.fillStyle = GOLD; ctx.fillRect(s.x - 1, s.y - 1, 2, 2); }
+        const twinkle = dive > 0.3 ? 1 : 0.86 + 0.14 * Math.sin(t * 0.003 + p.phase);
+        ctx.globalAlpha = intro * Math.min(1, 0.12 + s.z * 1.1) * twinkle;
+        if (photoTiles.length) {
+          ctx.drawImage(photoTiles[p.pick % photoTiles.length], s.x - size / 2, s.y - size / 2, size, size);
+        } else {
+          const icon = iconTiles[p.pick % iconTiles.length];
+          if (icon.complete && icon.naturalWidth) ctx.drawImage(icon, s.x - size / 2, s.y - size / 2, size, size);
+        }
       }
       ctx.globalAlpha = 1;
 
       if (t > FADE_IN - 100) {
         // Trail along the finished legs and the current one, lifted above the surface.
-        ctx.lineWidth = 2;
+        const trailFade = 1 - dive;
+        ctx.lineWidth = 2.5;
         ctx.lineCap = 'round';
-        for (let l = 0; l <= leg; l++) {
+        for (let l = 0; l <= leg && trailFade > 0.02; l++) {
           const upto = l < leg ? 1 : legT;
           ctx.beginPath();
           let started = false;
@@ -207,27 +256,29 @@ export const GlobeIntro = ({ onDone }) => {
             if (s.z < -0.05) { started = false; continue; }
             if (!started) { ctx.moveTo(s.x, s.y); started = true; } else ctx.lineTo(s.x, s.y);
           }
-          ctx.strokeStyle = l < leg ? 'rgba(212,175,90,0.55)' : GOLD;
+          ctx.globalAlpha = trailFade;
+          ctx.strokeStyle = l < leg ? 'rgba(243,226,176,0.7)' : CREAM;
           ctx.setLineDash(l < leg ? [3, 6] : []);
           ctx.stroke();
         }
         ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
 
         // Stops the plane has reached: a ring that pulses out, and the place name.
         stops.forEach((stop, i) => {
           const reachedAt = FADE_IN + LEG * i;
           if (t < reachedAt - 60) return;
+          const last = i === stops.length - 1;
+          if (!last && dive > 0.6) return;
           const s = project(stop.at[0], stop.at[1]);
           if (s.z <= 0.05) return;
           const age = (t - reachedAt) / 1000;
-          const last = i === stops.length - 1;
           ctx.fillStyle = last ? CREAM : GOLD;
-          ctx.beginPath(); ctx.arc(s.x, s.y, last ? 5 : 3.5, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(s.x, s.y, last ? 6 : 4, 0, Math.PI * 2); ctx.fill();
           const ring = (age % 1.4) / 1.4;
-          ctx.strokeStyle = `rgba(243,226,176,${(1 - ring) * 0.8})`;
-          ctx.lineWidth = 1.5;
-          ctx.beginPath(); ctx.arc(s.x, s.y, 4 + ring * (last ? 34 : 20), 0, Math.PI * 2); ctx.stroke();
-          // Name shows while it's the latest stop (Ghana stays).
+          ctx.strokeStyle = `rgba(243,226,176,${(1 - ring) * 0.85})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(s.x, s.y, 5 + ring * (last ? 46 : 22), 0, Math.PI * 2); ctx.stroke();
           const nextAt = reachedAt + LEG;
           const showing = last || t < nextAt + 200;
           if (!showing) return;
@@ -237,12 +288,12 @@ export const GlobeIntro = ({ onDone }) => {
           ctx.textBaseline = 'middle';
           const label = `${stop.name} · ${stop.country}`;
           const w = ctx.measureText(label).width;
-          const lx = s.x + 12; const ly = s.y - 16;
-          ctx.fillStyle = 'rgba(14,12,9,0.78)';
+          const lx = s.x + 14; const ly = s.y - 18;
+          ctx.fillStyle = 'rgba(14,12,9,0.85)';
           ctx.beginPath();
-          if (ctx.roundRect) ctx.roundRect(lx - 7, ly - 11, w + 14, 22, 11); else ctx.rect(lx - 7, ly - 11, w + 14, 22);
+          if (ctx.roundRect) ctx.roundRect(lx - 8, ly - 12, w + 16, 24, 12); else ctx.rect(lx - 8, ly - 12, w + 16, 24);
           ctx.fill();
-          ctx.strokeStyle = 'rgba(212,175,90,0.5)'; ctx.lineWidth = 1; ctx.stroke();
+          ctx.strokeStyle = 'rgba(212,175,90,0.6)'; ctx.lineWidth = 1; ctx.stroke();
           ctx.fillStyle = last ? CREAM : '#e9e2d4';
           ctx.fillText(label, lx, ly + 0.5);
           ctx.globalAlpha = 1;
@@ -258,10 +309,10 @@ export const GlobeIntro = ({ onDone }) => {
           ctx.save();
           ctx.translate(here.x, here.y);
           ctx.rotate(Number.isFinite(angle) ? angle : 0);
-          const scale = (isPhone ? 0.75 : 0.95) * (0.8 + 0.2 * here.z);
+          const scale = (isPhone ? 0.8 : 1) * (0.8 + 0.2 * here.z);
           ctx.scale(scale, scale);
-          ctx.shadowColor = 'rgba(212,175,90,0.9)';
-          ctx.shadowBlur = 14;
+          ctx.shadowColor = 'rgba(212,175,90,0.95)';
+          ctx.shadowBlur = 16;
           ctx.fillStyle = CREAM;
           ctx.fill(PLANE);
           ctx.restore();
@@ -273,11 +324,26 @@ export const GlobeIntro = ({ onDone }) => {
       if (t >= DONE_AT) { end(); return; }
       raf = requestAnimationFrame(frame);
     };
-    raf = requestAnimationFrame(frame);
+
+    // Get the photos ready first (up to a couple of seconds), then roll.
+    (async () => {
+      const deadline = performance.now() + PHOTO_WAIT;
+      while (photosRef.current.length < 8 && performance.now() < deadline - 900) await sleep(100);
+      const urls = [...new Set(photosRef.current)].slice(0, 36);
+      const loads = Promise.all(urls.map(loadPhoto)).then((tiles) => tiles.filter(Boolean));
+      const tiles = await Promise.race([loads, sleep(Math.max(300, deadline - performance.now())).then(() => null)]);
+      if (cancelled) return;
+      photoTiles = tiles || [];
+      // Any photos that finish a moment later still join in.
+      if (!tiles) loads.then((late) => { if (!cancelled && late.length) photoTiles = late; });
+      setPhase('flying');
+      raf = requestAnimationFrame(frame);
+    })();
 
     const onKey = (e) => { if (e.key === 'Escape') finish.current(); };
     window.addEventListener('keydown', onKey);
     return () => {
+      cancelled = true;
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', resize);
       window.removeEventListener('keydown', onKey);
@@ -287,6 +353,7 @@ export const GlobeIntro = ({ onDone }) => {
   return (
     <div className={`gi is-${phase}`} role="dialog" aria-modal="true" aria-label="CHARI intro">
       <canvas ref={canvasRef} className="gi-canvas" aria-hidden="true" />
+      <div className="gi-loading" aria-hidden="true"><span /></div>
       <p className="gi-caption" aria-hidden="true">Sourcing from suppliers around the world…</p>
       <div className="gi-title">
         <img src="/chari-mark.jpg" alt="" width="64" height="64" />
