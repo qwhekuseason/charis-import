@@ -10,6 +10,9 @@ import { HiddenGem } from '../components/HiddenGem';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// Where customers find things — scrolls past in the band under the hero.
+const SOURCES = ['Shein', '1688', 'Alibaba', 'Taobao', 'TikTok Shop', 'Instagram', 'AliExpress'];
+
 const BATCH_STAGE_LABELS = {
   CONFIRMED: 'Booking orders now',
   QC_BATCHING: 'Being checked and packed',
@@ -65,9 +68,9 @@ const ProductRail = ({ products, onSeeAll, seeAllLabel, label, showMore = true }
     <div className="hm-rail-wrap">
       <button type="button" className="hm-rail-arrow is-prev" onClick={() => scrollRail(-1)} disabled={edges.start} aria-label={`Scroll ${label} back`}><ChevronLeft size={20} /></button>
       <div className="hm-rail" ref={railRef} onScroll={updateEdges} role="list" aria-label={label}>
-        {products.map((product) => <div role="listitem" key={product.id}><ProductCard product={product} /></div>)}
+        {products.map((product, i) => <div role="listitem" key={product.id} data-reveal style={{ '--i': Math.min(i, 5) }}><ProductCard product={product} /></div>)}
         {showMore && (
-          <div role="listitem">
+          <div role="listitem" data-reveal style={{ '--i': Math.min(products.length, 5) }}>
             <button type="button" className="hm-rail-more" onClick={onSeeAll}>
               <span className="hm-rail-more-icon"><ArrowRight size={20} /></span>
               {seeAllLabel}
@@ -127,6 +130,41 @@ export const HomePage = () => {
   const [moreFilter, setMoreFilter] = useState('all');
   const [activeBatch, setActiveBatch] = useState(null);
   const [heroSearch, setHeroSearch] = useState('');
+  const homeRef = useRef(null);
+
+  // Sections fade up as they scroll into view. Skipped for people who ask their device for less motion,
+  // and nothing is hidden unless this runs, so the page never ends up blank.
+  useEffect(() => {
+    const root = homeRef.current;
+    if (!root || !('IntersectionObserver' in window)) return undefined;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined;
+    root.classList.add('hm-animate');
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add('is-in');
+        io.unobserve(entry.target);
+      });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
+    const watch = () => root.querySelectorAll('[data-reveal]:not(.is-in)').forEach((el) => io.observe(el));
+    watch();
+    // Products arrive after the first paint — watch them too.
+    const mo = new MutationObserver(watch);
+    mo.observe(root, { childList: true, subtree: true });
+    return () => { io.disconnect(); mo.disconnect(); };
+  }, []);
+
+  // Desktop: the hero photos drift a little with the mouse, each at its own depth.
+  const onHeroPointer = (e) => {
+    if (e.pointerType !== 'mouse') return;
+    const box = e.currentTarget.getBoundingClientRect();
+    e.currentTarget.style.setProperty('--mx', ((e.clientX - box.left) / box.width - 0.5).toFixed(3));
+    e.currentTarget.style.setProperty('--my', ((e.clientY - box.top) / box.height - 0.5).toFixed(3));
+  };
+  const resetHeroPointer = (e) => {
+    e.currentTarget.style.setProperty('--mx', '0');
+    e.currentTarget.style.setProperty('--my', '0');
+  };
   const now = Date.now();
 
   useEffect(() => {
@@ -199,15 +237,25 @@ export const HomePage = () => {
   const tileCategories = categories.slice(0, 7);
 
   return (
-    <div className="home hm">
+    <div className="home hm" ref={homeRef}>
       {/* Hero — ink, like the logo */}
-      <section className="hm-hero">
+      <section className="hm-hero" onPointerMove={onHeroPointer} onPointerLeave={resetHeroPointer}>
+        {/* A plane flies a gold route across the hero, like the one circling the logo */}
+        <svg className="hm-flight" viewBox="0 0 1200 640" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+          <path id="hm-route" className="hm-flight-route" d="M -60 560 C 220 520 360 300 600 260 S 980 120 1260 -40" />
+          <g className="hm-flight-plane">
+            <path d="M14 0 L-6 -3.2 L-10 -12 L-14 -12 L-10 -2.6 L-16 -2 L-19 -6 L-21 -6 L-19.5 0 L-21 6 L-19 6 L-16 2 L-10 2.6 L-14 12 L-10 12 L-6 3.2 Z" />
+            <animateMotion dur="14s" repeatCount="indefinite" rotate="auto" keyPoints="0;1" keyTimes="0;1" calcMode="linear">
+              <mpath href="#hm-route" />
+            </animateMotion>
+          </g>
+        </svg>
         <div className="container hm-hero-grid">
           <div className="hm-hero-copy">
             <span className="hm-eyebrow"><Plane size={14} aria-hidden="true" /> Direct imports, delivered across Ghana</span>
             <h1 className="hm-hero-title">
-              See it. Send it.<br />
-              <em>We'll source it.</em>
+              <span className="hm-line"><span>See it. Send it.</span></span>
+              <span className="hm-line"><em>We'll source it.</em></span>
               <HiddenGem spot="home-hero" />
             </h1>
             <p className="hm-hero-text">
@@ -274,7 +322,7 @@ export const HomePage = () => {
       {/* How it works — replaces the small-print notice */}
       <section className="container hm-how" aria-labelledby="hm-how-title">
         <h2 id="hm-how-title" className="sr-only">How ordering works</h2>
-        <ol className="hm-how-steps">
+        <ol className="hm-how-steps" data-reveal>
           <li>
             <span className="hm-how-num">1</span>
             <div>
@@ -302,9 +350,25 @@ export const HomePage = () => {
         </button>
       </section>
 
+      {/* Where customers find things — a slow ticker */}
+      <section className="hm-ticker" aria-label="Where we can buy from">
+        <div className="hm-ticker-track">
+          {[0, 1].map((copy) => (
+            <div className="hm-ticker-group" key={copy} aria-hidden={copy === 1 ? 'true' : undefined}>
+              <span className="hm-ticker-lead">We buy from</span>
+              {SOURCES.map((name) => (
+                <span key={name} className="hm-ticker-item">{name}<i aria-hidden="true">✦</i></span>
+              ))}
+              <span className="hm-ticker-lead">and deliver across Ghana</span>
+              <i className="hm-ticker-sep" aria-hidden="true">✦</i>
+            </div>
+          ))}
+        </div>
+      </section>
+
       {/* Categories — one tidy row of tiles; the last one opens the full list */}
       <section className="container home-section">
-        <div className="hm-head">
+        <div className="hm-head" data-reveal>
           <h2>Shop by category <HiddenGem spot="home-categories" /></h2>
           <button type="button" className="hm-head-link" onClick={() => navigate('categories')}>All categories <ArrowRight size={15} /></button>
         </div>
@@ -312,14 +376,14 @@ export const HomePage = () => {
           {catalogStatus === 'loading' && categories.length === 0 && [...Array(8)].map((_, i) => (
             <div key={i} className="hm-cat is-loading" aria-hidden="true"><span className="hm-cat-img" /><span className="hm-cat-name">&nbsp;</span></div>
           ))}
-          {tileCategories.map((cat) => (
-            <button type="button" key={cat.id} className="hm-cat" onClick={() => openCategory(cat.slug)}>
+          {tileCategories.map((cat, i) => (
+            <button type="button" key={cat.id} className="hm-cat" data-reveal style={{ '--i': i }} onClick={() => openCategory(cat.slug)}>
               <span className="hm-cat-img"><SmartImage src={sizedImage(cat.image, 240)} alt="" width="120" height="120" loading="lazy" /></span>
               <span className="hm-cat-name">{cat.name}</span>
             </button>
           ))}
           {categories.length > tileCategories.length && (
-            <button type="button" className="hm-cat is-more" onClick={() => navigate('categories')}>
+            <button type="button" className="hm-cat is-more" data-reveal style={{ '--i': tileCategories.length }} onClick={() => navigate('categories')}>
               <span className="hm-cat-img"><span>+{categories.length - tileCategories.length}</span></span>
               <span className="hm-cat-name">More</span>
             </button>
@@ -330,7 +394,7 @@ export const HomePage = () => {
       {/* Deals — an ink panel with the countdown, beside the deal products */}
       {dealProducts.length > 0 && (
         <section className="container home-section">
-          <div className="hm-deals">
+          <div className="hm-deals" data-reveal>
             <div className="hm-deals-intro">
               <span className="hm-eyebrow">{hasLiveDeals ? 'Limited time' : 'Price drops'}</span>
               <h2>{hasLiveDeals ? 'Deals' : 'On sale'}</h2>
@@ -352,7 +416,7 @@ export const HomePage = () => {
       {/* Popular */}
       {popularProducts.length > 0 && (
         <section className="container home-section">
-          <div className="hm-head">
+          <div className="hm-head" data-reveal>
             <h2>Popular right now</h2>
             <button type="button" className="hm-head-link" onClick={() => navigate('shop')}>See all <ArrowRight size={15} /></button>
           </div>
@@ -362,7 +426,7 @@ export const HomePage = () => {
 
       {/* Request an item + invite a friend */}
       <section className="container home-section hm-promos">
-        <div className="hm-promo is-ink">
+        <div className="hm-promo is-ink" data-reveal>
           <span className="hm-promo-icon"><Link2 size={20} aria-hidden="true" /></span>
           <h2>Can't find what you want?</h2>
           <p>Send us a link or photo from 1688, Taobao, Shein or Instagram. We'll buy it, clear customs and deliver it to you.</p>
@@ -378,7 +442,7 @@ export const HomePage = () => {
             </a>
           </div>
         </div>
-        <div className="hm-promo is-gold">
+        <div className="hm-promo is-gold" data-reveal style={{ '--i': 1 }}>
           <span className="hm-promo-icon"><Gift size={20} aria-hidden="true" /></span>
           <h2>Give GH₵25, get GH₵25</h2>
           <p>Your friend gets GH₵25 off their first order. You get GH₵25 store credit when they pay.</p>
@@ -390,7 +454,7 @@ export const HomePage = () => {
 
       {/* More products */}
       <section className="container home-section">
-        <div className="hm-head">
+        <div className="hm-head" data-reveal>
           <h2>More to explore</h2>
           <div className="hm-chips" role="tablist" aria-label="Filter products">
             {[
@@ -418,7 +482,9 @@ export const HomePage = () => {
         ) : moreProducts.length > 0 ? (
           <>
             <div className="products-grid hm-grid">
-              {moreProducts.map((product) => <ProductCard key={product.id} product={product} />)}
+              {moreProducts.map((product, i) => (
+                <div key={product.id} className="hm-grid-item" data-reveal style={{ '--i': i % 4 }}><ProductCard product={product} /></div>
+              ))}
             </div>
             {products.length > moreProducts.length && (
               <div className="hm-more">
@@ -438,12 +504,12 @@ export const HomePage = () => {
       {/* Reviews — real customer reviews only */}
       {customerReviews.length > 0 && (
         <section className="container home-section">
-          <div className="hm-head">
+          <div className="hm-head" data-reveal>
             <h2>What customers say</h2>
           </div>
           <div className="hm-reviews">
             {customerReviews.map((r) => (
-              <figure key={r.id} className="hm-review">
+              <figure key={r.id} className="hm-review" data-reveal>
                 <span className="hm-review-stars" aria-label={`${r.rating} out of 5 stars`}>{'★'.repeat(Math.round(r.rating))}</span>
                 <blockquote>“{r.comment}”</blockquote>
                 <figcaption>{r.userName}{r.userCity ? ` · ${r.userCity}` : ''}</figcaption>
@@ -455,7 +521,7 @@ export const HomePage = () => {
 
       {/* Contact */}
       <section className="container home-section">
-        <div className="hm-contact">
+        <div className="hm-contact" data-reveal>
           <div>
             <h2>Have a question?</h2>
             <p>Ask about sizes, bulk orders or delivery. We reply on WhatsApp every day.</p>
