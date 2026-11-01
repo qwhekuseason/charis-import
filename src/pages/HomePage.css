@@ -304,3 +304,6 @@
   .hm-mosaic-tile { translate: none; }
   .hm-hero-title em { animation: none; background: none; color: var(--gold-bright); }
 }
+
+/* While the globe intro plays, the hero's own opening waits, then runs as the intro lifts. */
+.hm-intro-on .hm-hero, .hm-intro-on .hm-hero *, .hm-intro-on .hm-hero::before, .hm-intro-on .hm-hero::after { animation-play-state: paused !important; }

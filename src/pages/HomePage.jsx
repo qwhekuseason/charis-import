@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { useStore } from '../context/StoreContext';
 import { ProductCard } from '../components/ProductCard';
 import { SmartImage } from '../components/SmartImage';
@@ -6,6 +6,19 @@ import { getActiveBatches } from '../services/api';
 import { sizedImage } from '../utils/images';
 import { ArrowRight, Search, Smartphone, ShieldCheck, Truck, ChevronLeft, ChevronRight, Plane, PackagePlus, Link2, Gift, MessageCircle, Clock } from 'lucide-react';
 import './HomePage.css';
+
+// The globe intro's code only downloads when it actually plays.
+const GlobeIntro = lazy(() => import('../components/GlobeIntro').then((m) => ({ default: m.GlobeIntro })));
+const INTRO_KEY = 'chari_intro_seen';
+// Once per visit, and never for people who ask their device for less motion.
+const shouldPlayIntro = () => {
+  try {
+    if (sessionStorage.getItem(INTRO_KEY)) return false;
+    return !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
+};
 import { HiddenGem } from '../components/HiddenGem';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -131,6 +144,17 @@ export const HomePage = () => {
   const [activeBatch, setActiveBatch] = useState(null);
   const [heroSearch, setHeroSearch] = useState('');
   const homeRef = useRef(null);
+  const [introOn, setIntroOn] = useState(shouldPlayIntro);
+  const endIntro = useCallback(() => setIntroOn(false), []);
+
+  // Remember it played (even if the page is refreshed half-way), and keep the page still behind it.
+  useEffect(() => {
+    if (!introOn) return undefined;
+    try { sessionStorage.setItem(INTRO_KEY, '1'); } catch { /* private mode */ }
+    const { overflow } = document.body.style;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = overflow; };
+  }, [introOn]);
 
   // Sections fade up as they scroll into view. Skipped for people who ask their device for less motion,
   // and nothing is hidden unless this runs, so the page never ends up blank.
@@ -237,7 +261,12 @@ export const HomePage = () => {
   const tileCategories = categories.slice(0, 7);
 
   return (
-    <div className="home hm" ref={homeRef}>
+    <div className={`home hm ${introOn ? 'hm-intro-on' : ''}`} ref={homeRef}>
+      {introOn && (
+        <Suspense fallback={<div style={{ position: 'fixed', inset: 0, zIndex: 3000, background: '#0e0c09' }} />}>
+          <GlobeIntro onDone={endIntro} />
+        </Suspense>
+      )}
       {/* Hero — ink, like the logo */}
       <section className="hm-hero" onPointerMove={onHeroPointer} onPointerLeave={resetHeroPointer}>
         {/* A plane flies a gold route across the hero, like the one circling the logo */}
