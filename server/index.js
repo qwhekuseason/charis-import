@@ -65,9 +65,8 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024 }, // 15MB max file size
   fileFilter: (req, file, cb) => {
-    const allowed = /jpeg|jpg|png|webp|gif|avif/;
-    const extname = allowed.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = allowed.test(file.mimetype);
+    const extname = /^\.(jpe?g|png|webp|gif|avif)$/.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = /^image\/(jpeg|png|webp|gif|avif)$/.test(file.mimetype);
     if (extname && mimetype) {
       return cb(null, true);
     }
@@ -80,8 +79,9 @@ const requestPhotoUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024, files: 1 },
   fileFilter: (req, file, cb) => {
-    const allowed = /jpeg|jpg|png|webp|avif/;
-    if (allowed.test(path.extname(file.originalname).toLowerCase()) && allowed.test(file.mimetype)) return cb(null, true);
+    const okExt = /^\.(jpe?g|png|webp|avif)$/.test(path.extname(file.originalname).toLowerCase());
+    const okType = /^image\/(jpeg|png|webp|avif)$/.test(file.mimetype);
+    if (okExt && okType) return cb(null, true);
     cb(new Error('Please choose a photo (JPG, PNG or WEBP).'));
   },
 });
@@ -155,11 +155,20 @@ const rateLimit = ({ windowMs, max, message }) => {
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: 'Too many attempts. Please wait 15 minutes and try again.' });
 const inquiryLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 8, message: 'Too many messages sent. Please wait a few minutes or chat with us on WhatsApp.' });
 const trackLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: 'Too many tracking lookups. Please wait a few minutes and try again.' });
+// Promo codes are short words, so checking them is limited to stop anyone trying thousands to find one.
+// (Generous enough for a shopper changing quantities in the cart, which re-checks the code.)
+const promoLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 60, message: 'Too many promo code checks. Please wait a few minutes and try again.' });
 
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use('/uploads', express.static(uploadsDir));
+// Uploaded files are only ever shown as pictures: browsers must not guess another type or run anything in them.
+app.use('/uploads', express.static(uploadsDir, {
+  setHeaders: (res) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
+  },
+}));
 
 // Request logger
 app.use((req, res, next) => {
@@ -413,15 +422,17 @@ app.get('/api/auth/me', authenticateUser, async (req, res) => {
 // PUT /api/auth/profile (Update personal profile)
 app.put('/api/auth/profile', authenticateUser, async (req, res) => {
   try {
+    // Plain, length-capped text only.
+    const clean = (value, max) => String(value).trim().slice(0, max);
     const { name, phone, city, address } = req.body;
 
     const updated = await prisma.user.update({
       where: { id: req.user.id },
       data: {
-        ...(name && { name: name.trim() }),
-        ...(phone !== undefined && { phone: phone ? phone.trim() : null }),
-        ...(city && { city: city.trim() }),
-        ...(address !== undefined && { address: address ? address.trim() : null }),
+        ...(name && { name: clean(name, 100) }),
+        ...(phone !== undefined && { phone: phone ? clean(phone, 30) : null }),
+        ...(city && { city: clean(city, 80) }),
+        ...(address !== undefined && { address: address ? clean(address, 300) : null }),
       },
       select: {
         id: true,
@@ -1548,7 +1559,7 @@ app.post('/api/inquiries/photo', requestPhotoLimiter, (req, res) => {
         const result = await uploadToCloudinary(req.file.buffer, 'chari/requests');
         url = optimizedImageUrl(result.public_id);
       } else {
-        const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
+        const ext = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/avif': '.avif' }[req.file.mimetype] || '.jpg';
         const filename = `req-${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ext}`;
         await fs.promises.writeFile(path.join(uploadsDir, filename), req.file.buffer);
         url = `/uploads/${filename}`;
@@ -1567,7 +1578,8 @@ app.post('/api/inquiries', inquiryLimiter, async (req, res) => {
     const phone = String(req.body.phone || '').trim().slice(0, 30);
     const email = String(req.body.email || '').trim().slice(0, 120);
     const subject = String(req.body.subject || 'General question').trim().slice(0, 80);
-    let message = String(req.body.message || '').trim().slice(0, 4000);
+    // Lines starting "Photo:" are reserved for photos we stored, so a customer can't type their own link there.
+    let message = String(req.body.message || '').replace(/^[ \t]*photo:.*$/gim, '').trim().slice(0, 4000);
     // A photo uploaded with "Request an item" — kept as a line the admin page turns into a thumbnail.
     if (req.body.photoUrl && isOurRequestPhoto(req.body.photoUrl)) message = `${message}\nPhoto: ${req.body.photoUrl}`;
 
@@ -1804,7 +1816,7 @@ async function evaluateDiscount(code, subtotal) {
   return { valid: true, discount, code: discount.code, discountAmount };
 }
 
-app.post('/api/discounts/validate', async (req, res) => {
+app.post('/api/discounts/validate', promoLimiter, async (req, res) => {
   try {
     const { code, subtotal } = req.body;
     if (!code) {

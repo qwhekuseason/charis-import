@@ -1306,6 +1306,11 @@ const ShipmentsTab = ({ batches, setBatches }) => {
 // ---------------------------------------------------------------------------
 // Messages
 // ---------------------------------------------------------------------------
+// A request photo our server stored (local upload or our Cloudinary folder) — never a link a customer typed.
+const isStoredRequestPhoto = (url) =>
+  /^\/uploads\/req-[a-z0-9-]+\.(jpe?g|png|webp|avif)$/i.test(url || '') ||
+  /^https:\/\/res\.cloudinary\.com\/[a-z0-9_-]+\/image\/upload\/[^\s"'<>]*\/chari\/requests\/[^\s"'<>]+$/i.test(url || '');
+
 // "5 min ago", "3 hrs ago", "yesterday", then the date.
 const timeAgo = (d) => {
   const mins = Math.round((Date.now() - new Date(d).getTime()) / 60000);
@@ -1383,7 +1388,8 @@ const MessagesTab = ({ messages, setMessages }) => {
             const isRequest = /^item request/i.test(m.subject || '');
             const lines = String(m.message || '').split('\n');
             // Item requests can carry a "Photo: <link>" line — show it as a picture instead of text.
-            const photo = lines.find((l) => l.startsWith('Photo: '))?.slice(7);
+            // Only links to photos our own server stored count; anything a customer typed stays plain text.
+            const photo = lines.map((l) => (l.startsWith('Photo: ') ? l.slice(7).trim() : '')).find(isStoredRequestPhoto);
             return (
               <article key={m.id} className={`adm-card adm-msg ${status === 'NEW' ? 'is-new' : ''}`} aria-busy={busy === m.id}>
                 <header className="adm-card-head">
@@ -1393,7 +1399,7 @@ const MessagesTab = ({ messages, setMessages }) => {
                   </div>
                   <span className="adm-muted" title={new Date(m.createdAt).toLocaleString('en-GB')}>{timeAgo(m.createdAt)}</span>
                 </header>
-                <p className="adm-message">{lines.filter((l) => !l.startsWith('Photo: ')).join('\n')}</p>
+                <p className="adm-message">{lines.filter((l) => !(l.startsWith('Photo: ') && l.slice(7).trim() === photo)).join('\n')}</p>
                 {photo && (
                   <a className="adm-message-photo" href={photo} target="_blank" rel="noreferrer" title="Open the customer's photo">
                     <SmartImage src={sizedImage(photo, 240)} alt="Photo sent by the customer" fallbackLabel="Open photo" />
