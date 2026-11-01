@@ -7,10 +7,14 @@ import nodemailer from 'nodemailer';
 // Both are optional: if the keys aren't set, the shop works exactly the same, just without them.
 //
 //   VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY  → phone alerts   (create with: npm run push-keys)
-//   SMTP_URL + MAIL_FROM                  → customer emails (Gmail app password, Brevo, etc.)
+//   BREVO_API_KEY + MAIL_FROM             → customer emails over HTTPS (works on Render's free plan,
+//                                           which blocks the ports normal email servers use)
+//   SMTP_URL + MAIL_FROM                  → customer emails over SMTP (Gmail app password etc. —
+//                                           only on hosts that allow outgoing SMTP)
 // ---------------------------------------------------------------------------
 
-const SITE_URL = (process.env.SITE_URL || 'https://charis-import.onrender.com').replace(/\/$/, '');
+// The shop customers use — links in emails (track order, reset password) open here.
+const SITE_URL = (process.env.SITE_URL || 'https://charis-import.vercel.app').replace(/\/$/, '');
 
 export const pushEnabled = Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
 if (pushEnabled) {
@@ -22,19 +26,38 @@ if (pushEnabled) {
 }
 export const pushPublicKey = () => (pushEnabled ? process.env.VAPID_PUBLIC_KEY : null);
 
+const BREVO_API_KEY = (process.env.BREVO_API_KEY || '').trim();
 let mailer = null;
-if (process.env.SMTP_URL) {
+if (!BREVO_API_KEY && process.env.SMTP_URL) {
   try {
-    mailer = nodemailer.createTransport(process.env.SMTP_URL);
+    const url = new URL(process.env.SMTP_URL);
+    const secure = url.protocol === 'smtps:';
+    mailer = nodemailer.createTransport({
+      host: url.hostname,
+      port: Number(url.port) || (secure ? 465 : 587),
+      secure,
+      auth: url.username ? { user: decodeURIComponent(url.username), pass: decodeURIComponent(url.password) } : undefined,
+      // Give up quickly instead of hanging for minutes when the host blocks email ports.
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 20000,
+    });
   } catch (err) {
     console.error('⚠️  SMTP_URL is not valid — customer emails are off:', err.message);
   }
 }
-export const emailEnabled = Boolean(mailer);
+export const emailEnabled = Boolean(BREVO_API_KEY || mailer);
 const MAIL_FROM = process.env.MAIL_FROM || 'CHARI <princessarmah514@gmail.com>';
+// "CHARI <name@gmail.com>" → { name: 'CHARI', email: 'name@gmail.com' }
+const fromParts = (() => {
+  const m = /^\s*"?([^"<]*?)"?\s*<\s*([^>\s]+)\s*>\s*$/.exec(MAIL_FROM);
+  return m ? { name: m[1] || 'CHARI', email: m[2] } : { name: 'CHARI', email: MAIL_FROM.trim() };
+})();
 
 console.log(pushEnabled ? '🔔 Admin phone alerts are on' : '🔕 Admin phone alerts off (set VAPID keys to turn on)');
-console.log(emailEnabled ? '📧 Customer emails are on' : '📭 Customer emails off (set SMTP_URL to turn on)');
+console.log(BREVO_API_KEY ? '📧 Customer emails are on (Brevo)'
+  : mailer ? '📧 Customer emails are on (SMTP)'
+    : '📭 Customer emails off (set BREVO_API_KEY or SMTP_URL to turn on)');
 
 // ---------------------------------------------------------------------------
 // Push subscriptions — one per admin device, kept in StoreSetting 'adminPushSubscriptions'
@@ -152,9 +175,19 @@ const layout = ({ heading, intro, order, extra = '' }) => {
 };
 
 const send = async (to, subject, html) => {
-  if (!mailer || !to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return false;
+  if (!emailEnabled || !to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return false;
   try {
-    await mailer.sendMail({ from: MAIL_FROM, to, subject, html });
+    if (BREVO_API_KEY) {
+      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: { 'api-key': BREVO_API_KEY, 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({ sender: fromParts, to: [{ email: to }], subject, htmlContent: html }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!res.ok) throw new Error(`Brevo replied ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    } else {
+      await mailer.sendMail({ from: MAIL_FROM, to, subject, html });
+    }
     return true;
   } catch (err) {
     console.warn('Email failed:', err.message);

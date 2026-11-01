@@ -494,7 +494,7 @@ app.post('/api/auth/forgot-password', forgotLimiter, async (req, res) => {
   }
   // Without email set up there is no way to deliver the link, so say so instead of pretending.
   if (!emailEnabled) {
-    console.warn('Password reset requested but SMTP_URL is not set — no email sent.');
+    console.warn('Password reset requested but email is not set up (BREVO_API_KEY or SMTP_URL) — no email sent.');
     return res.status(503).json({ success: false, emailUnavailable: true, error: 'Password reset by email isn\'t available right now. Please contact us on WhatsApp.' });
   }
   try {
@@ -505,8 +505,11 @@ app.post('/api/auth/forgot-password', forgotLimiter, async (req, res) => {
         where: { id: user.id },
         data: { resetTokenHash: hashResetToken(token), resetTokenExpires: new Date(Date.now() + RESET_TTL_MS) },
       });
-      const sent = await emailPasswordReset(user, passwordResetUrl(token));
-      console.log(`🔑 Password reset requested for ${email}${sent ? '' : ' (email failed to send)'}`);
+      // Sent in the background: the customer gets an answer straight away, and the reply takes
+      // the same time whether or not the account exists.
+      emailPasswordReset(user, passwordResetUrl(token))
+        .then((sent) => console.log(`🔑 Password reset requested for ${email}${sent ? ' — email sent' : ' — email FAILED to send (see "Email failed" above)'}`))
+        .catch(() => {});
     }
     // Same answer either way, so this form can't be used to find out who has an account.
     res.json({ success: true, message: 'If an account exists for that email, we have sent a reset link.' });
@@ -1529,7 +1532,10 @@ app.patch('/api/orders/:id/status', authenticateUser, requireAdmin, async (req, 
     await refundCreditIfCancelled(updated);
 
     // Tell the customer by email (only if they gave one and the status really changed).
-    const emailed = await emailOrderUpdate(before, updated);
+    // Sent in the background so the admin page never waits on the email service.
+    const statusChanged = before.orderStatus !== updated.orderStatus || before.paymentStatus !== updated.paymentStatus;
+    const emailed = emailEnabled && Boolean(updated.email) && statusChanged;
+    emailOrderUpdate(before, updated).catch(() => {});
 
     res.json({ success: true, data: updated, emailed });
   } catch (error) {
