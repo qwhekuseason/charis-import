@@ -1,31 +1,102 @@
-import React, { useState, useId } from 'react';
+import React, { useState, useRef } from 'react';
 import { useStore } from '../context/StoreContext';
 import { sizedImage } from '../utils/images';
+import { SmartImage } from '../components/SmartImage';
 import { GHANA_REGIONS } from '../data/products';
 import { validateDiscountCode } from '../services/api';
+import './CheckoutPage.css';
 import {
   ShoppingBag,
   Truck,
-  CreditCard,
-  Phone,
-  CheckCircle2,
-  AlertCircle,
   MessageCircle,
   ArrowRight,
-  ShieldCheck,
-  PackageCheck,
   ChevronLeft,
-  Tag,
-  Loader2,
-  Info,
+  ChevronDown,
   Ship,
   Plane,
-  Scale,
-  Lock,
-  Clock,
   Check,
-  Copy
+  Copy,
+  X,
+  MapPin,
+  Smartphone,
+  AlertCircle,
+  Lock
 } from 'lucide-react';
+
+// Delivery options shown at checkout. Fees must match DELIVERY_OPTIONS in server/index.js.
+const FREIGHT_OPTIONS = [
+  {
+    id: 'sea_freight',
+    name: 'Sea shipping',
+    type: 'SEA_FREIGHT',
+    icon: Ship,
+    cost: 35.00,
+    time: '35 – 45 working days',
+    desc: 'Shipped by sea from China to Tema Port. Most affordable.'
+  },
+  {
+    id: 'air_cargo',
+    name: 'Air shipping',
+    type: 'AIR_FREIGHT',
+    icon: Plane,
+    cost: 75.00,
+    time: '7 – 12 working days',
+    desc: 'Flown to Ghana by air cargo for quicker delivery.'
+  },
+  {
+    id: 'local_express',
+    name: 'Local delivery (Kumasi)',
+    type: 'LOCAL_DISPATCH',
+    icon: Truck,
+    cost: 40.00,
+    time: '1 – 2 working days',
+    desc: 'For items already in stock — delivered to your door in Kumasi.'
+  }
+];
+
+const MOMO_PROVIDERS = [
+  { id: 'mtn', label: 'MTN MoMo' },
+  { id: 'telecel', label: 'Telecel Cash' },
+  { id: 'at', label: 'AT Money' }
+];
+
+const money = (n) => `GH₵${Number(n || 0).toFixed(2)}`;
+const phoneDigits = (v) => String(v || '').replace(/\D/g, '');
+
+// Guests' delivery details are remembered on this device so the next order is quicker.
+const SAVED_DETAILS_KEY = 'chari_checkout_details';
+const loadSavedDetails = () => {
+  try {
+    return JSON.parse(localStorage.getItem(SAVED_DETAILS_KEY)) || {};
+  } catch {
+    return {};
+  }
+};
+
+const validateDetails = (data) => {
+  const errors = {};
+  if (!data.fullName.trim()) errors.fullName = 'Enter your name.';
+  if (!data.phone.trim()) errors.phone = 'Enter a phone number we can reach you on.';
+  else if (phoneDigits(data.phone).length < 9) errors.phone = 'This phone number looks too short.';
+  if (data.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email.trim())) errors.email = 'Check this email address, or leave it empty.';
+  if (!data.city.trim()) errors.city = 'Enter your town or suburb.';
+  if (!data.address.trim()) errors.address = 'Enter a street address or bus station.';
+  return errors;
+};
+
+const Field = ({ label, error, hint, children, htmlFor }) => (
+  <div className={`co-field ${error ? 'has-error' : ''}`}>
+    <label htmlFor={htmlFor} className="co-label">{label}</label>
+    {children}
+    {error ? (
+      <span className="co-error" id={`${htmlFor}-error`} role="alert">
+        <AlertCircle size={13} aria-hidden="true" /> {error}
+      </span>
+    ) : hint ? (
+      <span className="co-hint">{hint}</span>
+    ) : null}
+  </div>
+);
 
 export const CheckoutPage = () => {
   const {
@@ -46,7 +117,7 @@ export const CheckoutPage = () => {
   const [useCredit, setUseCredit] = useState(false);
 
   // Browser-held wallet credit (WALLET-...) can't be verified by the server, so it isn't carried into checkout.
-  const carriedPromo = pageParams?.appliedPromo && !pageParams.appliedPromo.startsWith('WALLET-') ? pageParams : null;
+  const carriedPromo = pageParams?.appliedPromo && !String(pageParams.appliedPromo).startsWith('WALLET-') ? pageParams : null;
   const [discountAmount, setDiscountAmount] = useState(carriedPromo?.discountAmount || 0);
   const [appliedPromo, setAppliedPromo] = useState(carriedPromo?.appliedPromo || '');
   const [promoInput, setPromoInput] = useState('');
@@ -61,47 +132,21 @@ export const CheckoutPage = () => {
   const estimatedActualKg = Math.round((totalItemsCount * 3.2) * 10) / 10;
   const freightCalc = calculateVolumetricFreight
     ? calculateVolumetricFreight(estimatedCbm, estimatedActualKg)
-    : { cbm: estimatedCbm, actualKg: estimatedActualKg, seaFreightGhs: 45, airFreightGhs: 95, customsDutyEst: 50 };
-
-  const FREIGHT_OPTIONS = [
-    {
-      id: 'sea_freight',
-      name: 'Sea shipping',
-      type: 'SEA_FREIGHT',
-      icon: Ship,
-      cost: 35.00,
-      time: '35 - 45 working days',
-      desc: 'Shipped safely by sea from China to Tema Port. Most affordable option.'
-    },
-    {
-      id: 'air_cargo',
-      name: 'Air shipping',
-      type: 'AIR_FREIGHT',
-      icon: Plane,
-      cost: 75.00,
-      time: '7 - 12 working days',
-      desc: 'Flown to Ghana by air cargo for quicker delivery.'
-    },
-    {
-      id: 'local_express',
-      name: 'Local delivery (Kumasi)',
-      type: 'LOCAL_DISPATCH',
-      icon: Truck,
-      cost: 40.00,
-      time: '1 - 2 working days',
-      desc: 'For items already in stock — delivered to your door in Kumasi.'
-    }
-  ];
+    : { cbm: estimatedCbm, actualKg: estimatedActualKg };
 
   const [selectedShipping, setSelectedShipping] = useState(FREIGHT_OPTIONS[0]);
-  const [paymentMethod, setPaymentMethod] = useState('momo');
   const [momoProvider, setMomoProvider] = useState('mtn');
   const [momoNumber, setMomoNumber] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [placedOrderDetails, setPlacedOrderDetails] = useState(null);
   const [termsAgreed, setTermsAgreed] = useState(false);
+  const [termsError, setTermsError] = useState(false);
   const [step, setStep] = useState(1);
   const [copiedField, setCopiedField] = useState(null);
+  const [errors, setErrors] = useState({});
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const formRef = useRef(null);
+  const termsRef = useRef(null);
 
   const handleCopy = (text, fieldName, label) => {
     try {
@@ -116,22 +161,32 @@ export const CheckoutPage = () => {
         document.body.removeChild(textArea);
       }
       setCopiedField(fieldName);
-      showToast(`${label} copied to clipboard!`, 'success');
+      showToast(`${label} copied`, 'success');
       setTimeout(() => setCopiedField(null), 2500);
     } catch {
       showToast(`Copied: ${text}`, 'info');
     }
   };
 
-  const [formData, setFormData] = useState({
-    fullName: user?.name || '',
-    phone: user?.phone || '',
-    email: user?.email || '',
-    region: user?.city?.includes('Accra') ? 'Greater Accra' : 'Ashanti',
-    city: user?.city || '',
-    address: user?.address || '',
-    notes: ''
+  const [formData, setFormData] = useState(() => {
+    const saved = loadSavedDetails();
+    return {
+      fullName: user?.name || saved.fullName || '',
+      phone: user?.phone || saved.phone || '',
+      email: user?.email || saved.email || '',
+      region: saved.region || (user?.city?.includes('Accra') ? 'Greater Accra' : 'Ashanti'),
+      city: user?.city || saved.city || '',
+      address: user?.address || saved.address || '',
+      notes: ''
+    };
   });
+
+  // Typing in a field clears its error straight away.
+  const updateField = (key) => (e) => {
+    const value = e.target.value;
+    setFormData((prev) => ({ ...prev, [key]: value }));
+    if (errors[key]) setErrors((prev) => ({ ...prev, [key]: undefined }));
+  };
 
   const handleApplyPromo = async (e) => {
     e.preventDefault();
@@ -144,11 +199,11 @@ export const CheckoutPage = () => {
       if (res.valid) {
         setAppliedPromo(res.code);
         setDiscountAmount(res.discountAmount);
-        showToast(res.message || `Coupon "${res.code}" applied!`, 'success');
+        showToast(res.message || `Code "${res.code}" applied`, 'success');
         setPromoInput('');
       }
     } catch (err) {
-      showToast(err.message || 'Invalid promo code', 'error');
+      showToast(err.message || 'That promo code is not valid', 'error');
     } finally {
       setValidatingPromo(false);
     }
@@ -170,60 +225,60 @@ export const CheckoutPage = () => {
   const creditUsed = useCredit ? Math.min(creditBalance, Math.max(0, cartSubtotal - effectiveDiscount)) : 0;
   const grandTotal = Math.max(0, cartSubtotal - effectiveDiscount - creditUsed + shippingCost);
 
+  const goToStep = (n) => {
+    setStep(n);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   // If cart is empty and not on confirmation
   if (cart.length === 0 && !placedOrderDetails) {
     return (
       <div className="section">
-        <div className="container" style={{ maxWidth: '600px', textAlign: 'center', padding: '60px 20px' }}>
-          <div
-            style={{
-              width: '76px',
-              height: '76px',
-              borderRadius: '24px',
-              background: 'var(--accent-subtle)',
-              border: '1.5px solid var(--accent-border)',
-              color: 'var(--accent)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '0 auto 16px'
-            }}
-          >
-            <ShoppingBag size={38} />
-          </div>
-          <h2 style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--text-primary)', marginBottom: '8px' }}>
-            Your cart is empty
-          </h2>
-          <p style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>
-            Add some products to your cart first.
-          </p>
+        <div className="container co-empty">
+          <div className="co-empty-icon"><ShoppingBag size={34} /></div>
+          <h2>Your cart is empty</h2>
+          <p>Add some products to your cart first.</p>
           <button className="btn btn-primary" onClick={() => navigate('shop')}>
-            Browse products
+            Browse products <ArrowRight size={16} />
           </button>
         </div>
       </div>
     );
   }
 
-  // Handle Step 1 submit
+  // Step 1 → 2: check every field, show what's wrong next to it, and jump to the first problem.
   const handleProceedToPayment = (e) => {
     e.preventDefault();
-    if (!formData.fullName || !formData.phone || !formData.city) {
-      showToast('Please provide your name, phone number, and delivery city.', 'warning');
+    const found = validateDetails(formData);
+    setErrors(found);
+    const first = Object.keys(found)[0];
+    if (first) {
+      const el = formRef.current?.querySelector(`[name="${first}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.focus({ preventScroll: true });
+      }
       return;
     }
-    setStep(2);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (!user) {
+      try {
+        const { notes, ...keep } = formData;
+        localStorage.setItem(SAVED_DETAILS_KEY, JSON.stringify(keep));
+      } catch {}
+    }
+    goToStep(2);
   };
 
-  // Handle final order placement with transactional metadata & row locking simulation
   const handlePlaceOrder = async () => {
+    if (isSubmitting) return;
     if (!termsAgreed) {
-      showToast('Please accept the pre-order terms before completing checkout.', 'warning');
+      setTermsError(true);
+      termsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      termsRef.current?.querySelector('input')?.focus({ preventScroll: true });
       return;
     }
-    if (paymentMethod === 'momo' && !momoNumber && !formData.phone) {
-      showToast('Please enter your Mobile Money phone number.', 'warning');
+    if (phoneDigits(momoNumber || formData.phone).length < 9) {
+      showToast('Enter the MoMo number you will pay from.', 'warning');
       return;
     }
 
@@ -237,11 +292,11 @@ export const CheckoutPage = () => {
       const newOrder = {
         orderId,
         orderCode: orderId,
-        customerName: formData.fullName,
-        phone: formData.phone,
-        email: formData.email || null,
+        customerName: formData.fullName.trim(),
+        phone: formData.phone.trim(),
+        email: formData.email.trim() || null,
         date: new Date().toISOString().split('T')[0],
-        status: paymentMethod === 'cash' ? 'order_placed' : 'processing',
+        status: 'processing',
         freightType: selectedShipping.type,
         containerNumber: null,
         flightNumber: null,
@@ -267,19 +322,10 @@ export const CheckoutPage = () => {
         city: formData.city,
         address: formData.address,
         region: formData.region,
-        paymentMethod:
-          paymentMethod === 'momo'
-            ? `${momoProvider.toUpperCase()} MoMo Transfer (${momoNumber || formData.phone})`
-            : `Pay on collection (${settings.pickupPoint})`,
+        notes: formData.notes.trim() || null,
+        // Pre-orders are paid in full up front, so Mobile Money is the only way to pay.
+        paymentMethod: `${momoProvider.toUpperCase()} MoMo Transfer (${momoNumber || formData.phone})`,
         waybillNumber: `BL-GH-${orderId}`,
-        steps: [
-          { title: 'Order Confirmed', time: 'Just Now', location: 'CHARI', done: true, note: 'Order registered and price locked in Cedis.' },
-          { title: 'Supplier Processing & Quality Check', time: '1–3 Days', location: 'Overseas Warehouse', done: false, note: 'Supplier prepares and inspects items before shipping.' },
-          { title: 'In Transit to Ghana', time: selectedShipping.type === 'SEA_FREIGHT' ? 'Sea: 35–45 days' : 'Air: 7–12 days', location: 'En Route to Ghana', done: false, note: 'Cargo moving safely to Ghana.' },
-          { title: 'Customs Clearance at Port', time: 'Pending Arrival', location: 'Tema Port / Airport', done: false, note: 'Customs duties and port clearance processed.' },
-          { title: 'Arrived in Kumasi', time: 'Pending', location: settings.pickupPoint, done: false, note: 'Sorted and prepared for local delivery.' },
-          { title: 'Out for Delivery / Ready for Pickup', time: 'Pending', location: `${formData.city}, ${formData.region}`, done: false, note: 'Delivered to your address or ready for pickup.' }
-        ]
       };
 
       const savedOrder = await addPlacedOrder(newOrder);
@@ -287,14 +333,11 @@ export const CheckoutPage = () => {
 
       setPlacedOrderDetails(confirmedOrder);
       clearCart();
-      setStep(3);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      showToast(`Order #${confirmedOrder.orderCode || confirmedOrder.orderId} recorded successfully!`, 'success');
+      goToStep(3);
 
-      // Auto-open WhatsApp with order details
+      // Try to open WhatsApp with the order details (some browsers block this; there's a button too).
       try {
-        const waLink = getOrderWhatsAppLink(confirmedOrder);
-        window.open(waLink, '_blank');
+        window.open(getOrderWhatsAppLink(confirmedOrder), '_blank');
       } catch (err) {
         console.warn('WhatsApp auto-open popup notice:', err);
       }
@@ -318,8 +361,8 @@ export const CheckoutPage = () => {
       `*Customer:* ${order.customerName}\n` +
       `*Phone:* ${order.phone}\n` +
       (order.email ? `*Email:* ${order.email}\n` : '') +
-      `*Delivery Address:* ${order.destination || order.city}\n` +
-      `*Delivery:* ${order.shippingMethod}\n\n` +
+      `*Delivery Address:* ${order.destination || [order.address, order.city].filter(Boolean).join(', ')}\n` +
+      `*Delivery:* ${order.shippingMethod || order.deliveryMethod}\n\n` +
       `*ORDER ITEMS:*\n${itemsList}\n\n` +
       `*Subtotal:* GH₵${(order.subtotal || 0).toFixed(2)}\n` +
       `*Delivery / Shipping:* GH₵${(order.shippingCost || order.deliveryFee || 0).toFixed(2)}\n` +
@@ -327,1039 +370,444 @@ export const CheckoutPage = () => {
       (order.creditUsed ? `*Store credit:* -GH₵${order.creditUsed.toFixed(2)}\n` : '') +
       `*TOTAL PAYABLE:* GH₵${(order.total || 0).toFixed(2)}\n\n` +
       `*Payment Method:* ${order.paymentMethod}\n` +
-      `*Pay to MoMo:* ${settings.momoNumber} (${settings.momoName})\n\n` +
-      `Hello CHARI, I have placed this order on your website and will send my payment receipt now.`
+      `*Pay to MoMo:* ${settings.momoNumber} (${settings.momoName})\n\nHello CHARI, I have placed this order on your website and will send my payment receipt now.`
     );
     return `https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`;
   };
 
-  return (
-    <div className="section" style={{ minHeight: '85vh', paddingTop: '28px' }}>
-      <div className="container" style={{ maxWidth: '1080px' }}>
-        
-        {/* Step Indicator */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '16px',
-            marginBottom: '32px'
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              fontWeight: 700,
-              fontSize: '0.88rem',
-              color: step >= 1 ? 'var(--accent)' : 'var(--text-muted)'
-            }}
-          >
-            <span
-              style={{
-                width: '28px',
-                height: '28px',
-                borderRadius: '50%',
-                backgroundColor: step >= 1 ? 'var(--accent)' : 'var(--border-medium)',
-                color: '#ffffff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '0.84rem'
-              }}
-            >
-              1
-            </span>
-            <span>Delivery Information</span>
-          </div>
+  const steps = [
+    { n: 1, label: 'Delivery' },
+    { n: 2, label: 'Payment' },
+    { n: 3, label: 'Done' },
+  ];
 
-          <div style={{ width: '40px', height: '2px', backgroundColor: step >= 2 ? 'var(--accent)' : 'var(--border-light)' }} />
+  // ── Order summary (sidebar on desktop, collapsible panel on phones) ──
+  const summaryBody = (
+    <>
+      <ul className="co-items">
+        {cart.map((item) => (
+          <li key={item.product.id} className="co-item">
+            <div className="co-item-thumb">
+              <SmartImage
+                src={sizedImage(item.product.images ? item.product.images[0] : (item.product.image || ''), 160)}
+                alt={item.product.name}
+                className="co-item-img"
+              />
+              <span className="co-item-qty" aria-label={`Quantity ${item.quantity}`}>{item.quantity}</span>
+            </div>
+            <div className="co-item-info">
+              <span className="co-item-name">{item.product.name}</span>
+              <span className="co-item-each">{money(item.unitPrice)} each</span>
+            </div>
+            <span className="co-item-total">{money(item.total)}</span>
+          </li>
+        ))}
+      </ul>
 
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              fontWeight: 700,
-              fontSize: '0.88rem',
-              color: step >= 2 ? 'var(--accent)' : 'var(--text-muted)'
-            }}
-          >
-            <span
-              style={{
-                width: '28px',
-                height: '28px',
-                borderRadius: '50%',
-                backgroundColor: step >= 2 ? 'var(--accent)' : 'var(--border-medium)',
-                color: '#ffffff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '0.84rem'
-              }}
-            >
-              2
-            </span>
-            <span>Payment & Review</span>
-          </div>
+      {creditBalance > 0 && (
+        <label className="co-check-row">
+          <input type="checkbox" checked={useCredit} onChange={(e) => setUseCredit(e.target.checked)} />
+          <span>Use my store credit <strong>({money(creditBalance)} available)</strong></span>
+        </label>
+      )}
 
-          <div style={{ width: '40px', height: '2px', backgroundColor: step >= 3 ? '#10b981' : 'var(--border-light)' }} />
-
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              fontWeight: 700,
-              fontSize: '0.88rem',
-              color: step >= 3 ? '#10b981' : 'var(--text-muted)'
-            }}
-          >
-            <span
-              style={{
-                width: '28px',
-                height: '28px',
-                borderRadius: '50%',
-                backgroundColor: step >= 3 ? '#10b981' : 'var(--border-medium)',
-                color: '#ffffff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '0.84rem'
-              }}
-            >
-              3
-            </span>
-            <span>Confirmation</span>
-          </div>
+      {usingWelcome && (
+        <div className="co-note co-note-success">
+          <Check size={14} aria-hidden="true" /> Welcome discount from your invite: −{money(welcomeDiscount)}
         </div>
+      )}
 
-        {/* STEP 3: ORDER CONFIRMATION & PAYMENT TRANSFER DETAILS */}
+      {appliedPromo ? (
+        <div className="co-promo-applied">
+          <span><Check size={14} aria-hidden="true" /> Code <strong>{appliedPromo}</strong> applied (−{money(discountAmount)})</span>
+          <button type="button" onClick={handleRemovePromo} aria-label="Remove promo code"><X size={15} /></button>
+        </div>
+      ) : (
+        <form onSubmit={handleApplyPromo} className="co-promo">
+          <input
+            type="text"
+            placeholder="Promo code"
+            aria-label="Promo code"
+            value={promoInput}
+            onChange={(e) => setPromoInput(e.target.value.toUpperCase())}
+            autoCapitalize="characters"
+          />
+          <button type="submit" className={`btn btn-outline btn-sm ${validatingPromo ? 'is-loading' : ''}`} disabled={!promoInput.trim()}>
+            Apply
+          </button>
+        </form>
+      )}
+
+      <dl className="co-totals">
+        <div><dt>Items ({totalItemsCount})</dt><dd>{money(cartSubtotal)}</dd></div>
+        <div><dt>Delivery · {selectedShipping.name}</dt><dd>{money(shippingCost)}</dd></div>
+        {effectiveDiscount > 0 && (
+          <div className="is-saving"><dt>{usingWelcome ? 'Welcome discount' : 'Discount'}</dt><dd>−{money(effectiveDiscount)}</dd></div>
+        )}
+        {creditUsed > 0 && (
+          <div className="is-saving"><dt>Store credit</dt><dd>−{money(creditUsed)}</dd></div>
+        )}
+        <div className="co-grand"><dt>Total</dt><dd>{money(grandTotal)}</dd></div>
+      </dl>
+    </>
+  );
+
+  const orderCode = placedOrderDetails?.orderCode || placedOrderDetails?.orderId;
+  const orderTotal = Number(placedOrderDetails?.total ?? grandTotal);
+
+  return (
+    <div className="section co-page">
+      <div className="container co-container">
+
+        {/* Progress */}
+        <ol className="co-steps" aria-label="Checkout progress">
+          {steps.map((s, i) => {
+            const state = step > s.n || (s.n === 3 && step === 3) ? 'done' : step === s.n ? 'current' : 'todo';
+            const canGoBack = s.n === 1 && step === 2;
+            return (
+              <li key={s.n} className={`co-step is-${state}`} aria-current={state === 'current' ? 'step' : undefined}>
+                {i > 0 && <span className="co-step-line" aria-hidden="true" />}
+                <button type="button" className="co-step-btn" disabled={!canGoBack} onClick={() => goToStep(1)}>
+                  <span className="co-step-dot">{state === 'done' ? <Check size={14} /> : s.n}</span>
+                  <span className="co-step-label">{s.label}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+
+        {/* ── STEP 3: CONFIRMATION ── */}
         {step === 3 && placedOrderDetails && (
-          <div
-            className="glass-panel-elevated"
-            style={{
-              padding: '36px 28px',
-              maxWidth: '740px',
-              margin: '0 auto'
-            }}
-          >
-            {/* Header / Success Indicator */}
-            <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-              
-
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#059669', padding: '4px 12px', borderRadius: '20px', fontSize: '0.78rem', fontWeight: 800, marginBottom: '10px' }}>
-                <Check size={14} /> ORDER CONFIRMED &bull; AWAITING MOMO TRANSFER
-              </div>
-              
-              <h2 style={{ fontSize: '1.95rem', fontWeight: 900, color: 'var(--text-primary)', marginBottom: '6px', letterSpacing: '-0.02em' }}>
-                Order #{placedOrderDetails.orderCode || placedOrderDetails.orderId} Placed!
-              </h2>
-              <p style={{ color: 'var(--text-secondary)', fontSize: '0.92rem', maxWidth: '540px', margin: '0 auto' }}>
-                Thank you, <strong>{placedOrderDetails.customerName}</strong>! Your order has been recorded. Please complete your Mobile Money transfer to the number below to initiate processing.
+          <div className="co-card co-done">
+            <div className="co-done-head">
+              <div className="co-done-icon"><Check size={30} strokeWidth={3} /></div>
+              <h1>Thank you, {String(placedOrderDetails.customerName || '').split(' ')[0] || 'friend'}!</h1>
+              <p>
+                Your order <strong>#{orderCode}</strong> has been placed.{' '}
+                Send your MoMo payment below so we can start processing it.
               </p>
             </div>
 
-            {/* Order Reference & Amount Ticker */}
-            <div
-              style={{
-                backgroundColor: 'var(--bg-subtle)',
-                borderRadius: '14px',
-                padding: '16px 20px',
-                border: '1px solid var(--border-light)',
-                marginBottom: '24px',
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-                gap: '14px',
-                textAlign: 'center'
-              }}
-            >
-              <div>
-                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                  ORDER REFERENCE
-                </div>
-                <div style={{ fontSize: '1.25rem', fontWeight: 900, color: 'var(--text-primary)', marginTop: '2px' }}>
-                  #{placedOrderDetails.orderCode || placedOrderDetails.orderId}
-                </div>
+            <section className="co-pay" aria-label="How to pay">
+              <div className="co-pay-head">
+                <Smartphone size={18} aria-hidden="true" />
+                <h2>Pay {money(orderTotal)} by Mobile Money</h2>
               </div>
 
-              <div>
-                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                  TOTAL TO TRANSFER
-                </div>
-                <div style={{ fontSize: '1.35rem', fontWeight: 900, color: 'var(--accent)', marginTop: '2px' }}>
-                  GH₵{placedOrderDetails.total.toFixed(2)}
-                </div>
-              </div>
-
-              <div>
-                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                  FREIGHT / ROUTE
-                </div>
-                <div style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: '4px' }}>
-                  {placedOrderDetails.freightType === 'SEA_FREIGHT' ? 'Sea shipping' : placedOrderDetails.freightType === 'AIR_FREIGHT' ? 'Air shipping (Express)' : 'Local Delivery'}
-                </div>
-              </div>
-            </div>
-
-            {/* HERO PAYMENT TRANSFER CARD */}
-            <div
-              style={{
-                backgroundColor: 'var(--bg-card)',
-                borderRadius: '16px',
-                padding: '24px',
-                border: '2px solid rgba(245, 158, 11, 0.45)',
-                boxShadow: '0 8px 24px rgba(245, 158, 11, 0.08)',
-                marginBottom: '24px'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: '#f59e0b', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: '0.8rem' }}>
-                    MTN
-                  </div>
-                  <div>
-                    <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
-                      Mobile Money Transfer Details
-                    </h3>
-                    <div style={{ fontSize: '0.76rem', color: '#059669', fontWeight: 700 }}>
-                      Official CHARI payment account
+              <div className="co-pay-rows">
+                {[
+                  { key: 'momoNumber', label: 'MoMo number', value: settings.momoNumber, copy: settings.momoNumber.replace(/\s/g, ''), copyLabel: 'MoMo number' },
+                  { key: 'momoName', label: 'Account name', value: settings.momoName },
+                  { key: 'momoAmount', label: 'Amount', value: money(orderTotal), copy: orderTotal.toFixed(2), copyLabel: 'Amount', accent: true },
+                  { key: 'momoRef', label: 'Reference', value: orderCode, copy: orderCode, copyLabel: 'Reference', note: 'Use this as the reference so we can match your payment.' },
+                ].map((row) => (
+                  <div key={row.key} className="co-pay-row">
+                    <div className="co-pay-text">
+                      <span className="co-pay-label">{row.label}</span>
+                      <span className={`co-pay-value ${row.accent ? 'is-accent' : ''}`}>{row.value}</span>
+                      {row.note && <span className="co-pay-note">{row.note}</span>}
                     </div>
-                  </div>
-                </div>
-                <span style={{ fontSize: '0.74rem', backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#d97706', padding: '3px 10px', borderRadius: '20px', fontWeight: 700 }}>
-                  Zero Extra Fees
-                </span>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                {/* Number Box */}
-                <div
-                  style={{
-                    backgroundColor: 'var(--bg-subtle)',
-                    padding: '14px 16px',
-                    borderRadius: '12px',
-                    border: '1px solid var(--border-medium)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '12px'
-                  }}
-                >
-                  <div>
-                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                      MoMo number
-                    </div>
-                    <div style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--text-primary)', letterSpacing: '0.02em', marginTop: '2px' }}>
-                      {settings.momoNumber}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleCopy(settings.momoNumber.replace(/\s/g, ''), 'momoNumber', 'MoMo number')}
-                    className="btn btn-outline"
-                    style={{ padding: '8px 14px', fontSize: '0.82rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}
-                  >
-                    {copiedField === 'momoNumber' ? (
-                      <>
-                        <Check size={15} color="#10b981" />
-                        <span style={{ color: '#10b981' }}>Copied!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy size={15} />
-                        <span>Copy Number</span>
-                      </>
+                    {row.copy && (
+                      <button
+                        type="button"
+                        className={`co-copy ${copiedField === row.key ? 'is-copied' : ''}`}
+                        onClick={() => handleCopy(row.copy, row.key, row.copyLabel)}
+                        aria-label={`Copy ${row.copyLabel}`}
+                      >
+                        {copiedField === row.key ? <><Check size={15} /> Copied</> : <><Copy size={15} /> Copy</>}
+                      </button>
                     )}
-                  </button>
-                </div>
-
-                {/* Account Name */}
-                <div
-                  style={{
-                    backgroundColor: 'var(--bg-subtle)',
-                    padding: '12px 16px',
-                    borderRadius: '12px',
-                    border: '1px solid var(--border-light)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '12px'
-                  }}
-                >
-                  <div>
-                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                      Account name
-                    </div>
-                    <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: '2px' }}>
-                      {settings.momoName}
-                    </div>
                   </div>
-                  <span style={{ fontSize: '0.74rem', color: '#059669', fontWeight: 700, backgroundColor: 'rgba(16, 185, 129, 0.1)', padding: '3px 8px', borderRadius: '6px' }}>
-                    Verified Merchant
-                  </span>
-                </div>
-
-                {/* Amount to send */}
-                <div
-                  style={{
-                    backgroundColor: 'var(--bg-subtle)',
-                    padding: '12px 16px',
-                    borderRadius: '12px',
-                    border: '1px solid var(--border-light)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '12px'
-                  }}
-                >
-                  <div>
-                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                      EXACT AMOUNT TO SEND
-                    </div>
-                    <div style={{ fontSize: '1.25rem', fontWeight: 900, color: 'var(--accent)', marginTop: '2px' }}>
-                      GH₵{placedOrderDetails.total.toFixed(2)}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleCopy(placedOrderDetails.total.toFixed(2), 'momoAmount', 'Amount')}
-                    className="btn btn-outline"
-                    style={{ padding: '8px 14px', fontSize: '0.82rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}
-                  >
-                    {copiedField === 'momoAmount' ? (
-                      <>
-                        <Check size={15} color="#10b981" />
-                        <span style={{ color: '#10b981' }}>Copied!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy size={15} />
-                        <span>Copy Amount</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {/* Reference */}
-                <div
-                  style={{
-                    backgroundColor: 'var(--bg-subtle)',
-                    padding: '12px 16px',
-                    borderRadius: '12px',
-                    border: '1px solid var(--border-light)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '12px'
-                  }}
-                >
-                  <div>
-                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                      MOMO PAYMENT REFERENCE (REQUIRED)
-                    </div>
-                    <div style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--text-primary)', marginTop: '2px' }}>
-                      {placedOrderDetails.orderCode || placedOrderDetails.orderId}
-                    </div>
-                    <div style={{ fontSize: '0.72rem', color: '#d97706', fontWeight: 600, marginTop: '2px' }}>
-                      Put this reference in your MoMo transfer so we instantly identify your payment.
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleCopy(placedOrderDetails.orderCode || placedOrderDetails.orderId, 'momoRef', 'Reference')}
-                    className="btn btn-outline"
-                    style={{ padding: '8px 14px', fontSize: '0.82rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}
-                  >
-                    {copiedField === 'momoRef' ? (
-                      <>
-                        <Check size={15} color="#10b981" />
-                        <span style={{ color: '#10b981' }}>Copied!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy size={15} />
-                        <span>Copy Reference</span>
-                      </>
-                    )}
-                  </button>
-                </div>
+                ))}
               </div>
 
-              {/* Instructions 1-2-3 */}
-              <div
-                style={{
-                  marginTop: '18px',
-                  padding: '14px',
-                  backgroundColor: 'rgba(245, 158, 11, 0.08)',
-                  borderRadius: '10px',
-                  fontSize: '0.82rem',
-                  lineHeight: 1.5,
-                  color: 'var(--text-primary)'
-                }}
-              >
-                <div style={{ fontWeight: 800, marginBottom: '6px', color: '#b45309' }}>
-                  📌 Quick 3-Step Transfer Guide:
-                </div>
-                <ol style={{ paddingLeft: '18px', margin: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <li>Dial <strong>*170#</strong> or open your MTN MoMo / Bank App.</li>
-                  <li>Transfer <strong>GH₵{placedOrderDetails.total.toFixed(2)}</strong> to <strong>{settings.momoNumber}</strong> with reference <strong>{placedOrderDetails.orderCode || placedOrderDetails.orderId}</strong>.</li>
-                  <li>Click the button below to send your payment screenshot or SMS confirmation to WhatsApp.</li>
-                </ol>
-              </div>
-            </div>
+              <ol className="co-pay-steps">
+                <li>Dial <strong>*170#</strong> or open your MoMo app.</li>
+                <li>Send <strong>{money(orderTotal)}</strong> to <strong>{settings.momoNumber}</strong> with reference <strong>{orderCode}</strong>.</li>
+                <li>Send us the payment screenshot or SMS on WhatsApp.</li>
+              </ol>
+            </section>
 
-            {/* Action Buttons */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div className="co-done-actions">
               <a
                 href={getOrderWhatsAppLink(placedOrderDetails)}
                 target="_blank"
                 rel="noreferrer"
-                className="btn btn-whatsapp btn-lg"
-                style={{ borderRadius: '14px', fontSize: '0.98rem', padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}
+                className="btn btn-whatsapp btn-lg btn-block"
               >
-                <MessageCircle size={22} />
-                <span>Send Order &amp; Payment Receipt via WhatsApp</span>
+                <MessageCircle size={20} />
+                Send payment receipt on WhatsApp
               </a>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-                💡 WhatsApp opened automatically upon checkout. Click the button above if it did not open.
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '6px' }}>
+              <p className="co-hint co-center">If WhatsApp didn't open by itself, tap the button above.</p>
+              <div className="co-done-secondary">
                 <button
+                  type="button"
                   className="btn btn-outline"
-                  onClick={() => navigate('track-order', { prefillCode: placedOrderDetails.orderCode || placedOrderDetails.orderId, prefillPhone: placedOrderDetails.phone })}
-                  style={{ borderRadius: '12px' }}
+                  onClick={() => navigate('track-order', { prefillCode: orderCode, prefillPhone: placedOrderDetails.phone })}
                 >
-                  Track My Order
+                  Track my order
                 </button>
-                <button
-                  className="btn btn-dark"
-                  onClick={() => navigate('shop')}
-                  style={{ borderRadius: '12px' }}
-                >
-                  Continue Shopping
+                <button type="button" className="btn btn-dark" onClick={() => navigate('shop')}>
+                  Keep shopping
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* STEP 1 & 2: CHECKOUT FORM & BREAKDOWN */}
+        {/* ── STEPS 1 & 2 ── */}
         {step < 3 && (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-              gap: '28px',
-              alignItems: 'start'
-            }}
-          >
-            {/* Left: Interactive Form */}
-            <div>
+          <div className="co-layout">
+            {/* Phones: collapsible summary with the total always visible */}
+            <div className={`co-summary-mobile ${summaryOpen ? 'is-open' : ''}`}>
+              <button
+                type="button"
+                className="co-summary-toggle"
+                onClick={() => setSummaryOpen((o) => !o)}
+                aria-expanded={summaryOpen}
+              >
+                <ShoppingBag size={17} aria-hidden="true" />
+                <span>{summaryOpen ? 'Hide' : 'Show'} order summary</span>
+                <ChevronDown size={16} className="co-chevron" aria-hidden="true" />
+                <strong>{money(grandTotal)}</strong>
+              </button>
+              {summaryOpen && <div className="co-summary-mobile-body">{summaryBody}</div>}
+            </div>
+
+            <div className="co-main">
               {step === 1 ? (
-                /* Step 1: Delivery & Logistics Routing */
-                <form
-                  onSubmit={handleProceedToPayment}
-                  className="glass-panel"
-                  style={{
-                    padding: '28px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '20px'
-                  }}
-                >
-                  <div>
-                    <h3 style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 4px' }}>
-                      Delivery Information
-                    </h3>
-                    <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
-                      Enter your address and choose how you would like your items delivered.
-                    </p>
+                /* Step 1: delivery details */
+                <form id="co-delivery-form" ref={formRef} onSubmit={handleProceedToPayment} className="co-card" noValidate>
+                  <div className="co-card-head">
+                    <h1>Delivery details</h1>
+                    <p>Where should we send your order?</p>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '6px', color: 'var(--text-primary)' }}>
-                        Full Name / Business Name *
-                      </label>
+                  <div className="co-grid">
+                    <Field label="Full name" htmlFor="fullName" error={errors.fullName}>
                       <input
-                        type="text"
-                        required
-                        className="glass-input"
-                        placeholder="e.g. Kwabena Asante"
-                        value={formData.fullName}
-                        onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                        style={{ width: '100%' }}
+                        id="fullName" name="fullName" type="text" autoComplete="name"
+                        placeholder="Kwabena Asante"
+                        value={formData.fullName} onChange={updateField('fullName')}
+                        aria-invalid={Boolean(errors.fullName)} aria-describedby={errors.fullName ? 'fullName-error' : undefined}
                       />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '6px', color: 'var(--text-primary)' }}>
-                        WhatsApp Active Phone *
-                      </label>
+                    </Field>
+                    <Field label="Phone (WhatsApp)" htmlFor="phone" error={errors.phone} hint="We'll send order updates here.">
                       <input
-                        type="tel"
-                        required
-                        className="glass-input"
+                        id="phone" name="phone" type="tel" inputMode="tel" autoComplete="tel"
                         placeholder="024 412 3456"
-                        value={formData.phone}
-                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                        style={{ width: '100%' }}
+                        value={formData.phone} onChange={updateField('phone')}
+                        aria-invalid={Boolean(errors.phone)} aria-describedby={errors.phone ? 'phone-error' : undefined}
                       />
-                    </div>
+                    </Field>
                   </div>
 
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '6px', color: 'var(--text-primary)' }}>
-                      Email (optional)
-                    </label>
+                  <Field label={<>Email <span className="co-optional">optional</span></>} htmlFor="email" error={errors.email} hint="For order confirmation and shipping emails.">
                     <input
-                      type="email"
-                      className="glass-input"
+                      id="email" name="email" type="email" inputMode="email" autoComplete="email"
                       placeholder="k.asante@gmail.com"
-                      value={formData.email}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      style={{ width: '100%' }}
+                      value={formData.email} onChange={updateField('email')}
+                      aria-invalid={Boolean(errors.email)} aria-describedby={errors.email ? 'email-error' : undefined}
                     />
-                    <span style={{ display: 'block', marginTop: '4px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                      We’ll email you when your order is confirmed, shipped and delivered.
-                    </span>
-                  </div>
+                  </Field>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '6px', color: 'var(--text-primary)' }}>
-                        Ghana Region *
-                      </label>
-                      <select
-                        value={formData.region}
-                        onChange={(e) => setFormData({ ...formData, region: e.target.value })}
-                        className="glass-input"
-                        style={{ width: '100%' }}
-                      >
-                        {GHANA_REGIONS.map((reg) => (
-                          <option key={reg} value={reg}>
-                            {reg}
-                          </option>
-                        ))}
+                  <div className="co-grid">
+                    <Field label="Region" htmlFor="region">
+                      <select id="region" name="region" value={formData.region} onChange={updateField('region')} autoComplete="address-level1">
+                        {GHANA_REGIONS.map((reg) => <option key={reg} value={reg}>{reg}</option>)}
                       </select>
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '6px', color: 'var(--text-primary)' }}>
-                        Town / Suburb *
-                      </label>
+                    </Field>
+                    <Field label="Town or suburb" htmlFor="city" error={errors.city}>
                       <input
-                        type="text"
-                        required
-                        className="glass-input"
-                        placeholder="e.g. Adum / Asokwa / Takoradi"
-                        value={formData.city}
-                        onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                        style={{ width: '100%' }}
+                        id="city" name="city" type="text" autoComplete="address-level2"
+                        placeholder="Adum, Asokwa, Takoradi…"
+                        value={formData.city} onChange={updateField('city')}
+                        aria-invalid={Boolean(errors.city)} aria-describedby={errors.city ? 'city-error' : undefined}
                       />
-                    </div>
+                    </Field>
                   </div>
 
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, marginBottom: '6px', color: 'var(--text-primary)' }}>
-                      Street Address or Bus Station Destination *
-                    </label>
+                  <Field label="Street address or bus station" htmlFor="address" error={errors.address}>
                     <input
-                      type="text"
-                      required
-                      className="glass-input"
-                      placeholder="e.g. VIP Station Accra, or Hse No. 12, Asokwa"
-                      value={formData.address}
-                      onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                      style={{ width: '100%' }}
+                      id="address" name="address" type="text" autoComplete="street-address"
+                      placeholder="Hse No. 12, Asokwa — or VIP Station, Accra"
+                      value={formData.address} onChange={updateField('address')}
+                      aria-invalid={Boolean(errors.address)} aria-describedby={errors.address ? 'address-error' : undefined}
                     />
-                  </div>
+                  </Field>
 
-                  {/* Delivery option */}
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                      <label style={{ fontSize: '0.84rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                        Choose delivery
-                      </label>
-                    </div>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <fieldset className="co-fieldset">
+                    <legend className="co-label">Delivery method</legend>
+                    <div className="co-options">
                       {FREIGHT_OPTIONS.map((method) => {
                         const Icon = method.icon;
                         const isSelected = selectedShipping.id === method.id;
                         return (
-                          <label
-                            key={method.id}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'flex-start',
-                              gap: '14px',
-                              padding: '14px 16px',
-                              borderRadius: '14px',
-                              border: isSelected
-                                ? '2px solid var(--accent)'
-                                : '1px solid var(--border-light)',
-                              backgroundColor: isSelected
-                                ? 'var(--accent-subtle)'
-                                : 'var(--bg-subtle)',
-                              cursor: 'pointer',
-                              transition: 'all 0.2s ease'
-                            }}
-                          >
+                          <label key={method.id} className={`co-option ${isSelected ? 'is-selected' : ''}`}>
                             <input
                               type="radio"
                               name="shippingMethod"
                               checked={isSelected}
                               onChange={() => setSelectedShipping(method)}
-                              style={{ marginTop: '4px', accentColor: 'var(--accent)' }}
                             />
-                            <div style={{ flex: 1 }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: '0.92rem', color: 'var(--text-primary)' }}>
-                                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  
-                                  {method.name}
-                                </span>
-                                <span style={{ color: 'var(--accent)' }}>
-                                  GH₵{method.cost.toFixed(2)}
-                                </span>
-                              </div>
-                              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '3px' }}>
-                                {method.desc}
-                              </div>
-                              <div style={{ fontSize: '0.74rem', color: '#10b981', fontWeight: 700, marginTop: '4px' }}>
-                                ETA Window: {method.time}
-                              </div>
-                            </div>
+                            <span className="co-option-icon" aria-hidden="true"><Icon size={18} /></span>
+                            <span className="co-option-body">
+                              <span className="co-option-top">
+                                <span className="co-option-name">{method.name}</span>
+                                <span className="co-option-price">{money(method.cost)}</span>
+                              </span>
+                              <span className="co-option-desc">{method.desc}</span>
+                              <span className="co-option-time">Arrives in {method.time}</span>
+                            </span>
                           </label>
                         );
                       })}
                     </div>
-                  </div>
+                  </fieldset>
 
-                  <button type="submit" className="btn btn-primary btn-lg" style={{ marginTop: '8px', borderRadius: '12px' }}>
-                    Continue to Payment <ArrowRight size={18} />
+                  <Field label={<>Delivery note <span className="co-optional">optional</span></>} htmlFor="notes">
+                    <textarea
+                      id="notes" name="notes" rows={2}
+                      placeholder="Landmark, best time to call, sizes or colours…"
+                      value={formData.notes} onChange={updateField('notes')}
+                    />
+                  </Field>
+
+                  <button type="submit" className="btn btn-primary btn-lg btn-block co-desktop-only">
+                    Continue to payment <ArrowRight size={18} />
                   </button>
                 </form>
               ) : (
-                /* Step 2: Payment Method */
-                <div
-                  className="glass-panel"
-                  style={{
-                    padding: '28px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '20px'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div>
-                      <h3 style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 4px' }}>
-                        Select Payment Method
-                      </h3>
-                      <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
-                        Pay with Mobile Money (MoMo), or pay when you collect in Kumasi.
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => setStep(1)}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        fontSize: '0.84rem',
-                        color: 'var(--accent)',
-                        fontWeight: 700,
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <ChevronLeft size={16} /> Edit Details
-                    </button>
+                /* Step 2: payment and review */
+                <div className="co-card">
+                  <div className="co-card-head">
+                    <h1>Payment</h1>
+                    <p>Check your details, then place your order and pay by Mobile Money.</p>
                   </div>
 
-                  {/* Payment Methods */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    
-                    {/* MoMo Option */}
-                    <label
-                      style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: '14px',
-                        padding: '16px',
-                        borderRadius: '14px',
-                        border: paymentMethod === 'momo'
-                          ? '2px solid var(--accent)'
-                          : '1px solid var(--border-light)',
-                        backgroundColor: paymentMethod === 'momo'
-                          ? 'var(--accent-subtle)'
-                          : 'var(--bg-subtle)',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <input
-                        type="radio"
-                        name="paymentMethod"
-                        checked={paymentMethod === 'momo'}
-                        onChange={() => setPaymentMethod('momo')}
-                        style={{ marginTop: '4px', accentColor: 'var(--accent)' }}
-                      />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontWeight: 800, fontSize: '0.96rem', color: 'var(--text-primary)' }}>
-                            Mobile Money Transfer (MoMo)
+                  {/* What they entered on step 1, with a quick way back */}
+                  <div className="co-review">
+                    <MapPin size={18} className="co-review-icon" aria-hidden="true" />
+                    <div className="co-review-text">
+                      <strong>{formData.fullName}</strong>
+                      <span>{formData.phone}</span>
+                      <span>{formData.address}, {formData.city}, {formData.region}</span>
+                      <span>{selectedShipping.name} · {selectedShipping.time}</span>
+                    </div>
+                    <button type="button" className="co-link" onClick={() => goToStep(1)}>Edit</button>
+                  </div>
+
+                  <section className="co-fieldset" aria-labelledby="co-pay-title">
+                    <h2 id="co-pay-title" className="co-label">How you'll pay</h2>
+                    <div className="co-options">
+                      <div className="co-option is-selected">
+                        <span className="co-option-icon" aria-hidden="true"><Smartphone size={18} /></span>
+                        <span className="co-option-body">
+                          <span className="co-option-top">
+                            <span className="co-option-name">Mobile Money</span>
+                            <span className="co-momo-tags" aria-hidden="true">
+                              <span className="co-tag co-tag-mtn">MTN</span>
+                              <span className="co-tag co-tag-telecel">Telecel</span>
+                              <span className="co-tag co-tag-at">AT</span>
+                            </span>
                           </span>
-                          <div style={{ display: 'flex', gap: '6px' }}>
-                            <span style={{ backgroundColor: '#f59e0b', color: '#000', padding: '2px 7px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 800 }}>MTN</span>
-                            <span style={{ backgroundColor: '#ef4444', color: '#fff', padding: '2px 7px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 800 }}>Telecel</span>
-                            <span style={{ backgroundColor: '#2563eb', color: '#fff', padding: '2px 7px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 800 }}>AT</span>
-                          </div>
-                        </div>
-                        <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                          You'll see our MoMo number on the next screen after you place the order.
-                        </p>
+                          <span className="co-option-desc">Pre-orders are paid in full by MoMo before we buy from the supplier. You'll get our MoMo number after placing the order.</span>
+                        </span>
                       </div>
-                    </label>
 
-                    {/* MoMo Configuration Subform */}
-                    {paymentMethod === 'momo' && (
-                      <div
-                        style={{
-                          backgroundColor: 'var(--bg-card)',
-                          borderRadius: '12px',
-                          padding: '16px',
-                          border: '1px solid var(--border-light)',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '12px',
-                          marginLeft: '28px'
-                        }}
-                      >
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>
-                            Your Network Provider:
-                          </label>
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-                            {[
-                              { id: 'mtn', label: 'MTN MoMo', color: '#f59e0b' },
-                              { id: 'telecel', label: 'Telecel Cash', color: '#ef4444' },
-                              { id: 'at', label: 'AT Money', color: '#2563eb' }
-                            ].map((prov) => (
-                              <button
-                                key={prov.id}
-                                type="button"
-                                onClick={() => setMomoProvider(prov.id)}
-                                style={{
-                                  padding: '8px',
-                                  borderRadius: '8px',
-                                  fontSize: '0.82rem',
-                                  fontWeight: 700,
-                                  border:
-                                    momoProvider === prov.id
-                                      ? `2px solid ${prov.color}`
-                                      : '1px solid var(--border-light)',
-                                  backgroundColor:
-                                    momoProvider === prov.id ? 'var(--bg-subtle)' : 'transparent',
-                                  color: 'var(--text-primary)',
-                                  cursor: 'pointer'
-                                }}
-                              >
-                                {prov.label}
-                              </button>
-                            ))}
-                          </div>
+                      <div className="co-momo">
+                        <span className="co-label">Your network</span>
+                        <div className="co-segment" role="radiogroup" aria-label="Your network">
+                          {MOMO_PROVIDERS.map((prov) => (
+                            <button
+                              key={prov.id}
+                              type="button"
+                              role="radio"
+                              aria-checked={momoProvider === prov.id}
+                              className={`co-segment-btn ${momoProvider === prov.id ? 'is-active' : ''}`}
+                              onClick={() => setMomoProvider(prov.id)}
+                            >
+                              {prov.label}
+                            </button>
+                          ))}
                         </div>
-
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>
-                            Your {momoProvider.toUpperCase()} Phone Number:
-                          </label>
+                        <Field label="Number you'll pay from" htmlFor="momoNumber">
                           <input
-                            type="tel"
-                            className="glass-input"
+                            id="momoNumber" type="tel" inputMode="tel" autoComplete="tel"
                             placeholder="024 123 4567"
                             value={momoNumber || formData.phone}
                             onChange={(e) => setMomoNumber(e.target.value)}
-                            style={{ width: '100%' }}
                           />
-                        </div>
+                        </Field>
                       </div>
-                    )}
+                    </div>
+                  </section>
 
-                    {/* Store Pickup / Inspection Option */}
-                    <label
-                      style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: '14px',
-                        padding: '16px',
-                        borderRadius: '14px',
-                        border: paymentMethod === 'cash'
-                          ? '2px solid var(--accent)'
-                          : '1px solid var(--border-light)',
-                        backgroundColor: paymentMethod === 'cash'
-                          ? 'var(--accent-subtle)'
-                          : 'var(--bg-subtle)',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <input
-                        type="radio"
-                        name="paymentMethod"
-                        checked={paymentMethod === 'cash'}
-                        onChange={() => setPaymentMethod('cash')}
-                        style={{ marginTop: '4px', accentColor: 'var(--accent)' }}
-                      />
-                      <div>
-                        <span style={{ fontWeight: 800, fontSize: '0.96rem', color: 'var(--text-primary)' }}>
-                          Pay when you collect (Kumasi)
-                        </span>
-                        <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                          Check your items at our Kumasi pickup point, then pay.
-                        </p>
-                      </div>
-                    </label>
-                  </div>
-
-                  {/* Preorder Terms Agreement */}
-                  <div
-                    style={{
-                      backgroundColor: 'var(--accent-subtle)',
-                      border: '1px solid var(--accent-border)',
-                      borderRadius: '14px',
-                      padding: '16px',
-                      marginTop: '12px'
-                    }}
-                  >
-                    <label
-                      style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: '12px',
-                        cursor: 'pointer'
-                      }}
-                    >
+                  <div ref={termsRef} className={`co-terms ${termsError && !termsAgreed ? 'has-error' : ''}`}>
+                    <label>
                       <input
                         type="checkbox"
                         checked={termsAgreed}
-                        onChange={(e) => setTermsAgreed(e.target.checked)}
-                        style={{ marginTop: '3px', accentColor: 'var(--accent)', width: '16px', height: '16px', flexShrink: 0 }}
+                        onChange={(e) => { setTermsAgreed(e.target.checked); setTermsError(false); }}
                       />
-                      <span style={{ fontSize: '0.84rem', color: 'var(--text-primary)', lineHeight: 1.5 }}>
+                      <span>
                         I agree to the{' '}
-                        <button
-                          type="button"
-                          onClick={() => setPreorderTermsOpen(true)}
-                          style={{
-                            color: 'var(--accent)',
-                            fontWeight: 700,
-                            textDecoration: 'underline',
-                            background: 'none',
-                            border: 'none',
-                            cursor: 'pointer',
-                            padding: 0
-                          }}
-                        >
-                          pre-order terms
-                        </button>
-                        . I understand pre-orders are paid in full, the price is fixed in cedis, and delivery takes the time shown above.
+                        <button type="button" className="co-link" onClick={() => setPreorderTermsOpen(true)}>pre-order terms</button>.
+                        {' '}Pre-orders are paid in full, the price is fixed in cedis, and delivery takes the time shown above.
                       </span>
                     </label>
+                    {termsError && !termsAgreed && (
+                      <span className="co-error" role="alert"><AlertCircle size={13} aria-hidden="true" /> Tick the box to agree before placing your order.</span>
+                    )}
                   </div>
 
                   <button
-                    className="btn btn-primary btn-lg"
+                    type="button"
+                    className={`btn btn-primary btn-lg btn-block co-desktop-only ${isSubmitting ? 'is-loading' : ''}`}
                     onClick={handlePlaceOrder}
-                    disabled={isSubmitting || !termsAgreed}
-                    style={{ marginTop: '8px', borderRadius: '12px', opacity: termsAgreed ? 1 : 0.5 }}
+                    aria-busy={isSubmitting}
                   >
-                    {isSubmitting
-                      ? 'Placing Order & Connecting WhatsApp...'
-                      : `Place order · GH₵${grandTotal.toFixed(2)}`}
+                    <Lock size={16} /> Place order · {money(grandTotal)}
+                  </button>
+                  <button type="button" className="co-back co-desktop-only" onClick={() => goToStep(1)}>
+                    <ChevronLeft size={16} /> Back to delivery details
                   </button>
                 </div>
               )}
             </div>
 
-            {/* Right: Order Summary Breakdown Card */}
-            <div
-              className="glass-panel"
-              style={{
-                padding: '26px',
-                position: 'sticky',
-                top: '100px'
-              }}
-            >
-              <h4 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 16px' }}>
-                Order Summary ({cart.length} {cart.length === 1 ? 'item' : 'items'})
-              </h4>
-
-              {/* Items List */}
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '12px',
-                  maxHeight: '260px',
-                  overflowY: 'auto',
-                  paddingRight: '4px',
-                  marginBottom: '16px'
-                }}
-              >
-                {cart.map((item) => (
-                  <div
-                    key={item.product.id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '12px',
-                      paddingBottom: '12px',
-                      borderBottom: '1px solid var(--border-light)'
-                    }}
-                  >
-                    <img
-                      src={sizedImage(item.product.images ? item.product.images[0] : (item.product.image || ''), 160)}
-                      alt={item.product.name}
-                      style={{
-                        width: '48px',
-                        height: '48px',
-                        borderRadius: '10px',
-                        objectFit: 'cover',
-                        backgroundColor: 'var(--bg-subtle)'
-                      }}
-                    />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div
-                        style={{
-                          fontSize: '0.86rem',
-                          fontWeight: 700,
-                          color: 'var(--text-primary)',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap'
-                        }}
-                      >
-                        {item.product.name}
-                      </div>
-                      <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
-                        Qty: {item.quantity} × GH₵{item.unitPrice.toFixed(2)}
-                      </div>
-                    </div>
-                    <div style={{ fontWeight: 800, fontSize: '0.9rem', color: 'var(--text-primary)' }}>
-                      GH₵{item.total.toFixed(2)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Store credit (from referrals) */}
-              {creditBalance > 0 && (
-                <label className="shop-check" style={{ marginBottom: '12px', padding: '10px 12px', border: '1px solid var(--border-light)', borderRadius: '10px' }}>
-                  <input type="checkbox" checked={useCredit} onChange={(e) => setUseCredit(e.target.checked)} />
-                  Use my store credit (GH₵{creditBalance.toFixed(2)} available)
-                </label>
-              )}
-
-              {usingWelcome && (
-                <div style={{ padding: '8px 12px', borderRadius: '8px', background: 'rgba(16, 185, 129, 0.1)', color: '#047857', fontSize: '0.84rem', fontWeight: 600, marginBottom: '12px' }}>
-                  Welcome discount from your invite: −GH₵{welcomeDiscount.toFixed(2)}
-                </div>
-              )}
-
-              {/* Promo Input */}
-              <form onSubmit={handleApplyPromo} style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-                <input
-                  type="text"
-                  placeholder="Promo code"
-                  aria-label="Promo code"
-                  value={promoInput}
-                  onChange={(e) => setPromoInput(e.target.value)}
-                  className="glass-input"
-                  style={{ flex: 1, minWidth: 0, padding: '8px 12px', fontSize: '0.84rem' }}
-                />
-                <button
-                  type="submit"
-                  className="btn btn-outline"
-                  disabled={validatingPromo}
-                  style={{ padding: '8px 14px', fontSize: '0.84rem' }}
-                >
-                  {validatingPromo ? '...' : 'Apply'}
-                </button>
-              </form>
-
-              {appliedPromo && (
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '8px 12px',
-                    borderRadius: '8px',
-                    background: 'rgba(16, 185, 129, 0.12)',
-                    border: '1px solid rgba(16, 185, 129, 0.25)',
-                    color: '#10b981',
-                    fontSize: '0.82rem',
-                    fontWeight: 700,
-                    marginBottom: '16px'
-                  }}
-                >
-                  <span>Code: {appliedPromo} (-GH₵{discountAmount.toFixed(2)})</span>
-                  <button onClick={handleRemovePromo} style={{ color: '#ef4444', cursor: 'pointer' }}>
-                    ✕
-                  </button>
-                </div>
-              )}
-
-              {/* Price Breakdown */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid var(--border-light)', paddingTop: '14px', fontSize: '0.88rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)' }}>
-                  <span>Items</span>
-                  <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>GH₵{cartSubtotal.toFixed(2)}</span>
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)' }}>
-                  <span>Delivery</span>
-                  <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>GH₵{shippingCost.toFixed(2)}</span>
-                </div>
-
-                {effectiveDiscount > 0 && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669' }}>
-                    <span>{usingWelcome ? 'Welcome discount' : 'Discount'}</span>
-                    <span style={{ fontWeight: 700 }}>−GH₵{effectiveDiscount.toFixed(2)}</span>
-                  </div>
-                )}
-
-                {creditUsed > 0 && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669' }}>
-                    <span>Store credit</span>
-                    <span style={{ fontWeight: 700 }}>−GH₵{creditUsed.toFixed(2)}</span>
-                  </div>
-                )}
-
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    fontSize: '1.25rem',
-                    fontWeight: 900,
-                    color: 'var(--text-primary)',
-                    paddingTop: '12px',
-                    borderTop: '1px dashed var(--border-medium)',
-                    marginTop: '4px'
-                  }}
-                >
-                  <span>Total</span>
-                  <span style={{ color: 'var(--accent)' }}>
-                    <span className="currency-ghc">GH₵</span>
-                    {grandTotal.toFixed(2)}
-                  </span>
-                </div>
-              </div>
-            </div>
+            {/* Desktop: summary sidebar */}
+            <aside className="co-card co-summary" aria-label="Order summary">
+              <h2 className="co-summary-title">Order summary</h2>
+              {summaryBody}
+            </aside>
           </div>
         )}
       </div>
+
+      {/* Phones: the main action and total stay in reach at the bottom of the screen */}
+      {step < 3 && (
+        <div className="co-actionbar">
+          <div className="co-actionbar-total">
+            <span>Total</span>
+            <strong>{money(grandTotal)}</strong>
+          </div>
+          {step === 1 ? (
+            <button type="submit" form="co-delivery-form" className="btn btn-primary">
+              Continue <ArrowRight size={16} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={`btn btn-primary ${isSubmitting ? 'is-loading' : ''}`}
+              onClick={handlePlaceOrder}
+              aria-busy={isSubmitting}
+            >
+              <Lock size={15} /> Place order
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 };

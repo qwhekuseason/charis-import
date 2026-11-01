@@ -5,7 +5,27 @@ import { ProductCard } from '../components/ProductCard';
 import { productCategorySlug } from '../utils/categories';
 import { SlidersHorizontal, X, Search, ChevronDown } from 'lucide-react';
 
-const PRICE_MAX = 5000;
+// Quick price ranges; customers can also type their own.
+const PRICE_BANDS = [
+  ['Under GH₵100', '', '100'],
+  ['GH₵100 – 300', '100', '300'],
+  ['GH₵300 – 1,000', '300', '1000'],
+  ['Over GH₵1,000', '1000', ''],
+];
+const SORTS = [
+  ['featured', 'Recommended'],
+  ['price-low', 'Price: low to high'],
+  ['price-high', 'Price: high to low'],
+  ['discount', 'Biggest discount'],
+  ['newest', 'Newest'],
+];
+const PAGE_SIZE = 24;
+
+// Search that forgives word order, capitals, accents and plurals: "red blenders" finds "Blender (Red)".
+const normalise = (text) => String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+const searchWords = (query) => normalise(query).split(/[^a-z0-9]+/).filter(Boolean).map((w) => (w.length > 3 ? w.replace(/(es|s)$/, '') : w));
+const discountOf = (p) => (p.originalPrice > p.price ? (p.originalPrice - p.price) / p.originalPrice : 0);
+const money = (n) => `GH₵${Number(n).toLocaleString()}`;
 
 export const ShopPage = () => {
   const {
@@ -18,12 +38,28 @@ export const ShopPage = () => {
     setSearchQuery,
     wishlist,
     pageParams,
-    setQuoteModalOpen
+    openQuote
   } = useStore();
 
-  const [maxPrice, setMaxPrice] = useState(PRICE_MAX);
+  const [priceMin, setPriceMin] = useState('');
+  const [priceMax, setPriceMax] = useState('');
   const [sortBy, setSortBy] = useState('featured');
+  const [onlyInStock, setOnlyInStock] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false); // phones & tablets only
+  const [visible, setVisible] = useState(PAGE_SIZE);
+
+  // The filter sheet behaves like the other popups: page stays still, Escape closes it.
+  useEffect(() => {
+    if (!filtersOpen) return undefined;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e) => { if (e.key === 'Escape') setFiltersOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [filtersOpen]);
   const [onlyWishlist, setOnlyWishlist] = useState(pageParams?.filter === 'wishlist');
   const [onlyDeals, setOnlyDeals] = useState(pageParams?.filter === 'deals');
 
@@ -33,42 +69,58 @@ export const ShopPage = () => {
     setOnlyWishlist(pageParams?.filter === 'wishlist');
   }, [pageParams?.filter]);
 
-  const countFor =(slug) => (products || []).filter((p) => productCategorySlug(p) === slug).length;
+  const countFor = (slug) => (products || []).filter((p) => productCategorySlug(p) === slug).length;
+  const min = priceMin === '' ? null : Number(priceMin);
+  const max = priceMax === '' ? null : Number(priceMax);
+  const priceActive = min !== null || max !== null;
+  const words = useMemo(() => searchWords(searchQuery), [searchQuery]);
 
   const filteredProducts = useMemo(() => {
-    return (products || []).filter((product) => {
+    const matches = (product) => {
       if (selectedCategory !== 'all' && productCategorySlug(product) !== selectedCategory) return false;
       if (onlyWishlist && !wishlist.some((w) => w.id === product.id)) return false;
       if (onlyDeals && !(product.originalPrice > product.price)) return false;
-      if (product.price > maxPrice) return false;
-
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const haystack = `${product.name} ${product.category} ${product.description}`.toLowerCase();
-        if (!haystack.includes(q)) return false;
+      if (onlyInStock && product.inStock === false) return false;
+      // Price limits only apply when the shopper sets them — expensive items are never hidden by default.
+      if (min !== null && product.price < min) return false;
+      if (max !== null && product.price > max) return false;
+      if (words.length) {
+        const haystack = normalise(`${product.name} ${product.category} ${product.description} ${(product.tags || []).join(' ')}`);
+        if (!words.every((w) => haystack.includes(w))) return false;
       }
       return true;
-    }).sort((a, b) => {
+    };
+    // While searching, products whose name matches come before ones that only mention it in the description.
+    const nameScore = (p) => (words.length && words.every((w) => normalise(p.name).includes(w)) ? 0 : 1);
+    return (products || []).filter(matches).sort((a, b) => {
       if (sortBy === 'price-low') return a.price - b.price;
       if (sortBy === 'price-high') return b.price - a.price;
+      if (sortBy === 'discount') return discountOf(b) - discountOf(a);
       if (sortBy === 'newest') return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
-      return 0;
+      // Recommended: best search matches first, then anything that can't be ordered right now goes last.
+      return nameScore(a) - nameScore(b) || Number(a.inStock === false) - Number(b.inStock === false);
     });
-  }, [products, selectedCategory, maxPrice, sortBy, searchQuery, onlyWishlist, onlyDeals, wishlist]);
+  }, [products, selectedCategory, min, max, sortBy, words, onlyWishlist, onlyDeals, onlyInStock, wishlist]);
+
+  // New filters start from the top of the list again.
+  useEffect(() => { setVisible(PAGE_SIZE); }, [selectedCategory, priceMin, priceMax, sortBy, searchQuery, onlyWishlist, onlyDeals, onlyInStock]);
 
   const resetFilters = () => {
     setSelectedCategory('all');
-    setMaxPrice(PRICE_MAX);
+    setPriceMin('');
+    setPriceMax('');
     setSearchQuery('');
     setOnlyWishlist(false);
     setOnlyDeals(false);
+    setOnlyInStock(false);
   };
 
   const activeFilterCount =
     (selectedCategory !== 'all' ? 1 : 0) +
-    (maxPrice < PRICE_MAX ? 1 : 0) +
+    (priceActive ? 1 : 0) +
     (onlyWishlist ? 1 : 0) +
-    (onlyDeals ? 1 : 0);
+    (onlyDeals ? 1 : 0) +
+    (onlyInStock ? 1 : 0);
 
   const selectedCategoryName = (categories || []).find((c) => c.slug === selectedCategory)?.name;
 
@@ -77,12 +129,24 @@ export const ShopPage = () => {
     setFiltersOpen(false); // on phones, close the panel so the products are visible right away
   };
 
+  const setBand = ([, lo, hi]) => {
+    const same = priceMin === lo && priceMax === hi;
+    setPriceMin(same ? '' : lo);
+    setPriceMax(same ? '' : hi);
+  };
+
+  const priceLabel = min !== null && max !== null ? `${money(min)} – ${money(max)}` : min !== null ? `Over ${money(min)}` : `Up to ${money(max)}`;
+  const shown = filteredProducts.slice(0, visible);
+  const query = searchQuery.trim();
+  // Categories whose name matches the search — offered when nothing is found.
+  const categoryHints = query ? (categories || []).filter((c) => words.some((w) => normalise(c.name).includes(w))).slice(0, 3) : [];
+
   const pageTitle = onlyWishlist
-    ? 'Saved Items'
+    ? 'Saved items'
     : onlyDeals
     ? 'Deals'
     : selectedCategory === 'all'
-    ? 'All Products'
+    ? 'All products'
     : selectedCategoryName || 'Products';
 
   return (
@@ -95,13 +159,14 @@ export const ShopPage = () => {
             Order from overseas suppliers and we deliver to you anywhere in Ghana.
           </p>
 
-          <div className="shop-search">
+          <form className="shop-search" role="search" onSubmit={(e) => { e.preventDefault(); e.currentTarget.querySelector('input')?.blur(); }}>
             <Search size={18} color="var(--text-muted)" style={{ flexShrink: 0 }} />
             <input
               type="search"
+              enterKeyHint="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search products"
+              placeholder="Search air fryers, dresses, mannequins…"
               aria-label="Search products"
             />
             {searchQuery && (
@@ -109,7 +174,7 @@ export const ShopPage = () => {
                 <X size={16} />
               </button>
             )}
-          </div>
+          </form>
         </div>
 
         <div className="shop-layout">
@@ -143,6 +208,10 @@ export const ShopPage = () => {
                 On sale only
               </label>
               <label className="shop-check">
+                <input type="checkbox" checked={onlyInStock} onChange={(e) => setOnlyInStock(e.target.checked)} />
+                In stock only
+              </label>
+              <label className="shop-check">
                 <input type="checkbox" checked={onlyWishlist} onChange={(e) => setOnlyWishlist(e.target.checked)} />
                 Saved items ({wishlist.length})
               </label>
@@ -159,35 +228,60 @@ export const ShopPage = () => {
                   <span>All products</span>
                   <span className="shop-category-count">{products.length}</span>
                 </button>
-                {(categories || []).map((cat) => (
-                  <button
-                    type="button"
-                    key={cat.id}
-                    className={`shop-category ${selectedCategory === cat.slug ? 'active' : ''}`}
-                    onClick={() => chooseCategory(cat.slug)}
-                  >
-                    <span>{cat.name}</span>
-                    <span className="shop-category-count">{countFor(cat.slug)}</span>
-                  </button>
-                ))}
+                {(categories || []).map((cat) => {
+                  const count = countFor(cat.slug);
+                  return (
+                    <button
+                      type="button"
+                      key={cat.id}
+                      className={`shop-category ${selectedCategory === cat.slug ? 'active' : ''} ${count === 0 ? 'is-empty' : ''}`}
+                      onClick={() => chooseCategory(cat.slug)}
+                    >
+                      <span>{cat.name}</span>
+                      <span className="shop-category-count">{count}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
             <div className="shop-filter-group">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                <h4 className="shop-filter-label" style={{ margin: 0 }}>Max price</h4>
-                <strong style={{ fontSize: '0.92rem' }}>GH₵{maxPrice.toLocaleString()}</strong>
+              <h4 className="shop-filter-label">Price</h4>
+              <div className="shop-price-bands">
+                {PRICE_BANDS.map((band) => (
+                  <button
+                    key={band[0]}
+                    type="button"
+                    className={`shop-band ${priceMin === band[1] && priceMax === band[2] ? 'is-active' : ''}`}
+                    aria-pressed={priceMin === band[1] && priceMax === band[2]}
+                    onClick={() => setBand(band)}
+                  >
+                    {band[0]}
+                  </button>
+                ))}
               </div>
-              <input
-                type="range"
-                min="20"
-                max={PRICE_MAX}
-                step="20"
-                value={maxPrice}
-                onChange={(e) => setMaxPrice(Number(e.target.value))}
-                aria-label="Maximum price"
-                style={{ width: '100%', accentColor: 'var(--accent)' }}
-              />
+              <div className="shop-price-inputs">
+                <label>
+                  <span>Min</span>
+                  <input type="number" inputMode="numeric" min="0" placeholder="0" value={priceMin} onChange={(e) => setPriceMin(e.target.value)} aria-label="Lowest price" />
+                </label>
+                <span aria-hidden="true">–</span>
+                <label>
+                  <span>Max</span>
+                  <input type="number" inputMode="numeric" min="0" placeholder="Any" value={priceMax} onChange={(e) => setPriceMax(e.target.value)} aria-label="Highest price" />
+                </label>
+              </div>
+            </div>
+
+            <div className="shop-filter-group shop-filter-sort">
+              <h4 className="shop-filter-label">Sort by</h4>
+              <div className="shop-price-bands">
+                {SORTS.map(([id, text]) => (
+                  <button key={id} type="button" className={`shop-band ${sortBy === id ? 'is-active' : ''}`} aria-pressed={sortBy === id} onClick={() => setSortBy(id)}>
+                    {text}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <button type="button" className="btn btn-primary shop-filters-done" onClick={() => setFiltersOpen(false)}>
@@ -209,23 +303,27 @@ export const ShopPage = () => {
                 <ChevronDown size={15} style={{ transform: filtersOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
               </button>
 
-              <span className="shop-count">
-                {filteredProducts.length} {filteredProducts.length === 1 ? 'product' : 'products'}
+              <span className="shop-count" aria-live="polite">
+                {query
+                  ? <>{filteredProducts.length} result{filteredProducts.length === 1 ? '' : 's'} for “{query}”</>
+                  : <>{filteredProducts.length} {filteredProducts.length === 1 ? 'product' : 'products'}</>}
               </span>
 
               <label className="shop-sort">
                 <span>Sort</span>
                 <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-                  <option value="featured">Recommended</option>
-                  <option value="price-low">Price: low to high</option>
-                  <option value="price-high">Price: high to low</option>
-                  <option value="newest">Newest</option>
+                  {SORTS.map(([id, text]) => <option key={id} value={id}>{text}</option>)}
                 </select>
               </label>
             </div>
 
-            {activeFilterCount > 0 && (
+            {(activeFilterCount > 0 || query) && (
               <div className="shop-chips">
+                {query && (
+                  <button type="button" className="shop-chip" onClick={() => setSearchQuery('')}>
+                    “{query}” <X size={13} />
+                  </button>
+                )}
                 {selectedCategory !== 'all' && (
                   <button type="button" className="shop-chip" onClick={() => setSelectedCategory('all')}>
                     {selectedCategoryName || selectedCategory} <X size={13} />
@@ -236,15 +334,23 @@ export const ShopPage = () => {
                     On sale <X size={13} />
                   </button>
                 )}
+                {onlyInStock && (
+                  <button type="button" className="shop-chip" onClick={() => setOnlyInStock(false)}>
+                    In stock <X size={13} />
+                  </button>
+                )}
                 {onlyWishlist && (
                   <button type="button" className="shop-chip" onClick={() => setOnlyWishlist(false)}>
                     Saved items <X size={13} />
                   </button>
                 )}
-                {maxPrice < PRICE_MAX && (
-                  <button type="button" className="shop-chip" onClick={() => setMaxPrice(PRICE_MAX)}>
-                    Up to GH₵{maxPrice.toLocaleString()} <X size={13} />
+                {priceActive && (
+                  <button type="button" className="shop-chip" onClick={() => { setPriceMin(''); setPriceMax(''); }}>
+                    {priceLabel} <X size={13} />
                   </button>
+                )}
+                {activeFilterCount + (query ? 1 : 0) > 1 && (
+                  <button type="button" className="shop-link-btn" onClick={resetFilters}>Clear all</button>
                 )}
               </div>
             )}
@@ -256,26 +362,50 @@ export const ShopPage = () => {
             ) : filteredProducts.length === 0 ? (
               <div className="shop-empty">
                 <h3>
-                  {selectedCategory !== 'all' && countFor(selectedCategory) === 0
+                  {query
+                    ? `No results for “${query}”`
+                    : selectedCategory !== 'all' && countFor(selectedCategory) === 0
                     ? `${selectedCategoryName || 'This category'} is coming soon`
-                    : 'No products found'}
+                    : 'No products match these filters'}
                 </h3>
                 <p>
-                  {selectedCategory !== 'all' && countFor(selectedCategory) === 0
+                  {query
+                    ? 'We can probably still get it for you. Send us the name, a link or a photo and we’ll reply with a price.'
+                    : selectedCategory !== 'all' && countFor(selectedCategory) === 0
                     ? "We're adding new stock here. Tell us what you're looking for and we'll source it for you."
-                    : 'Try a different search or clear your filters.'}
+                    : 'Try removing a filter, or clear them all.'}
                 </p>
+                {categoryHints.length > 0 && (
+                  <div className="shop-hints">
+                    <span>Try a category:</span>
+                    {categoryHints.map((c) => (
+                      <button key={c.id} type="button" className="shop-chip" onClick={() => { setSearchQuery(''); setSelectedCategory(c.slug); }}>{c.name}</button>
+                    ))}
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
-                  <button className="btn btn-outline" onClick={resetFilters}>See all products</button>
-                  <button className="btn btn-primary" onClick={() => setQuoteModalOpen(true)}>Request an item</button>
+                  <button type="button" className="btn btn-outline" onClick={resetFilters}>See all products</button>
+                  <button type="button" className="btn btn-primary" onClick={() => openQuote(query ? { productName: query } : null)}>
+                    {query ? `Ask us to find “${query.length > 24 ? `${query.slice(0, 24)}…` : query}”` : 'Request an item'}
+                  </button>
                 </div>
               </div>
             ) : (
-              <div className="products-grid">
-                {filteredProducts.map((product) => (
-                  <ProductCard key={product.id} product={product} />
-                ))}
-              </div>
+              <>
+                <div className="products-grid">
+                  {shown.map((product) => (
+                    <ProductCard key={product.id} product={product} />
+                  ))}
+                </div>
+                {filteredProducts.length > shown.length && (
+                  <div className="shop-more">
+                    <span>Showing {shown.length} of {filteredProducts.length}</span>
+                    <button type="button" className="btn btn-outline" onClick={() => setVisible((v) => v + PAGE_SIZE)}>
+                      Show {Math.min(PAGE_SIZE, filteredProducts.length - shown.length)} more
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

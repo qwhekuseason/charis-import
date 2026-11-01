@@ -1,22 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../context/StoreContext';
 import { sizedImage } from '../utils/images';
+import { SmartImage } from './SmartImage';
 import { getFoundCodes } from '../utils/hunt';
 import { validateDiscountCode } from '../services/api';
-import {
-  X,
-  Trash2,
-  Plus,
-  Minus,
-  ShoppingBag,
-  ArrowRight,
-  ShieldCheck,
-  Tag,
-  Loader2,
-  Lock,
-  Anchor,
-  Boxes
-} from 'lucide-react';
+import { X, Trash2, Plus, Minus, ShoppingBag, ArrowRight, Tag, Check, AlertTriangle, Lock, Truck } from 'lucide-react';
+
+const money = (n) => `GH₵${Number(n || 0).toFixed(2)}`;
+// The applied promo code survives closing the cart (for this browser tab).
+const PROMO_KEY = 'chari_cart_promo';
+const readSavedPromo = () => { try { return sessionStorage.getItem(PROMO_KEY) || ''; } catch { return ''; } };
+const savePromo = (code) => { try { if (code) sessionStorage.setItem(PROMO_KEY, code); else sessionStorage.removeItem(PROMO_KEY); } catch {} };
 
 export const CartDrawer = () => {
   const {
@@ -25,524 +19,221 @@ export const CartDrawer = () => {
     setCartDrawerOpen,
     updateCartQuantity,
     removeFromCart,
-    clearCart,
+    emptyCartWithUndo,
     cartSubtotal,
     navigate,
-    showToast
+    setSelectedProduct
   } = useStore();
   const foundCodes = cartDrawerOpen ? getFoundCodes() : [];
 
-  const [promoCode, setPromoCode] = useState('');
-  const [discountInfo, setDiscountInfo] = useState(null); // { code, type, value, amount }
-  const [validatingPromo, setValidatingPromo] = useState(false);
+  const [promoInput, setPromoInput] = useState('');
+  const [promoCode, setPromoCode] = useState(readSavedPromo); // the code the shopper applied
+  const [promo, setPromo] = useState(null); // { code, amount, label } — as worked out by the server
+  const [promoNote, setPromoNote] = useState(''); // why the code isn't giving a discount right now
+  const [checking, setChecking] = useState(false);
+  const [inputError, setInputError] = useState('');
+  const requestId = useRef(0);
+
+  // The server works out the discount (with its minimum order and maximum caps) and is asked
+  // again whenever the cart total changes, so the number here always matches checkout.
+  useEffect(() => {
+    if (!promoCode || cart.length === 0) { setPromo(null); setPromoNote(''); return undefined; }
+    const id = ++requestId.current;
+    setChecking(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await validateDiscountCode(promoCode, cartSubtotal);
+        if (id !== requestId.current) return;
+        setPromo({
+          code: res.code,
+          amount: res.discountAmount,
+          label: res.type === 'PERCENTAGE' ? `${res.value}% off` : `${money(res.value)} off`,
+        });
+        setPromoNote('');
+      } catch (err) {
+        if (id !== requestId.current) return;
+        setPromo(null);
+        setPromoNote(err.message || 'This code can’t be used right now.');
+      } finally {
+        if (id === requestId.current) setChecking(false);
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [promoCode, cartSubtotal, cart.length]);
 
   if (!cartDrawerOpen) return null;
+  const close = () => setCartDrawerOpen(false);
 
-  const handleApplyPromo = async (e) => {
+  const applyPromo = (e) => {
     e.preventDefault();
-    const code = promoCode.trim().toUpperCase();
-    if (!code) return;
-
-    setValidatingPromo(true);
-    try {
-      const res = await validateDiscountCode(code, cartSubtotal);
-      if (res.valid) {
-        setDiscountInfo({
-          code: res.code,
-          type: res.type,
-          value: res.value,
-          amount: res.discountAmount
-        });
-        showToast(res.message || `Coupon "${res.code}" applied!`, 'success');
-        setPromoCode('');
-      }
-    } catch (err) {
-      showToast(err.message || 'Invalid promo code', 'error');
-    } finally {
-      setValidatingPromo(false);
-    }
+    const code = promoInput.trim().toUpperCase();
+    if (!code) { setInputError('Enter a promo code.'); return; }
+    setInputError('');
+    setPromoCode(code);
+    savePromo(code);
+    setPromoInput('');
   };
 
-  const handleRemovePromo = () => {
-    setDiscountInfo(null);
-    showToast('Promo code removed', 'info');
+  const removePromo = () => {
+    setPromoCode('');
+    savePromo('');
+    setPromo(null);
+    setPromoNote('');
   };
 
-  const discountAmount = discountInfo
-    ? discountInfo.type === 'PERCENTAGE'
-      ? (cartSubtotal * discountInfo.value) / 100
-      : Math.min(discountInfo.value || 0, cartSubtotal)
-    : 0;
-  const grandTotal = Math.max(0, cartSubtotal - discountAmount);
+  const discountAmount = promo ? Math.min(promo.amount, cartSubtotal) : 0;
+  const total = Math.max(0, cartSubtotal - discountAmount);
+  const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+  // What shoppers save versus the "was" prices on the products themselves.
+  const productSavings = cart.reduce((sum, item) => {
+    const was = Number(item.product.originalPrice);
+    return was > item.unitPrice ? sum + (was - item.unitPrice) * item.quantity : sum;
+  }, 0);
+  const unavailable = cart.filter((item) => item.product.inStock === false);
 
-  const totalCbm = cart.reduce((sum, item) => sum + (item.product.cbm || 0.035) * item.quantity, 0);
-  const totalWeight = cart.reduce((sum, item) => sum + (item.product.weightKg || 2.5) * item.quantity, 0);
-  const totalItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
-
-  const handleProceedToCheckout = () => {
-    setCartDrawerOpen(false);
-    navigate('checkout', { discountAmount, appliedPromo: discountInfo?.code || '' });
+  const goToCheckout = () => {
+    close();
+    navigate('checkout', promo ? { discountAmount, appliedPromo: promo.code } : {});
   };
+
+  const openProduct = (product) => { close(); setSelectedProduct(product); };
 
   return (
     <>
-      <div className="drawer-overlay" onClick={() => setCartDrawerOpen(false)} />
-      <div
-        className="cart-drawer glass-panel"
-        style={{
-          backgroundColor: 'var(--bg-card)',
-          color: 'var(--text-primary)',
-          borderLeft: '1px solid var(--border-light)',
-          display: 'flex',
-          flexDirection: 'column'
-        }}
-      >
-        {/* Header */}
-        <div
-          className="drawer-header"
-          style={{
-            borderBottom: '1px solid var(--border-light)',
-            backgroundColor: 'var(--bg-card)'
-          }}
-        >
-          <div className="drawer-title" style={{ color: 'var(--text-primary)' }}>
-            <ShoppingBag size={22} color="#2563eb" />
-            <span>Your cart ({totalItemCount})</span>
-          </div>
-          <button
-            onClick={() => setCartDrawerOpen(false)}
-            style={{
-              padding: '6px',
-              borderRadius: '50%',
-              backgroundColor: 'var(--bg-main)',
-              color: 'var(--text-secondary)',
-              border: '1px solid var(--border-light)',
-              cursor: 'pointer'
-            }}
-          >
-            <X size={18} />
-          </button>
-        </div>
+      <div className="drawer-overlay" onClick={close} />
+      <aside className="cart-drawer cd" role="dialog" aria-modal="true" aria-labelledby="cd-title">
+        <header className="cd-head">
+          <h2 id="cd-title"><ShoppingBag size={20} /> Your cart {itemCount > 0 && <span className="cd-count">{itemCount}</span>}</h2>
+          <button type="button" className="cd-close" onClick={close} aria-label="Close cart"><X size={20} /></button>
+        </header>
 
-        {/* Content */}
-        <div className="drawer-body" style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
+        <div className="cd-body">
           {cart.length === 0 ? (
-            <div
-              style={{
-                height: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                textAlign: 'center',
-                padding: '40px 20px',
-                color: 'var(--text-secondary)'
-              }}
-            >
-              <div
-                style={{
-                  width: '80px',
-                  height: '80px',
-                  borderRadius: '50%',
-                  backgroundColor: 'rgba(37, 99, 235, 0.1)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  marginBottom: '16px',
-                  color: '#2563eb'
-                }}
-              >
-                <ShoppingBag size={40} />
-              </div>
-              <h3 style={{ fontSize: '1.2rem', color: 'var(--text-primary)', marginBottom: '8px', fontWeight: 800 }}>
-                Your cart is empty
-              </h3>
-              <p style={{ fontSize: '0.88rem', marginBottom: '24px', color: 'var(--text-secondary)' }}>
-                Browse our products and add what you like.
-              </p>
-              <button
-                className="btn btn-primary"
-                onClick={() => {
-                  setCartDrawerOpen(false);
-                  navigate('shop');
-                }}
-              >
-                Start shopping
+            <div className="cd-empty">
+              <div className="cd-empty-icon"><ShoppingBag size={34} /></div>
+              <h3>Your cart is empty</h3>
+              <p>Browse the shop and add what you like — or ask us to find something for you.</p>
+              <button type="button" className="btn btn-primary" onClick={() => { close(); navigate('shop'); }}>
+                Start shopping <ArrowRight size={16} />
               </button>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {cart.map((item) => (
-                <div
-                  key={item.product.id}
-                  className="glass-panel"
-                  style={{
-                    display: 'flex',
-                    gap: '12px',
-                    padding: '12px',
-                    borderRadius: '14px',
-                    border: '1px solid var(--border-light)',
-                    position: 'relative'
-                  }}
-                >
-                  <img
-                    src={sizedImage(item.product.images?.[0] || item.product.image || '', 160)}
-                    alt={item.product.name}
-                    style={{
-                      width: '74px',
-                      height: '74px',
-                      borderRadius: '10px',
-                      objectFit: 'cover',
-                      flexShrink: 0,
-                      border: '1px solid var(--border-light)'
-                    }}
-                  />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'flex-start',
-                        gap: '8px'
-                      }}
-                    >
-                      <h4
-                        style={{
-                          fontSize: '0.88rem',
-                          fontWeight: 700,
-                          color: 'var(--text-primary)',
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          margin: 0
-                        }}
-                      >
-                        {item.product.name}
-                      </h4>
-                      <button
-                        onClick={() => removeFromCart(item.product.id)}
-                        style={{ color: 'var(--text-muted)', padding: '2px', background: 'none', border: 'none', cursor: 'pointer' }}
-                        title="Remove item"
-                      >
-                        <Trash2 size={15} />
+            <>
+              {unavailable.length > 0 && (
+                <div className="cd-alert" role="alert">
+                  <AlertTriangle size={16} />
+                  <span>{unavailable.length === 1 ? 'One item is' : `${unavailable.length} items are`} out of stock. Remove {unavailable.length === 1 ? 'it' : 'them'} to check out.</span>
+                </div>
+              )}
+
+              <ul className="cd-items">
+                {cart.map((item) => {
+                  const p = item.product;
+                  const out = p.inStock === false;
+                  const was = Number(p.originalPrice);
+                  return (
+                    <li key={p.id} className={`cd-item ${out ? 'is-out' : ''}`}>
+                      <button type="button" className="cd-thumb-btn" onClick={() => openProduct(p)} aria-label={`View ${p.name}`}>
+                        <SmartImage src={sizedImage(p.images?.[0] || p.image || '', 160)} alt="" className="cart-thumb cd-thumb" />
                       </button>
-                    </div>
-
-                    <div
-                      style={{
-                        fontSize: '0.78rem',
-                        color: 'var(--text-secondary)',
-                        margin: '4px 0'
-                      }}
-                    >
-                      GH₵{item.unitPrice.toFixed(2)} each
-                    </div>
-
-                    {/* Stepper & Total */}
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        marginTop: '8px'
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          backgroundColor: 'var(--bg-main)',
-                          border: '1px solid var(--border-light)',
-                          borderRadius: '8px',
-                          padding: '3px 6px'
-                        }}
-                      >
-                        <button
-                          onClick={() => {
-                            updateCartQuantity(item.product.id, item.quantity - 1);
-                          }}
-                          style={{ color: 'var(--text-primary)', background: 'none', border: 'none', cursor: 'pointer' }}
-                        >
-                          <Minus size={13} />
-                        </button>
-                        <span
-                          style={{
-                            fontSize: '0.85rem',
-                            fontWeight: 800,
-                            minWidth: '24px',
-                            textAlign: 'center',
-                            color: 'var(--text-primary)'
-                          }}
-                        >
-                          {item.quantity}
-                        </span>
-                        <button
-                          onClick={() =>
-                            updateCartQuantity(item.product.id, item.quantity + 1)
-                          }
-                          style={{ color: 'var(--text-primary)', background: 'none', border: 'none', cursor: 'pointer' }}
-                        >
-                          <Plus size={13} />
-                        </button>
+                      <div className="cd-item-main">
+                        <div className="cd-item-top">
+                          <button type="button" className="cd-item-name" onClick={() => openProduct(p)}>{p.name}</button>
+                          <button type="button" className="cd-remove" onClick={() => removeFromCart(p.id)} aria-label={`Remove ${p.name}`} title="Remove"><Trash2 size={16} /></button>
+                        </div>
+                        <div className="cd-item-price">
+                          {money(item.unitPrice)} each
+                          {was > item.unitPrice && <s>{money(was)}</s>}
+                          {out && <span className="cd-out">Out of stock</span>}
+                        </div>
+                        <div className="cd-item-bottom">
+                          <div className="cd-qty" role="group" aria-label={`Quantity of ${p.name}`}>
+                            {item.quantity > 1 ? (
+                              <button type="button" onClick={() => updateCartQuantity(p.id, item.quantity - 1)} aria-label="One less"><Minus size={16} /></button>
+                            ) : (
+                              // At 1, the left button removes the item (with Undo) instead of silently deleting it.
+                              <button type="button" onClick={() => removeFromCart(p.id)} aria-label={`Remove ${p.name}`} className="is-remove"><Trash2 size={15} /></button>
+                            )}
+                            <span aria-live="polite">{item.quantity}</span>
+                            <button type="button" onClick={() => updateCartQuantity(p.id, Math.min(999, item.quantity + 1))} aria-label="One more" disabled={out}><Plus size={16} /></button>
+                          </div>
+                          <strong className="cd-line-total">{money(item.total)}</strong>
+                        </div>
                       </div>
+                    </li>
+                  );
+                })}
+              </ul>
 
-                      <div
-                        style={{
-                          fontSize: '1rem',
-                          fontWeight: 900,
-                          color: 'var(--text-primary)'
-                        }}
-                      >
-                        <span className="currency-ghc">GH₵</span>
-                        {item.total.toFixed(2)}
+              {/* Promo code */}
+              <section className="cd-promo" aria-label="Promo code">
+                {promoCode ? (
+                  <div className={`cd-promo-applied ${promo ? 'is-ok' : promoNote ? 'is-warn' : ''}`}>
+                    <span className="cd-promo-icon">{promo ? <Check size={16} /> : <Tag size={16} />}</span>
+                    <span className="cd-promo-text">
+                      <strong>{promoCode}</strong>
+                      <small>
+                        {checking ? 'Checking…' : promo ? `${promo.label} · you save ${money(discountAmount)}` : promoNote}
+                      </small>
+                    </span>
+                    <button type="button" onClick={removePromo} aria-label={`Remove code ${promoCode}`}><X size={16} /></button>
+                  </div>
+                ) : (
+                  <>
+                    <form className="cd-promo-form" onSubmit={applyPromo}>
+                      <Tag size={16} aria-hidden="true" />
+                      <input
+                        type="text"
+                        placeholder="Promo code"
+                        aria-label="Promo code"
+                        autoCapitalize="characters"
+                        value={promoInput}
+                        onChange={(e) => { setPromoInput(e.target.value.toUpperCase()); setInputError(''); }}
+                      />
+                      <button type="submit" className="btn btn-dark btn-sm">Apply</button>
+                    </form>
+                    {inputError && <span className="cd-input-error" role="alert">{inputError}</span>}
+                    {/* Only codes this shopper found in the treasure hunt — never a public list */}
+                    {foundCodes.length > 0 ? (
+                      <div className="cd-found">
+                        <span>Codes you found:</span>
+                        {foundCodes.map((coupon) => (
+                          <button key={coupon.code} type="button" onClick={() => { setPromoCode(coupon.code); savePromo(coupon.code); }} title={coupon.offer}>
+                            {coupon.code} · {coupon.offer}
+                          </button>
+                        ))}
                       </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              {/* Package Summary */}
-              <div
-                className="glass-panel"
-                style={{
-                  padding: '10px 14px',
-                  borderRadius: '12px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  fontSize: '0.8rem',
-                  color: 'var(--text-secondary)',
-                  border: '1px solid var(--border-light)'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  
-                  <span>Items: <strong>{totalItemCount}</strong></span>
-                </div>
-                <div>
-                  <span>Approx. weight: <strong style={{ color: 'var(--text-primary)' }}>{totalWeight.toFixed(1)} kg</strong></span>
-                </div>
-              </div>
-
-              {/* Promo code box */}
-              <div
-                className="glass-panel"
-                style={{
-                  marginTop: '4px',
-                  padding: '14px',
-                  borderRadius: '12px',
-                  border: '1px solid var(--border-light)'
-                }}
-              >
-                <form
-                  onSubmit={handleApplyPromo}
-                  style={{ display: 'flex', gap: '8px' }}
-                >
-                  <input
-                    type="text"
-                    placeholder="Enter promo coupon"
-                    value={promoCode}
-                    disabled={validatingPromo}
-                    onChange={(e) => setPromoCode(e.target.value)}
-                    style={{
-                      flex: 1,
-                      padding: '8px 12px',
-                      fontSize: '0.85rem',
-                      borderRadius: '8px',
-                      border: '1px solid var(--border-light)',
-                      backgroundColor: 'var(--bg-main)',
-                      color: 'var(--text-primary)',
-                      textTransform: 'uppercase',
-                      fontWeight: 700
-                    }}
-                  />
-                  <button
-                    type="submit"
-                    disabled={validatingPromo || !promoCode.trim()}
-                    className="btn btn-dark btn-sm"
-                    style={{ minWidth: '70px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px' }}
-                  >
-                    {validatingPromo ? <Loader2 size={14} className="animate-spin" /> : 'Apply'}
-                  </button>
-                </form>
-
-                {/* Only codes this shopper found in the treasure hunt — never a public list */}
-                {!discountInfo && foundCodes.length > 0 && (
-                  <div style={{ marginTop: '10px' }}>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '6px' }}>
-                      Codes you found:
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                      {foundCodes.map((coupon) => (
-                        <button
-                          key={coupon.code}
-                          type="button"
-                          onClick={() => setPromoCode(coupon.code)}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                            padding: '3px 8px',
-                            backgroundColor: 'rgba(37, 99, 235, 0.1)',
-                            border: '1px dashed #2563eb',
-                            borderRadius: '6px',
-                            fontSize: '0.74rem',
-                            fontWeight: 700,
-                            color: '#2563eb',
-                            cursor: 'pointer'
-                          }}
-                          title={coupon.offer}
-                        >
-                          {coupon.code} • {coupon.offer}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                    ) : (
+                      <p className="cd-hint">No code? Some are hidden around the site — keep an eye out.</p>
+                    )}
+                  </>
                 )}
-                {!discountInfo && foundCodes.length === 0 && (
-                  <p style={{ marginTop: '8px', fontSize: '0.76rem', color: 'var(--text-muted)' }}>
-                    No code? Some are hidden around the site — keep an eye out.
-                  </p>
-                )}
-
-                {discountInfo && (
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      fontSize: '0.8rem',
-                      color: '#10b981',
-                      fontWeight: 600,
-                      marginTop: '8px',
-                      padding: '6px 10px',
-                      backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                      borderRadius: '8px',
-                      border: '1px solid rgba(16, 185, 129, 0.3)'
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      
-                      <span>
-                        Coupon <strong>{discountInfo.code}</strong> applied (
-                        {discountInfo.type === 'PERCENTAGE'
-                          ? `${discountInfo.value}% OFF`
-                          : `GH₵${discountInfo.value} OFF`}
-                        )
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleRemovePromo}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: '#ef4444',
-                        cursor: 'pointer',
-                        fontSize: '0.75rem',
-                        fontWeight: 700,
-                        padding: '0 4px'
-                      }}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
+              </section>
+            </>
           )}
         </div>
 
-        {/* Footer */}
         {cart.length > 0 && (
-          <div
-            className="drawer-footer"
-            style={{
-              backgroundColor: 'var(--bg-card)',
-              borderTop: '1px solid var(--border-light)',
-              padding: '16px 20px'
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                fontSize: '0.88rem',
-                color: 'var(--text-secondary)',
-                marginBottom: '6px'
-              }}
-            >
-              <span>Subtotal:</span>
-              <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
-                GH₵{cartSubtotal.toFixed(2)}
-              </span>
-            </div>
-
-            {discountAmount > 0 && (
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  fontSize: '0.88rem',
-                  color: '#10b981',
-                  marginBottom: '6px'
-                }}
-              >
-                <span>
-                  Discount ({discountInfo?.code}):
-                </span>
-                <span style={{ fontWeight: 700 }}>
-                  - GH₵{discountAmount.toFixed(2)}
-                </span>
-              </div>
+          <footer className="cd-foot">
+            <dl className="cd-totals">
+              <div><dt>Items ({itemCount})</dt><dd>{money(cartSubtotal)}</dd></div>
+              {discountAmount > 0 && <div className="is-saving"><dt>Promo {promo.code}</dt><dd>−{money(discountAmount)}</dd></div>}
+              <div className="cd-delivery"><dt><Truck size={14} /> Delivery</dt><dd>Chosen at checkout</dd></div>
+              <div className="cd-grand"><dt>Total</dt><dd>{money(total)}</dd></div>
+            </dl>
+            {(productSavings + discountAmount) > 0 && (
+              <p className="cd-savings">You're saving {money(productSavings + discountAmount)} on this order</p>
             )}
-
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                fontSize: '1.3rem',
-                fontWeight: 900,
-                color: 'var(--text-primary)',
-                paddingTop: '10px',
-                borderTop: '1px dashed var(--border-light)',
-                marginBottom: '16px'
-              }}
-            >
-              <span>Landed Total:</span>
-              <span style={{ color: '#2563eb' }}>
-                <span className="currency-ghc">GH₵</span>
-                {grandTotal.toFixed(2)}
-              </span>
+            <button type="button" className="btn btn-primary btn-block cd-checkout" onClick={goToCheckout} disabled={unavailable.length > 0 || checking}>
+              <Lock size={16} /> Checkout · {money(total)}
+            </button>
+            <div className="cd-foot-links">
+              <button type="button" onClick={() => { close(); navigate('shop'); }}>Keep shopping</button>
+              <button type="button" onClick={emptyCartWithUndo}>Empty cart</button>
             </div>
-
-            <button
-              className="btn btn-primary"
-              style={{ width: '100%', marginBottom: '8px', borderRadius: '12px', padding: '12px' }}
-              onClick={handleProceedToCheckout}
-            >
-              Go to checkout <ArrowRight size={18} />
-            </button>
-
-            <button
-              onClick={clearCart}
-              style={{
-                width: '100%',
-                fontSize: '0.8rem',
-                color: 'var(--text-muted)',
-                textAlign: 'center',
-                padding: '4px',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer'
-              }}
-            >
-              Clear Bag
-            </button>
-          </div>
+          </footer>
         )}
-      </div>
+      </aside>
     </>
   );
 };

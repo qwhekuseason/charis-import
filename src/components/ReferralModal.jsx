@@ -116,7 +116,7 @@ export const ReferralModal = () => {
                           {HISTORY_LABELS[item.type] || item.type}
                           <small>{new Date(item.createdAt).toLocaleDateString('en-GB')}</small>
                         </span>
-                        <strong style={{ color: item.amount > 0 ? '#059669' : 'var(--text-primary)' }}>
+                        <strong style={{ color: item.amount > 0 ? '#23744a' : 'var(--text-primary)' }}>
                           {item.amount > 0 ? '+' : '−'}GH₵{Math.abs(item.amount).toFixed(2)}
                         </strong>
                       </li>

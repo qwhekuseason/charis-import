@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useStore } from '../context/StoreContext';
 import {
   ShoppingBag,
@@ -10,9 +11,21 @@ import {
   User,
   Shield,
   Gift,
-  Flame,
-  PackagePlus
+  PackagePlus,
+  Search,
+  LogOut,
+  Package
 } from 'lucide-react';
+
+const NAV_LINKS = [
+  { label: 'Home', page: 'home' },
+  { label: 'Shop', page: 'shop' },
+  { label: 'Deals', page: 'shop', filter: 'deals' },
+  { label: 'Categories', page: 'categories' },
+  { label: 'Import Tips', page: 'import-tips' },
+  { label: 'About Us', page: 'about' },
+  { label: 'Contact', page: 'contact' },
+];
 
 export const Navbar = () => {
   const {
@@ -20,373 +33,270 @@ export const Navbar = () => {
     pageParams,
     navigate,
     cartCount,
+    cartBump,
     wishlist,
     setCartDrawerOpen,
-    setSelectedProduct,
+    setSearchQuery,
     setSelectedCategory,
-    products,
     user,
     openAuth,
+    logout,
     setQuoteModalOpen,
     setReferralModalOpen,
     WHATSAPP_NUMBER
   } = useStore();
 
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+  const [menuSearch, setMenuSearch] = useState('');
+  const menuRef = useRef(null);
+  const toggleRef = useRef(null);
 
-  const handleCategoryNav = (catSlug) => {
-    setSelectedCategory(catSlug);
-    navigate('shop');
-    setMobileMenuOpen(false);
+  // A soft shadow once the page scrolls, so the header stands apart from the content.
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Phone menu: page stays still behind it, Escape closes it, focus goes in and comes back out.
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e) => { if (e.key === 'Escape') setMenuOpen(false); };
+    window.addEventListener('keydown', onKey);
+    menuRef.current?.querySelector('input, button')?.focus({ preventScroll: true });
+    const toggle = toggleRef.current;
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener('keydown', onKey);
+      toggle?.focus({ preventScroll: true });
+    };
+  }, [menuOpen]);
+
+  // Changing page from anywhere (bottom bar, back button) closes the menu.
+  useEffect(() => { setMenuOpen(false); }, [currentPage, pageParams]);
+
+  const isActive = (link) => {
+    if (link.page !== currentPage) return false;
+    if (link.filter) return pageParams?.filter === link.filter;
+    // "Shop" isn't also highlighted while the Deals view is showing.
+    return link.page !== 'shop' || pageParams?.filter !== 'deals';
   };
 
-  const navLinks = [
-    { label: 'Home', page: 'home' },
-    { label: 'Shop', page: 'shop' },
-    { label: 'Deals', page: 'shop', filter: 'deals' },
-    { label: 'Categories', page: 'categories' },
-    { label: 'Import Tips', page: 'import-tips' },
-    { label: 'About Us', page: 'about' },
-    { label: 'Contact', page: 'contact' },
-  ];
+  const go = (link) => {
+    if (link.filter) navigate('shop', { filter: link.filter });
+    else navigate(link.page);
+    setMenuOpen(false);
+  };
+
+  // Header search icon: go to the Shop and put the cursor in its search box.
+  const openSearch = () => {
+    navigate('shop');
+    setTimeout(() => document.querySelector('.shop-search input')?.focus(), 250);
+  };
+
+  const submitMenuSearch = (e) => {
+    e.preventDefault();
+    setSearchQuery(menuSearch.trim());
+    setSelectedCategory('all');
+    setMenuSearch('');
+    navigate('shop');
+  };
+
+  const firstName = user?.name?.split(' ')[0];
 
   return (
-    <header className="site-header">
-      {/* Main Navbar */}
+    <header className={`site-header ${scrolled ? 'scrolled' : ''}`}>
       <div className="container navbar-container">
-
-        {/* Brand Logo */}
-        <div
-          onClick={() => navigate('home')}
+        {/* Brand */}
+        <a
+          href="#/home"
+          onClick={(e) => { e.preventDefault(); navigate('home'); }}
           className="brand-logo"
-          style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
+          aria-label="CHARI home"
         >
-          <img
-            src="/chari-mark.jpg"
-            alt="CHARI"
-            style={{
-              width: '42px',
-              height: '42px',
-              objectFit: 'contain',
-              borderRadius: '8px',
-              display: 'block'
-            }}
-          />
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <span className="brand-title" style={{ fontSize: '1.45rem', fontWeight: 900, letterSpacing: '0.04em', lineHeight: 1.1 }}>
-              CHARI<span style={{ color: 'var(--accent)' }}>.</span>
-            </span>
-            <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-              Direct Imports
-            </span>
-          </div>
-        </div>
+          <img src="/chari-mark.jpg" alt="" className="brand-mark" width="42" height="42" />
+          <span className="brand-words">
+            <span className="brand-title">CHARI<span className="brand-dot">.</span></span>
+            <span className="brand-sub">Direct Imports</span>
+          </span>
+        </a>
 
-        {/* Desktop Navigation */}
-        <nav className="desktop-nav">
-          {navLinks.map((link) => {
-            const isActive = currentPage === link.page && (!link.filter || pageParams?.filter === link.filter);
-            return (
-              <button
-                key={link.label}
-                onClick={() => {
-                  if (link.filter) {
-                    navigate('shop', { filter: link.filter });
-                  } else {
-                    navigate(link.page);
-                  }
-                }}
-                className={`nav-link ${isActive ? 'active' : ''}`}
-                style={link.filter === 'deals' ? { color: '#ea580c', fontWeight: 700 } : {}}
-              >
-                {link.label}
-              </button>
-            );
-          })}
+        {/* Desktop links */}
+        <nav className="desktop-nav" aria-label="Main">
+          {NAV_LINKS.map((link) => (
+            <button
+              key={link.label}
+              type="button"
+              onClick={() => go(link)}
+              className={`nav-link ${isActive(link) ? 'active' : ''} ${link.filter === 'deals' ? 'nav-link-deals' : ''}`}
+              aria-current={isActive(link) ? 'page' : undefined}
+            >
+              {link.label}
+            </button>
+          ))}
         </nav>
 
-        {/* Right Actions */}
-        <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-
-          {/* Request Item Button */}
-          <button
-            onClick={() => setQuoteModalOpen(true)}
-            className="navbar-cta-btn"
-            style={{
-              alignItems: 'center',
-              gap: '6px',
-              padding: '7px 12px',
-              backgroundColor: 'var(--accent-subtle)',
-              border: '1.5px solid var(--accent-border)',
-              color: 'var(--accent)',
-              borderRadius: '10px',
-              fontSize: '0.8rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              transition: 'all 0.15s ease'
-            }}
-            title="Request an item not listed on the store"
-          >
-            <PackagePlus size={15} color="var(--accent)" />
-            <span>Request Item</span>
+        {/* Right-hand actions */}
+        <div className="header-actions">
+          <button type="button" onClick={() => setQuoteModalOpen(true)} className="navbar-cta-btn nav-cta-request" title="Request an item that isn't in the shop" aria-label="Request an item">
+            <PackagePlus size={15} />
+            <span className="nav-cta-text">Request Item</span>
+          </button>
+          <button type="button" onClick={() => setReferralModalOpen(true)} className="navbar-cta-btn nav-cta-earn" title="Give GH₵25, get GH₵25" aria-label="Invite a friend and earn GH₵25">
+            <Gift size={15} />
+            <span className="nav-cta-text">Earn GH₵25</span>
           </button>
 
-          {/* Referral / Earn Button */}
-          <button
-            onClick={() => setReferralModalOpen(true)}
-            className="navbar-cta-btn"
-            style={{
-              alignItems: 'center',
-              gap: '5px',
-              padding: '7px 12px',
-              backgroundColor: 'rgba(16, 185, 129, 0.12)',
-              border: '1.5px solid rgba(16, 185, 129, 0.28)',
-              color: '#10b981',
-              borderRadius: '10px',
-              fontSize: '0.8rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              transition: 'all 0.15s ease'
-            }}
-            title="Give GH₵25, Get GH₵25"
-          >
-            <Gift size={14} color="#10b981" />
-            <span>Earn GH₵25</span>
-          </button>
-
-          {/* User / Account */}
           {user ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <>
               {user.role === 'ADMIN' && (
-                <button
-                  onClick={() => navigate('admin')}
-                  className="navbar-text-btn"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '5px',
-                    padding: '6px 12px',
-                    borderRadius: '8px',
-                    backgroundColor: 'var(--accent-subtle)',
-                    color: 'var(--accent)',
-                    fontWeight: 700,
-                    fontSize: '0.8rem',
-                    cursor: 'pointer',
-                    border: '1.5px solid var(--accent-border)',
-                    whiteSpace: 'nowrap'
-                  }}
-                >
-                  <Shield size={13} />
-                  Admin
+                <button type="button" onClick={() => navigate('admin')} className={`navbar-text-btn nav-admin ${currentPage === 'admin' ? 'is-active' : ''}`}>
+                  <Shield size={14} /> Admin
                 </button>
               )}
-              <button
-                onClick={() => navigate('account')}
-                className="navbar-text-btn"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                  padding: '6px 12px',
-                  borderRadius: '8px',
-                  backgroundColor: 'var(--bg-subtle)',
-                  border: '1px solid var(--border-light)',
-                  color: 'var(--text-primary)',
-                  fontWeight: 600,
-                  fontSize: '0.82rem',
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                  maxWidth: '120px',
-                  overflow: 'hidden'
-                }}
-              >
+              <button type="button" onClick={() => navigate('account')} className={`navbar-text-btn nav-account ${currentPage === 'account' ? 'is-active' : ''}`} title="Your account">
                 <User size={14} />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {user.name.split(' ')[0]}
-                </span>
+                <span>{firstName}</span>
               </button>
-            </div>
+            </>
           ) : (
-            <button
-              onClick={() => openAuth('login')}
-              className="navbar-text-btn"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                padding: '7px 14px',
-                borderRadius: '8px',
-                backgroundColor: 'var(--bg-subtle)',
-                border: '1px solid var(--border-light)',
-                color: 'var(--text-primary)',
-                fontWeight: 600,
-                fontSize: '0.82rem',
-                cursor: 'pointer',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              <User size={14} />
-              Sign In
+            <button type="button" onClick={() => openAuth('login')} className="navbar-text-btn nav-account">
+              <User size={14} /> Sign In
             </button>
           )}
 
-          {/* Wishlist */}
+          <button type="button" onClick={openSearch} className="action-btn nav-search-btn" aria-label="Search products" title="Search">
+            <Search size={18} />
+          </button>
+
           <button
+            type="button"
             onClick={() => navigate('shop', { filter: 'wishlist' })}
             className="action-btn"
-            title="Wishlist"
-            style={{ borderRadius: '10px' }}
+            aria-label={`Saved items${wishlist.length ? `, ${wishlist.length}` : ''}`}
+            title="Saved items"
           >
             <Heart size={18} />
-            {wishlist.length > 0 && (
-              <span className="badge-counter">{wishlist.length}</span>
-            )}
+            {wishlist.length > 0 && <span className="badge-counter">{wishlist.length}</span>}
           </button>
 
-          {/* Cart */}
           <button
+            type="button"
             onClick={() => setCartDrawerOpen(true)}
-            className="action-btn"
+            key={`cart-${cartBump}`}
+            className={`action-btn nav-cart ${cartBump ? 'cart-bump' : ''}`}
             title="Cart"
-            style={{ background: '#2563eb', color: '#ffffff', borderRadius: '10px', boxShadow: '0 4px 12px rgba(37,99,235,0.25)' }}
+            aria-label={`Cart, ${cartCount} item${cartCount === 1 ? '' : 's'}`}
           >
             <ShoppingBag size={18} />
-            {cartCount > 0 && (
-              <span className="badge-counter" style={{ background: '#f97316', color: '#ffffff' }}>{cartCount}</span>
-            )}
+            {cartCount > 0 && <span className="badge-counter nav-cart-count">{cartCount}</span>}
           </button>
 
-          {/* Mobile Menu */}
           <button
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            ref={toggleRef}
+            type="button"
+            onClick={() => setMenuOpen((o) => !o)}
             className="action-btn mobile-menu-toggle"
-            aria-label="Toggle menu"
-            style={{ borderRadius: '10px' }}
+            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={menuOpen}
+            aria-controls="nav-drawer"
           >
-            {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+            {menuOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
         </div>
       </div>
 
-      {/* Mobile Menu Drawer */}
-      {mobileMenuOpen && (
-        <div
-          style={{
-            backgroundColor: 'var(--bg-card)',
-            borderTop: '1px solid var(--border-light)',
-            padding: '14px 20px 24px',
-          }}
-        >
-
-          {/* Mobile Nav Links */}
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {navLinks.map((link, i) => (
-              <button
-                key={link.label}
-                onClick={() => {
-                  if (link.filter) {
-                    navigate('shop', { filter: link.filter });
-                  } else {
-                    navigate(link.page);
-                  }
-                  setMobileMenuOpen(false);
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '12px 0',
-                  fontSize: '0.95rem',
-                  fontWeight: currentPage === link.page ? 700 : 500,
-                  color: currentPage === link.page ? 'var(--accent)' : 'var(--text-primary)',
-                  borderBottom: i < navLinks.length - 1 ? '1px solid var(--border-light)' : 'none',
-                  background: 'transparent'
-                }}
-              >
-                {link.label}
-                <ChevronRight size={15} color="var(--text-muted)" />
-              </button>
-            ))}
-          </div>
-
-          {/* Quick Mobile Action Buttons */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '16px' }}>
-            <button
-              onClick={() => {
-                setMobileMenuOpen(false);
-                setQuoteModalOpen(true);
-              }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '6px',
-                padding: '10px 12px',
-                backgroundColor: 'var(--accent-subtle)',
-                border: '1.5px solid var(--accent-border)',
-                color: 'var(--accent)',
-                borderRadius: '10px',
-                fontSize: '0.85rem',
-                fontWeight: 700,
-                cursor: 'pointer'
-              }}
-            >
-              <PackagePlus size={16} color="var(--accent)" />
-              Request Item
-            </button>
-
-            <button
-              onClick={() => {
-                setMobileMenuOpen(false);
-                setReferralModalOpen(true);
-              }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '6px',
-                padding: '10px 12px',
-                backgroundColor: 'rgba(16, 185, 129, 0.12)',
-                border: '1.5px solid rgba(16, 185, 129, 0.3)',
-                color: '#10b981',
-                borderRadius: '10px',
-                fontSize: '0.85rem',
-                fontWeight: 700,
-                cursor: 'pointer'
-              }}
-            >
-              <Gift size={16} color="#10b981" />
-              Earn GH₵25
-            </button>
-          </div>
-
-          {/* Mobile WhatsApp */}
-          <div style={{ marginTop: '16px' }}>
-            <a
-              href={`https://wa.me/${WHATSAPP_NUMBER}`}
-              target="_blank"
-              rel="noreferrer"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
-                backgroundColor: '#25D366',
-                color: '#ffffff',
-                padding: '11px 20px',
-                borderRadius: '8px',
-                fontWeight: 700,
-                fontSize: '0.9rem',
-                width: '100%'
-              }}
-            >
-              <MessageCircle size={17} /> Chat on WhatsApp
-            </a>
-          </div>
+      {/* Phone & tablet menu — slides in from the side. Rendered on <body>: the header's
+          frosted-glass effect would otherwise squeeze anything fixed-position into the header bar. */}
+      {createPortal(<>
+      {menuOpen && <div className="nav-drawer-backdrop" onClick={() => setMenuOpen(false)} aria-hidden="true" />}
+      <aside
+        id="nav-drawer"
+        ref={menuRef}
+        className={`nav-drawer ${menuOpen ? 'is-open' : ''}`}
+        aria-label="Menu"
+        aria-hidden={!menuOpen}
+        inert={menuOpen ? undefined : ''}
+      >
+        <div className="nav-drawer-head">
+          <span className="nav-drawer-title">Menu</span>
+          <button type="button" className="nav-drawer-close" onClick={() => setMenuOpen(false)} aria-label="Close menu"><X size={20} /></button>
         </div>
-      )}
+
+        <form className="nav-drawer-search" role="search" onSubmit={submitMenuSearch}>
+          <Search size={17} aria-hidden="true" />
+          <input type="search" enterKeyHint="search" placeholder="Search products" aria-label="Search products" value={menuSearch} onChange={(e) => setMenuSearch(e.target.value)} />
+        </form>
+
+        {/* Account */}
+        <div className="nav-drawer-account">
+          {user ? (
+            <>
+              <div className="nav-drawer-hello">
+                <span className="nav-drawer-avatar" aria-hidden="true">{user.name.charAt(0).toUpperCase()}</span>
+                <span><strong>Hi, {firstName}</strong><small>{user.email}</small></span>
+              </div>
+              <div className="nav-drawer-account-links">
+                <button type="button" onClick={() => navigate('account')}><Package size={16} /> My orders & account</button>
+                {user.role === 'ADMIN' && <button type="button" onClick={() => navigate('admin')}><Shield size={16} /> Admin dashboard</button>}
+              </div>
+            </>
+          ) : (
+            <div className="nav-drawer-auth">
+              <button type="button" className="btn btn-primary" onClick={() => { setMenuOpen(false); openAuth('login'); }}>Sign in</button>
+              <button type="button" className="btn btn-outline" onClick={() => { setMenuOpen(false); openAuth('register'); }}>Create account</button>
+            </div>
+          )}
+        </div>
+
+        <nav className="nav-drawer-links" aria-label="Pages">
+          {NAV_LINKS.map((link) => (
+            <button
+              key={link.label}
+              type="button"
+              onClick={() => go(link)}
+              className={`${isActive(link) ? 'is-active' : ''} ${link.filter === 'deals' ? 'is-deals' : ''}`}
+              aria-current={isActive(link) ? 'page' : undefined}
+            >
+              {link.label}
+              <ChevronRight size={16} aria-hidden="true" />
+            </button>
+          ))}
+          <button type="button" onClick={() => go({ page: 'shop', filter: 'wishlist' })} className={isActive({ page: 'shop', filter: 'wishlist' }) ? 'is-active' : ''}>
+            <span>Saved items {wishlist.length > 0 && <span className="nav-drawer-count">{wishlist.length}</span>}</span>
+            <ChevronRight size={16} aria-hidden="true" />
+          </button>
+          <button type="button" onClick={() => go({ page: 'track-order' })} className={isActive({ page: 'track-order' }) ? 'is-active' : ''}>
+            Track an order
+            <ChevronRight size={16} aria-hidden="true" />
+          </button>
+        </nav>
+
+        <div className="nav-drawer-ctas">
+          <button type="button" className="nav-drawer-cta is-request" onClick={() => { setMenuOpen(false); setQuoteModalOpen(true); }}>
+            <PackagePlus size={18} />
+            <span><strong>Request an item</strong><small>Send a link or photo</small></span>
+          </button>
+          <button type="button" className="nav-drawer-cta is-earn" onClick={() => { setMenuOpen(false); setReferralModalOpen(true); }}>
+            <Gift size={18} />
+            <span><strong>Earn GH₵25</strong><small>Invite a friend</small></span>
+          </button>
+        </div>
+
+        <a className="btn btn-whatsapp btn-block nav-drawer-wa" href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noreferrer">
+          <MessageCircle size={17} /> Chat on WhatsApp
+        </a>
+        {user && (
+          <button type="button" className="nav-drawer-signout" onClick={() => { setMenuOpen(false); logout(); }}>
+            <LogOut size={15} /> Sign out
+          </button>
+        )}
+      </aside>
+      </>, document.body)}
     </header>
   );
 };

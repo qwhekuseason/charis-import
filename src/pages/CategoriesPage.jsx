@@ -1,149 +1,88 @@
 import React from 'react';
 import { useStore } from '../context/StoreContext';
 import { HiddenGem } from '../components/HiddenGem';
+import { SmartImage } from '../components/SmartImage';
 import { sizedImage } from '../utils/images';
 import { productCategorySlug } from '../utils/categories';
-import { ArrowRight, Layers } from 'lucide-react';
+import { ArrowRight, PackagePlus } from 'lucide-react';
+import './InfoPages.css';
+
+const money = (n) => `GH₵${Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
 export const CategoriesPage = () => {
-  const { categories, products, setSelectedCategory, navigate } = useStore();
+  const { categories, products, catalogStatus, setSelectedCategory, navigate, openQuote } = useStore();
 
-  const handleSelectCategory = (catSlug) => {
-    setSelectedCategory(catSlug);
+  const open = (slug) => {
+    setSelectedCategory(slug);
     navigate('shop');
   };
 
+  // What's in each category, so the cards can show real products and a starting price.
+  const withStock = (categories || []).map((cat) => {
+    const items = (products || []).filter((p) => productCategorySlug(p) === cat.slug);
+    const prices = items.map((p) => p.price).filter((n) => n > 0);
+    return { ...cat, items, from: prices.length ? Math.min(...prices) : null };
+  });
+  const ready = withStock.filter((c) => c.items.length > 0).sort((a, b) => b.items.length - a.items.length);
+  const comingSoon = withStock.filter((c) => c.items.length === 0);
+  const loading = catalogStatus === 'loading' && !(categories || []).length;
+
   return (
-    <div className="section">
+    <div className="section ip-page">
       <div className="container">
-        {/* Header */}
-        <div
-          style={{
-            backgroundColor: 'var(--bg-card)',
-            borderRadius: '16px',
-            padding: '36px',
-            marginBottom: '40px',
-            border: '1px solid var(--border-light)',
-            textAlign: 'center',
-            maxWidth: '800px',
-            margin: '0 auto 40px'
-          }}
-        >
-          <span className="section-pretitle">Categories</span>
-          <h1 style={{ fontSize: '2.4rem', fontWeight: 900, color: 'var(--text-primary)', marginBottom: '10px' }}>
-            Shop by category <HiddenGem spot="categories-page" />
-          </h1>
-          <p style={{ fontSize: '1rem', color: 'var(--text-muted)' }}>
-            Find what you need, with delivery anywhere in Ghana.
-          </p>
-        </div>
+        <header className="ip-head">
+          <h1>Shop by category <HiddenGem spot="categories-page" /></h1>
+          <p>Everything we stock, grouped to help you find it faster. Delivery anywhere in Ghana.</p>
+        </header>
 
-        {/* Categories Grid */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-            gap: '24px'
-          }}
-        >
-          {(categories || []).map((cat) => (
-            <div
-              key={cat.id}
-              onClick={() => handleSelectCategory(cat.slug)}
-              style={{
-                backgroundColor: 'var(--bg-card)',
-                borderRadius: '16px',
-                overflow: 'hidden',
-                border: '1px solid var(--border-light)',
-                boxShadow: 'var(--shadow-sm)',
-                cursor: 'pointer',
-                transition: 'all 0.25s ease',
-                display: 'flex',
-                flexDirection: 'column'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = 'translateY(-4px)';
-                e.currentTarget.style.boxShadow = '0 16px 32px rgba(15,23,42,0.14)';
-                e.currentTarget.style.borderColor = 'var(--accent)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
-                e.currentTarget.style.borderColor = 'var(--border-light)';
-              }}
-            >
-              <div style={{ position: 'relative', width: '100%', height: '190px' }}>
-                <img
-                  src={sizedImage(cat.image, 480)}
-                  alt={cat.name}
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'cover'
-                  }}
-                />
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: '12px',
-                    right: '12px',
-                    backgroundColor: 'rgba(15, 23, 42, 0.85)',
-                    color: '#ffffff',
-                    fontSize: '0.75rem',
-                    fontWeight: 700,
-                    padding: '4px 10px',
-                    borderRadius: '9999px'
-                  }}
-                >
-                  {(() => {
-                    const count = (products || []).filter((p) => productCategorySlug(p) === cat.slug).length;
-                    return count === 0 ? 'Coming soon' : `${count} ${count === 1 ? 'product' : 'products'}`;
-                  })()}
-                </div>
-              </div>
-
-              <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', flex: 1 }}>
-                <h3
-                  style={{
-                    fontSize: '1.25rem',
-                    fontWeight: 800,
-                    color: 'var(--text-primary)',
-                    marginBottom: '6px'
-                  }}
-                >
-                  {cat.name}
-                </h3>
-                <p
-                  style={{
-                    fontSize: '0.88rem',
-                    color: 'var(--text-muted)',
-                    lineHeight: 1.5,
-                    marginBottom: '18px',
-                    flex: 1
-                  }}
-                >
-                  {cat.description}
-                </p>
-
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    paddingTop: '12px',
-                    borderTop: '1px solid var(--border-light)',
-                    fontSize: '0.9rem',
-                    fontWeight: 700,
-                    color: 'var(--accent)'
-                  }}
-                >
-                  <span>Explore Items</span>
-                  <ArrowRight size={16} />
-                </div>
-              </div>
+        {loading ? (
+          <div className="ip-cat-grid" aria-label="Loading categories">
+            {[0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="ip-cat-skeleton" aria-hidden="true" />)}
+          </div>
+        ) : (
+          <>
+            <div className="ip-cat-grid">
+              {ready.map((cat) => (
+                <button key={cat.id} type="button" className="ip-cat" onClick={() => open(cat.slug)}>
+                  <span className="ip-cat-photo">
+                    <SmartImage src={cat.image ? sizedImage(cat.image, 480) : ''} alt="" fallbackLabel={cat.name} loading="lazy" />
+                    <span className="ip-cat-count">{cat.items.length} product{cat.items.length === 1 ? '' : 's'}</span>
+                  </span>
+                  <span className="ip-cat-body">
+                    <span className="ip-cat-name">{cat.name}</span>
+                    {cat.from !== null && <span className="ip-cat-from">From {money(cat.from)}</span>}
+                    <span className="ip-cat-thumbs" aria-hidden="true">
+                      {cat.items.slice(0, 4).map((p) => (
+                        <SmartImage key={p.id} src={sizedImage(p.images?.[0] || p.image || '', 96)} alt="" className="ip-cat-thumb" />
+                      ))}
+                    </span>
+                    <span className="ip-cat-go">Browse {cat.name} <ArrowRight size={16} /></span>
+                  </span>
+                </button>
+              ))}
             </div>
-          ))}
-        </div>
+
+            {comingSoon.length > 0 && (
+              <section className="ip-soon" aria-label="Coming soon">
+                <div className="ip-soon-text">
+                  <h2>Coming soon</h2>
+                  <p>We're adding stock to these. Need something now? Tell us what you want and we'll source it.</p>
+                </div>
+                <div className="ip-soon-list">
+                  {comingSoon.map((cat) => (
+                    <button key={cat.id} type="button" className="ip-soon-chip" onClick={() => openQuote()} title={`Request something from ${cat.name}`}>
+                      <SmartImage src={cat.image ? sizedImage(cat.image, 96) : ''} alt="" className="ip-soon-img" />
+                      {cat.name}
+                    </button>
+                  ))}
+                </div>
+                <button type="button" className="btn btn-primary" onClick={() => openQuote()}>
+                  <PackagePlus size={16} /> Request an item
+                </button>
+              </section>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

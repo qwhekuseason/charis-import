@@ -1,37 +1,62 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../context/StoreContext';
 import { HiddenGem } from '../components/HiddenGem';
+import { SmartImage } from '../components/SmartImage';
 import { sizedImage } from '../utils/images';
 import { trackOrder as apiTrackOrder } from '../services/api';
+import './TrackOrderPage.css';
 import {
-  Package,
   Search,
-  CheckCircle2,
-  Clock,
-  Truck,
-  MapPin,
-  Calendar,
   MessageCircle,
   AlertCircle,
-  Ship,
-  Plane,
-  Anchor,
-  ShieldCheck,
   ArrowRight,
   Copy,
   Check,
   RefreshCw,
-  Layers,
-  Scale
+  MapPin,
+  Package,
+  X,
+  Clock
 } from 'lucide-react';
+
+const money = (n) => `GH₵${Number(n || 0).toFixed(2)}`;
+// "25 Oct 2026" from a server timestamp or a date saved on this phone.
+const niceDate = (value) => {
+  const d = value ? new Date(value) : null;
+  return d && !Number.isNaN(d.getTime()) ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+};
 
 // Four plain-language steps that follow the order status set in Admin.
 const STATUS_RANK = { PROCESSING: 0, PENDING: 0, CONFIRMED: 1, SHIPPED: 2, DELIVERED: 3 };
 
+const STATUS_LABEL = {
+  PROCESSING: { text: 'Received', tone: 'info' },
+  PENDING: { text: 'Received', tone: 'info' },
+  CONFIRMED: { text: 'Confirmed', tone: 'info' },
+  SHIPPED: { text: 'On the way', tone: 'info' },
+  DELIVERED: { text: 'Delivered', tone: 'success' },
+  CANCELLED: { text: 'Cancelled', tone: 'danger' },
+};
+
+// What the customer needs to know about their money.
+const PAYMENT_LABEL = {
+  PENDING: { text: 'Payment not received yet', tone: 'warning' },
+  VERIFYING: { text: "We're checking your payment", tone: 'warning' },
+  PAID: { text: 'Paid', tone: 'success' },
+  REFUNDED: { text: 'Refunded', tone: 'muted' },
+};
+
 const buildTrackingSteps = (order) => {
   const status = String(order.orderStatus || order.status || 'PROCESSING').toUpperCase();
   const rank = STATUS_RANK[status] ?? 0;
-  const placed = order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-GB') : order.date || '';
+  const placed = niceDate(order.createdAt || order.date);
+  // A cancelled order must not look like it is still on its way.
+  if (status === 'CANCELLED') {
+    return [
+      { title: 'Order received', note: 'We received your order.', time: placed, done: true },
+      { title: 'Cancelled', note: 'This order was cancelled. If you paid, we will contact you about your refund.', done: true, cancelled: true },
+    ];
+  }
   const steps = [
     { title: 'Order received', note: 'We have your order and will contact you on WhatsApp.', time: placed },
     { title: 'Confirmed', note: 'Payment checked and your items ordered from the supplier.' },
@@ -41,43 +66,58 @@ const buildTrackingSteps = (order) => {
   return steps.map((step, i) => ({ ...step, done: i <= rank, current: i === rank + 1 && status !== 'DELIVERED' }));
 };
 
-// Turns an order from the server into what this page displays.
-const toTrackedOrder = (liveOrder) => ({
-  ...liveOrder,
-  orderId: liveOrder.orderCode,
-  status: String(liveOrder.orderStatus || 'PROCESSING').toLowerCase(),
-  date: new Date(liveOrder.createdAt).toLocaleDateString('en-GB'),
-  shippingMethod: liveOrder.deliveryMethod,
-  destination: liveOrder.address ? `${liveOrder.address}, ${liveOrder.city}` : liveOrder.city,
-  steps: buildTrackingSteps(liveOrder),
+// Turns an order from the server (or one saved on this phone) into what this page displays.
+const toTrackedOrder = (order) => ({
+  ...order,
+  orderId: order.orderCode || order.orderId,
+  statusKey: String(order.orderStatus || order.status || 'PROCESSING').toUpperCase(),
+  date: niceDate(order.createdAt || order.date),
+  shippingMethod: order.deliveryMethod || order.shippingMethod,
+  destination: order.address ? [order.address, order.city].filter(Boolean).join(', ') : order.destination || order.city,
+  steps: buildTrackingSteps(order),
 });
 
 export const TrackOrderPage = () => {
-  const { orders, WHATSAPP_NUMBER, pageParams } = useStore();
-  const [searchInput, setSearchInput] = useState('');
+  const { orders, WHATSAPP_NUMBER, pageParams, showToast } = useStore();
+  const [searchInput, setSearchInput] = useState(pageParams?.prefillCode || '');
   const [phoneInput, setPhoneInput] = useState(pageParams?.prefillPhone || '');
   const [searchedOrder, setSearchedOrder] = useState(null);
+  const [searchedCode, setSearchedCode] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
+  const [fromDevice, setFromDevice] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [copiedId, setCopiedId] = useState(false);
+  const [codeError, setCodeError] = useState('');
+  const [copied, setCopied] = useState(false);
+  const resultRef = useRef(null);
+
+  // Orders placed from this phone, newest first — one tap to track them.
+  const recentOrders = Object.values(orders || {})
+    .filter((o) => o && (o.orderCode || o.orderId))
+    .sort((a, b) => String(b.createdAt || b.date || '').localeCompare(String(a.createdAt || a.date || '')))
+    .slice(0, 4);
 
   const lookUp = async (code, phone) => {
     setLoading(true);
+    setSearchedCode(code);
     try {
       const liveOrder = await apiTrackOrder(code, phone);
       setSearchedOrder(liveOrder ? toTrackedOrder(liveOrder) : null);
+      setFromDevice(false);
     } catch {
       // Fall back to an order placed from this browser (shown even if the server is asleep).
       const local = orders[code];
-      setSearchedOrder(local ? { ...local, steps: buildTrackingSteps(local) } : null);
+      setSearchedOrder(local ? toTrackedOrder(local) : null);
+      setFromDevice(Boolean(local));
     } finally {
       setHasSearched(true);
       setLoading(false);
+      // On phones the result is below the form — bring it into view.
+      setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
     }
   };
 
   // Opened from the account page or right after checkout
-  React.useEffect(() => {
+  useEffect(() => {
     if (!pageParams?.prefillCode) return;
     const code = pageParams.prefillCode.trim().toUpperCase();
     setSearchInput(code);
@@ -88,552 +128,265 @@ export const TrackOrderPage = () => {
   const handleSearch = (e) => {
     if (e) e.preventDefault();
     const code = searchInput.trim().toUpperCase();
-    if (code) lookUp(code, phoneInput);
-  };
-  const copyTrackingNumber = () => {
-    if (searchedOrder?.orderId) {
-      navigator.clipboard?.writeText(searchedOrder.orderId);
-      setCopiedId(true);
-      setTimeout(() => setCopiedId(false), 2000);
+    if (!code) {
+      setCodeError('Enter the order code from your receipt or WhatsApp message.');
+      return;
     }
+    setCodeError('');
+    lookUp(code, phoneInput);
   };
 
-  // Determine stage progression (0 to 5)
-  const steps = searchedOrder?.steps || [];
-  const completedCount = steps.filter((s) => s.done).length;
-  const progressPercent = Math.min(100, Math.round((completedCount / Math.max(1, steps.length)) * 100));
+  const trackRecent = (order) => {
+    const code = order.orderCode || order.orderId;
+    setSearchInput(code);
+    setPhoneInput(order.phone || '');
+    setCodeError('');
+    lookUp(code, order.phone || '');
+  };
 
+  const copyCode = () => {
+    if (!searchedOrder?.orderId) return;
+    navigator.clipboard?.writeText(searchedOrder.orderId);
+    setCopied(true);
+    showToast('Order code copied', 'success');
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const clearSearch = () => {
+    setSearchInput('');
+    setHasSearched(false);
+    setSearchedOrder(null);
+  };
+
+  const steps = searchedOrder?.steps || [];
+  const doneCount = steps.filter((s) => s.done).length;
+  const status = searchedOrder ? (STATUS_LABEL[searchedOrder.statusKey] || STATUS_LABEL.PROCESSING) : null;
+  const payment = searchedOrder?.paymentStatus ? PAYMENT_LABEL[searchedOrder.paymentStatus] : null;
+  const items = Array.isArray(searchedOrder?.items) ? searchedOrder.items : [];
+  const helpLink = (text) => `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(text)}`;
 
   return (
-    <div className="section" style={{ minHeight: '85vh', paddingTop: '32px' }}>
-      <div className="container" style={{ maxWidth: '960px' }}>
-        
+    <div className="section tr-page">
+      <div className="container tr-container">
         {/* Search */}
-        <div className="glass-panel" style={{ padding: 'clamp(22px, 5vw, 36px) clamp(16px, 4vw, 28px)', marginBottom: '28px', textAlign: 'center' }}>
-          
-          {/* Header Icon */}
-          
+        <div className="tr-search-card">
+          <div className="tr-search-icon" aria-hidden="true"><Package size={24} /></div>
+          <h1>Track your order <HiddenGem spot="track-page" /></h1>
+          <p className="tr-sub">Enter your order code and the phone number you used at checkout.</p>
 
-          <h1 style={{ fontSize: 'clamp(1.6rem, 5vw, 2.2rem)', fontWeight: 900, color: 'var(--text-primary)', marginBottom: '8px', letterSpacing: '-0.02em' }}>
-            Track your order <HiddenGem spot="track-page" />
-          </h1>
-          <p style={{ fontSize: '0.94rem', color: 'var(--text-muted)', maxWidth: '620px', margin: '0 auto 24px', lineHeight: 1.6 }}>
-            Enter your order code and phone number to see where your order is.
-          </p>
-
-          {/* Search Bar with Glass Glow */}
-          <form
-            onSubmit={handleSearch}
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              maxWidth: '640px',
-              margin: '0 auto',
-              gap: '10px',
-              alignItems: 'center'
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                flex: '1 1 220px',
-                backgroundColor: 'var(--bg-card)',
-                border: '1.5px solid var(--border-medium)',
-                borderRadius: '14px',
-                padding: '10px 16px',
-                boxShadow: 'var(--shadow-sm)'
-              }}
-            >
-              <Search size={19} color="var(--text-muted)" />
-              <input
-                type="text"
-                aria-label="Order code"
-                placeholder="Order code (e.g. CHR-SEA-7KQ2MX9P)"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                style={{
-                  border: 'none',
-                  background: 'transparent',
-                  width: '100%',
-                  marginLeft: '10px',
-                  fontSize: '0.94rem',
-                  color: 'var(--text-primary)',
-                  outline: 'none',
-                  padding: 0
-                }}
-              />
-              {searchInput && (
-                <button
-                  type="button"
-                  onClick={() => setSearchInput('')}
-                  style={{ color: 'var(--text-muted)', cursor: 'pointer', padding: '2px' }}
-                >
-                  ✕
-                </button>
-              )}
+          <form onSubmit={handleSearch} className="tr-form" noValidate>
+            <div className={`tr-field ${codeError ? 'has-error' : ''}`}>
+              <label htmlFor="tr-code">Order code</label>
+              <div className="tr-input">
+                <Search size={17} aria-hidden="true" />
+                <input
+                  id="tr-code"
+                  type="text"
+                  autoCapitalize="characters"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="CHR-SEA-7KQ2MX9P"
+                  value={searchInput}
+                  onChange={(e) => { setSearchInput(e.target.value.toUpperCase()); setCodeError(''); }}
+                  aria-invalid={Boolean(codeError)}
+                  aria-describedby={codeError ? 'tr-code-error' : undefined}
+                />
+                {searchInput && (
+                  <button type="button" className="tr-clear" onClick={clearSearch} aria-label="Clear order code">
+                    <X size={15} />
+                  </button>
+                )}
+              </div>
+              {codeError && <span className="tr-error" id="tr-code-error" role="alert"><AlertCircle size={13} /> {codeError}</span>}
             </div>
 
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                flex: '1 1 180px',
-                backgroundColor: 'var(--bg-card)',
-                border: '1.5px solid var(--border-medium)',
-                borderRadius: '14px',
-                padding: '10px 16px',
-                boxShadow: 'var(--shadow-sm)'
-              }}
-            >
-              <input
-                type="tel"
-                inputMode="tel"
-                autoComplete="tel"
-                aria-label="Phone number used at checkout"
-                placeholder="Phone used at checkout"
-                value={phoneInput}
-                onChange={(e) => setPhoneInput(e.target.value)}
-                style={{
-                  border: 'none',
-                  background: 'transparent',
-                  width: '100%',
-                  fontSize: '0.94rem',
-                  color: 'var(--text-primary)',
-                  outline: 'none',
-                  padding: 0
-                }}
-              />
+            <div className="tr-field">
+              <label htmlFor="tr-phone">Phone number</label>
+              <div className="tr-input">
+                <input
+                  id="tr-phone"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  placeholder="024 412 3456"
+                  value={phoneInput}
+                  onChange={(e) => setPhoneInput(e.target.value)}
+                />
+              </div>
             </div>
 
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={loading}
-              style={{ borderRadius: '14px', padding: '12px 22px', fontSize: '0.92rem' }}
-            >
-              {loading ? (
-                <>
-                  <RefreshCw size={16} className="animate-spin" />
-                  <span>Tracking...</span>
-                </>
-              ) : (
-                <>
-                  <span>Track</span>
-                  <ArrowRight size={16} />
-                </>
-              )}
+            <button type="submit" className={`btn btn-primary tr-submit ${loading ? 'is-loading' : ''}`} aria-busy={loading}>
+              Track order <ArrowRight size={16} />
             </button>
           </form>
+          <p className="tr-tip">Signed in? Your own orders don't need the phone number.</p>
 
-          {/* Tracking Guidance */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              marginTop: '22px',
-              fontSize: '0.84rem',
-              color: 'var(--text-muted)',
-              flexWrap: 'wrap'
-            }}
-          >
-            <span>💡 Enter the order code from your WhatsApp receipt together with the phone number you checked out with. Signed in? Your own orders don't need the phone number.</span>
-          </div>
+          {recentOrders.length > 0 && (
+            <div className="tr-recent">
+              <span className="tr-recent-label">Ordered on this phone</span>
+              <div className="tr-recent-list">
+                {recentOrders.map((o) => {
+                  const code = o.orderCode || o.orderId;
+                  return (
+                    <button
+                      key={code}
+                      type="button"
+                      className={`tr-recent-chip ${searchedCode === code ? 'is-active' : ''}`}
+                      onClick={() => trackRecent(o)}
+                    >
+                      <Package size={14} aria-hidden="true" />
+                      <span>{code}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Results Console */}
-        {hasSearched && searchedOrder ? (
-          <div className="glass-panel-elevated" style={{ padding: 'clamp(18px, 4vw, 32px)', marginBottom: '32px' }}>
-            
-            {/* Top Meta Header */}
-            <div
-              style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                justifyContent: 'space-between',
-                alignItems: 'flex-start',
-                paddingBottom: '24px',
-                borderBottom: '1px solid var(--border-light)',
-                marginBottom: '28px',
-                gap: '16px'
-              }}
-            >
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                  <span
-                    style={{
-                      fontSize: '0.72rem',
-                      fontWeight: 800,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.08em',
-                      color: 'var(--accent)'
-                    }}
-                  >
-                    Order
-                  </span>
-                </div>
+        <div ref={resultRef} className="tr-result-anchor" />
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <h2 style={{ fontSize: '1.85rem', fontWeight: 900, color: 'var(--text-primary)', letterSpacing: '-0.02em', margin: 0 }}>
-                    #{searchedOrder.orderId}
-                  </h2>
-                  <button
-                    onClick={copyTrackingNumber}
-                    className="theme-toggle-btn"
-                    style={{ width: '32px', height: '32px' }}
-                    title="Copy tracking code"
-                  >
-                    {copiedId ? <Check size={14} color="#10b981" /> : <Copy size={14} />}
+        {/* Result */}
+        {loading && !searchedOrder && (
+          <div className="tr-card tr-skeleton" aria-hidden="true">
+            <span /><span /><span />
+          </div>
+        )}
+
+        {hasSearched && searchedOrder && (
+          <div className={`tr-card ${loading ? 'is-refreshing' : ''}`} aria-live="polite">
+            <div className="tr-head">
+              <div className="tr-head-main">
+                <span className="tr-eyebrow">Order</span>
+                <div className="tr-code-row">
+                  <h2>#{searchedOrder.orderId}</h2>
+                  <button type="button" className={`tr-icon-btn ${copied ? 'is-done' : ''}`} onClick={copyCode} aria-label="Copy order code">
+                    {copied ? <Check size={15} /> : <Copy size={15} />}
                   </button>
                 </div>
-
-                <div style={{ fontSize: '0.86rem', color: 'var(--text-muted)', display: 'flex', gap: '12px', marginTop: '6px', flexWrap: 'wrap' }}>
-                  <span>Customer: <strong style={{ color: 'var(--text-primary)' }}>{searchedOrder.customerName}</strong></span>
-                  <span>•</span>
-                  <span>Date: <strong style={{ color: 'var(--text-primary)' }}>{searchedOrder.date}</strong></span>
-                  {searchedOrder.etaDate && (
-                    <>
-                      <span>•</span>
-                      <span>Expected: <strong style={{ color: '#10b981' }}>{searchedOrder.etaDate}</strong></span>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* Status Badge */}
-              <div style={{ textAlign: 'right' }}>
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '8px 18px',
-                    borderRadius: '9999px',
-                    fontSize: '0.84rem',
-                    fontWeight: 800,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.04em',
-                    backgroundColor:
-                      searchedOrder.status === 'on_high_seas'
-                        ? 'rgba(6, 182, 212, 0.15)'
-                        : searchedOrder.status === 'customs_clearance'
-                        ? 'rgba(37, 99, 235, 0.15)'
-                        : searchedOrder.status === 'delivered'
-                        ? 'rgba(16, 185, 129, 0.15)'
-                        : 'rgba(59, 130, 246, 0.15)',
-                    color:
-                      searchedOrder.status === 'on_high_seas'
-                        ? '#0284c7'
-                        : searchedOrder.status === 'customs_clearance'
-                        ? '#ea580c'
-                        : searchedOrder.status === 'delivered'
-                        ? '#059669'
-                        : '#2563eb',
-                    border: '1px solid currentColor'
-                  }}
-                >
-                  <span
-                    style={{
-                      width: '8px',
-                      height: '8px',
-                      borderRadius: '50%',
-                      backgroundColor: 'currentColor'
-                    }}
-                  />
-                  {searchedOrder.status?.replace(/_/g, ' ')}
+                <span className="tr-meta">
+                  {searchedOrder.customerName}{searchedOrder.date ? ` · placed ${searchedOrder.date}` : ''}
                 </span>
-
-                {searchedOrder.waybillNumber && (
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '8px' }}>
-                    Waybill: <strong style={{ color: 'var(--text-primary)' }}>{searchedOrder.waybillNumber}</strong>
-                  </div>
-                )}
+              </div>
+              <div className="tr-badges">
+                <span className={`tr-badge is-${status.tone}`}><span className="tr-badge-dot" />{status.text}</span>
+                {payment && <span className={`tr-badge is-${payment.tone}`}>{payment.text}</span>}
               </div>
             </div>
 
-            {/* Progress */}
-            <div style={{ marginBottom: '36px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
-                  Order progress
-                </h3>
-                <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--accent)' }}>
-                  {completedCount} of {steps.length} steps
-                </span>
-              </div>
-
-              {/* Desktop Horizontal Milestone Track */}
-              <div className="timeline-progress-track">
-                <div
-                  className="timeline-progress-fill"
-                  style={{ width: `calc(${progressPercent}% - 30px)` }}
-                />
-                
-                {steps.map((st, i) => {
-                  const isDone = st.done;
-                  const isCurrent = st.current;
-                  return (
-                    <div
-                      key={i}
-                      className={`timeline-milestone ${isDone ? 'done' : ''} ${isCurrent ? 'current' : ''}`}
-                    >
-                      <div className="timeline-milestone-bubble">
-                        {isDone ? <Check size={16} /> : <span>{i + 1}</span>}
-                      </div>
-                      <span className="timeline-milestone-label">
-                        {st.title.split('&')[0].trim()}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Vertical Detailed Step Breakdown */}
-              <div style={{ marginTop: '28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {steps.map((st, idx) => {
-                  const isDone = st.done;
-                  const isCurrent = st.current;
-                  return (
-                    <div
-                      key={idx}
-                      style={{
-                        display: 'flex',
-                        gap: '16px',
-                        padding: '16px',
-                        borderRadius: '14px',
-                        backgroundColor: isCurrent ? 'var(--accent-subtle)' : isDone ? 'var(--bg-subtle)' : 'transparent',
-                        border: isCurrent
-                          ? '1.5px solid var(--accent-border)'
-                          : isDone
-                          ? '1px solid var(--border-light)'
-                          : '1px dashed var(--border-light)',
-                        transition: 'all 0.2s ease'
-                      }}
-                    >
-                      {/* Node Icon */}
-                      <div
-                        style={{
-                          width: '36px',
-                          height: '36px',
-                          borderRadius: '50%',
-                          backgroundColor: isDone ? '#10b981' : isCurrent ? 'var(--accent)' : 'var(--bg-card)',
-                          color: isDone || isCurrent ? '#ffffff' : 'var(--text-muted)',
-                          border: isDone || isCurrent ? 'none' : '2px solid var(--border-medium)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0,
-                          boxShadow: isCurrent ? '0 0 14px var(--accent-glow)' : 'none'
-                        }}
-                      >
-                        {isDone ? <Check size={18} /> : <span>{idx + 1}</span>}
-                      </div>
-
-                      {/* Content */}
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                          <span
-                            style={{
-                              fontSize: '0.96rem',
-                              fontWeight: isCurrent ? 800 : 700,
-                              color: isDone || isCurrent ? 'var(--text-primary)' : 'var(--text-muted)'
-                            }}
-                          >
-                            {st.title}
-                          </span>
-                          <span style={{ fontSize: '0.78rem', fontWeight: 600, color: isCurrent ? 'var(--accent)' : 'var(--text-muted)' }}>
-                            {st.time}
-                          </span>
-                        </div>
-
-                        {st.location && (
-                          <div style={{ fontSize: '0.78rem', color: 'var(--accent)', fontWeight: 600, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                             {st.location}
-                          </div>
-                        )}
-
-                        {st.note && (
-                          <div style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', marginTop: '4px', lineHeight: 1.5 }}>
-                            {st.note}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Destination & Ordered Items Breakdown */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-                gap: '20px',
-                padding: '22px',
-                backgroundColor: 'var(--bg-subtle)',
-                borderRadius: '16px',
-                border: '1px solid var(--border-light)'
-              }}
-            >
-              <div>
-                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                  Delivery Destination
-                </span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px', fontWeight: 800, color: 'var(--text-primary)' }}>
-                  
-                  <span>{searchedOrder.destination || 'Pickup in Kumasi'}</span>
-                </div>
-                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                  Fulfillment: {searchedOrder.shippingMethod || 'Standard Importation Logistics'}
-                </div>
-              </div>
-
-              <div>
-                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                  Order Financial Snapshot
-                </span>
-                <div style={{ fontSize: '1.35rem', fontWeight: 900, color: 'var(--text-primary)', marginTop: '4px' }}>
-                  <span className="currency-ghc">GH₵</span>
-                  {searchedOrder.total?.toFixed(2)}
-                </div>
-                <div style={{ fontSize: '0.8rem', color: '#10b981', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                   Mobile Money / Card Verified
-                </div>
-                {(searchedOrder.deliveryFee || searchedOrder.shippingCost) && (
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    Includes GH₵{(searchedOrder.deliveryFee || searchedOrder.shippingCost).toFixed(2)} logistics fee
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Consignment Items Breakdown */}
-            {searchedOrder.items && Array.isArray(searchedOrder.items) && searchedOrder.items.length > 0 && (
-              <div
-                style={{
-                  marginTop: '20px',
-                  padding: '20px',
-                  backgroundColor: 'var(--bg-subtle)',
-                  borderRadius: '16px',
-                  border: '1px solid var(--border-light)'
-                }}
-              >
-                <div style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '14px', letterSpacing: '0.05em' }}>
-                  Consignment Items ({searchedOrder.items.length})
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {searchedOrder.items.map((it, idx) => (
-                    <div
-                      key={idx}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '10px 14px',
-                        backgroundColor: 'var(--bg-card)',
-                        borderRadius: '12px',
-                        border: '1px solid var(--border-light)'
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        {it.image && (
-                          <img
-                            src={sizedImage(it.image, 160)}
-                            alt={it.name}
-                            style={{ width: '42px', height: '42px', objectFit: 'cover', borderRadius: '8px' }}
-                          />
-                        )}
-                        <div>
-                          <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                            {it.name}
-                          </div>
-                          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                            Qty: {it.qty || it.quantity || 1} • GH₵{(it.price || 0).toFixed(2)} each
-                          </div>
-                        </div>
-                      </div>
-                      <div style={{ fontSize: '0.92rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                        GH₵{((it.qty || it.quantity || 1) * (it.price || 0)).toFixed(2)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+            {fromDevice && (
+              <p className="tr-notice"><Clock size={14} /> Showing the details saved on this phone, so the status may be out of date. Tap Refresh, or ask us on WhatsApp.</p>
             )}
 
-            {/* Concierge & Support Footer */}
-            <div
-              style={{
-                marginTop: '28px',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: '14px',
-                paddingTop: '20px',
-                borderTop: '1px solid var(--border-light)'
-              }}
-            >
-              <div>
-                <div style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  Need customs clearance or delivery assistance?
-                </div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  Our Kumasi team replies on WhatsApp every day.
-                </div>
+            {/* Progress */}
+            <section className="tr-progress" aria-label="Order progress">
+              <div className="tr-progress-head">
+                <h3>Progress</h3>
+                <button type="button" className="tr-refresh" onClick={() => lookUp(searchedOrder.orderId, phoneInput || searchedOrder.phone || '')} disabled={loading}>
+                  <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
+                </button>
               </div>
+              <ol className="tr-steps">
+                {steps.map((st, idx) => (
+                  <li
+                    key={st.title}
+                    className={`tr-step ${st.done ? 'is-done' : ''} ${st.current ? 'is-current' : ''} ${st.cancelled ? 'is-cancelled' : ''}`}
+                    aria-current={st.current ? 'step' : undefined}
+                  >
+                    <span className="tr-step-dot" aria-hidden="true">
+                      {st.cancelled ? <X size={14} /> : st.done ? <Check size={14} /> : idx + 1}
+                    </span>
+                    <div className="tr-step-body">
+                      <span className="tr-step-title">
+                        {st.title}
+                        {st.current && <span className="tr-now">Next</span>}
+                      </span>
+                      {st.time && <span className="tr-step-time">{st.time}</span>}
+                      <span className="tr-step-note">{st.note}</span>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+              <span className="sr-only">{doneCount} of {steps.length} steps done</span>
+            </section>
 
+            {/* Delivery and money */}
+            <div className="tr-facts">
+              <div className="tr-fact">
+                <span className="tr-fact-label"><MapPin size={14} /> Delivering to</span>
+                <strong>{searchedOrder.destination || 'Pickup in Kumasi'}</strong>
+                {searchedOrder.shippingMethod && <span>{searchedOrder.shippingMethod}</span>}
+              </div>
+              <div className="tr-fact">
+                <span className="tr-fact-label">Total</span>
+                <strong className="tr-total">{money(searchedOrder.total)}</strong>
+                {Number(searchedOrder.deliveryFee || searchedOrder.shippingCost) > 0 && (
+                  <span>Includes {money(searchedOrder.deliveryFee || searchedOrder.shippingCost)} delivery</span>
+                )}
+                {searchedOrder.paymentMethod && <span>{searchedOrder.paymentMethod}</span>}
+              </div>
+            </div>
+
+            {items.length > 0 && (
+              <section className="tr-items" aria-label="Items in this order">
+                <h3>Items ({items.reduce((n, it) => n + (it.qty || it.quantity || 1), 0)})</h3>
+                <ul>
+                  {items.map((it, idx) => {
+                    const qty = it.qty || it.quantity || 1;
+                    return (
+                      <li key={idx}>
+                        <SmartImage src={sizedImage(it.image || '', 160)} alt="" className="tr-item-img" />
+                        <div className="tr-item-info">
+                          <span className="tr-item-name">{it.name}</span>
+                          <span className="tr-item-each">{qty} × {money(it.price)}</span>
+                        </div>
+                        <span className="tr-item-total">{money(qty * (it.price || 0))}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            )}
+
+            <div className="tr-help">
+              <div>
+                <strong>Questions about this order?</strong>
+                <span>Our Kumasi team replies on WhatsApp every day.</span>
+              </div>
               <a
-                href={`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(
-                  `Hello CHARI Logistics Team, I am requesting an update regarding shipment #${searchedOrder.orderId}`
-                )}`}
+                href={helpLink(`Hello CHARI, I'd like an update on my order #${searchedOrder.orderId}.`)}
                 target="_blank"
                 rel="noreferrer"
                 className="btn btn-whatsapp"
-                style={{ borderRadius: '12px', padding: '10px 18px', fontSize: '0.88rem' }}
               >
-                <MessageCircle size={17} />
-                <span>WhatsApp Logistics Dispatch</span>
+                <MessageCircle size={17} /> Ask on WhatsApp
               </a>
             </div>
           </div>
-        ) : hasSearched ? (
-          <div
-            className="glass-panel"
-            style={{
-              padding: '48px 24px',
-              textAlign: 'center'
-            }}
-          >
-            
-            <h3 style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '8px' }}>
-              No order found for "{searchInput}"
-            </h3>
-            <p style={{ fontSize: '0.92rem', color: 'var(--text-muted)', marginBottom: '22px', maxWidth: '480px', margin: '0 auto 22px' }}>
-              Check the order code and make sure the phone number is the one you used at checkout.
+        )}
+
+        {hasSearched && !searchedOrder && !loading && (
+          <div className="tr-card tr-empty" role="alert">
+            <div className="tr-empty-icon" aria-hidden="true"><Search size={22} /></div>
+            <h2>We couldn't find that order</h2>
+            <p>
+              Check the code <strong>{searchedCode}</strong> and make sure the phone number is the one you used at checkout.
             </p>
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
-              <button
-                className="btn btn-outline"
-                onClick={() => { setSearchInput(''); setHasSearched(false); }}
-              >
-                Clear Search
+            <div className="tr-empty-actions">
+              <button type="button" className="btn btn-outline" onClick={() => document.getElementById('tr-code')?.focus()}>
+                Try again
               </button>
               <a
-                href={`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(`Hello CHARI Logistics, I need help tracking my order with query: "${searchInput}"`)}`}
+                href={helpLink(`Hello CHARI, I need help tracking my order "${searchedCode}".`)}
                 target="_blank"
                 rel="noreferrer"
                 className="btn btn-whatsapp"
               >
-                <MessageCircle size={18} />
-                <span>Inquire on WhatsApp</span>
+                <MessageCircle size={17} /> Ask on WhatsApp
               </a>
             </div>
           </div>
-        ) : null}
+        )}
       </div>
     </div>
   );

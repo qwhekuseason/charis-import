@@ -1,5 +1,5 @@
-import React, { lazy, Suspense } from 'react';
-import { MessageCircle } from 'lucide-react';
+import React, { lazy, Suspense, useEffect, useRef } from 'react';
+import { MessageCircle, CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 import { useStore } from './context/StoreContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Navbar } from './components/Navbar';
@@ -37,6 +37,7 @@ const TrackOrderPage = named(() => import('./pages/TrackOrderPage'), 'TrackOrder
 const CheckoutPage = named(() => import('./pages/CheckoutPage'), 'CheckoutPage');
 const AccountPage = named(() => import('./pages/AccountPage'), 'AccountPage');
 const AdminPage = named(() => import('./pages/AdminPage'), 'AdminPage');
+const ResetPasswordPage = named(() => import('./pages/ResetPasswordPage'), 'ResetPasswordPage');
 
 const CartDrawer = named(() => import('./components/CartDrawer'), 'CartDrawer');
 const ProductDetailModal = named(() => import('./components/ProductDetailModal'), 'ProductDetailModal');
@@ -49,7 +50,7 @@ const AuthModal = named(() => import('./components/AuthModal'), 'AuthModal');
 const PageLoader = () => (
   <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
     <div style={{ width: '36px', height: '3px', borderRadius: '2px', background: 'var(--border-medium)', overflow: 'hidden', position: 'relative' }}>
-      <div style={{ position: 'absolute', inset: 0, background: '#2563eb', borderRadius: '2px', animation: 'loadbar 1.2s ease-in-out infinite' }} />
+      <div style={{ position: 'absolute', inset: 0, background: '#8a6a22', borderRadius: '2px', animation: 'loadbar 1.2s ease-in-out infinite' }} />
     </div>
   </div>
 );
@@ -83,7 +84,7 @@ const AuthLoader = () => (
         style={{
           position: 'absolute',
           inset: 0,
-          background: '#2563eb',
+          background: '#8a6a22',
           borderRadius: '2px',
           animation: 'loadbar 1.2s ease-in-out infinite',
         }}
@@ -105,7 +106,43 @@ export const App = () => {
     referralModalOpen,
     authModalOpen,
     WHATSAPP_NUMBER,
+    setCartDrawerOpen,
+    setSelectedProduct,
+    setQuoteModalOpen,
+    setReferralModalOpen,
+    setAuthModalOpen,
+    dismissToast,
   } = useStore();
+
+  // Drawers and modals, topmost first — Escape closes the one on top.
+  const overlays = [
+    [authModalOpen, () => setAuthModalOpen(false)],
+    [preorderTermsOpen, () => setPreorderTermsOpen(false)],
+    [referralModalOpen, () => setReferralModalOpen(false)],
+    [quoteModalOpen, () => setQuoteModalOpen(false)],
+    [Boolean(selectedProduct), () => setSelectedProduct(null)],
+    [cartDrawerOpen, () => setCartDrawerOpen(false)],
+  ];
+  const topOverlay = overlays.find(([open]) => open);
+  const overlayOpen = Boolean(topOverlay);
+  const closeTopRef = useRef(null);
+  closeTopRef.current = topOverlay?.[1];
+
+  // While something is open: keep the page behind it still, and let Escape close it.
+  useEffect(() => {
+    if (!overlayOpen) return undefined;
+    const { overflow, paddingRight } = document.body.style;
+    const scrollbar = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.overflow = 'hidden';
+    if (scrollbar > 0) document.body.style.paddingRight = `${scrollbar}px`;
+    const onKey = (e) => { if (e.key === 'Escape') closeTopRef.current?.(); };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = overflow;
+      document.body.style.paddingRight = paddingRight;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [overlayOpen]);
 
   const renderCurrentPage = () => {
     switch (currentPage) {
@@ -119,6 +156,7 @@ export const App = () => {
       case 'checkout':  return <CheckoutPage />;
       case 'account':   return <AccountPage />;
       case 'admin':     return <AdminPage />;
+      case 'reset-password': return <ResetPasswordPage />;
       default:          return <HomePage />;
     }
   };
@@ -161,15 +199,29 @@ export const App = () => {
         <MobileBottomNav />
 
         {/* Global Toast Alerts */}
-        <div className="toast-container">
-          {toasts.map((toast) => (
-            <div
-              key={toast.id}
-              className={`toast ${toast.type === 'success' ? 'success' : toast.type === 'error' ? 'error' : ''}`}
-            >
-              <span>{toast.message}</span>
-            </div>
-          ))}
+        <div className="toast-container" role="status" aria-live="polite">
+          {toasts.map((toast) => {
+            const tone = toast.type === 'success' ? 'success' : toast.type === 'error' ? 'error' : toast.type === 'warning' ? 'warning' : 'info';
+            const Icon = tone === 'success' ? CheckCircle2 : tone === 'info' ? Info : AlertCircle;
+            return (
+              <div key={toast.id} className={`toast ${tone}`}>
+                <Icon size={18} className="toast-icon" aria-hidden="true" />
+                <span className="toast-message">{toast.message}</span>
+                {toast.action && (
+                  <button
+                    type="button"
+                    className="toast-action"
+                    onClick={() => { toast.action.onClick(); dismissToast(toast.id); }}
+                  >
+                    {toast.action.label}
+                  </button>
+                )}
+                <button type="button" className="toast-close" onClick={() => dismissToast(toast.id)} aria-label="Dismiss">
+                  <X size={14} />
+                </button>
+              </div>
+            );
+          })}
         </div>
 
         {/* Floating WhatsApp Quick Action Button with live pulse */}
@@ -177,11 +229,14 @@ export const App = () => {
           href={`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent('Hello CHARI, I have a question about your products.')}`}
           target="_blank"
           rel="noreferrer"
-          className="floating-wa-btn"
+          className={`floating-wa-btn ${overlayOpen ? 'is-hidden' : ''} ${currentPage === 'checkout' ? 'is-checkout' : ''}`}
           title="Chat with CHARI on WhatsApp"
+          aria-label="Chat with CHARI on WhatsApp"
+          aria-hidden={overlayOpen || undefined}
+          tabIndex={overlayOpen ? -1 : undefined}
         >
           <MessageCircle size={20} />
-          <span>Chat with Us</span>
+          <span className="floating-wa-label">Chat with Us</span>
         </a>
       </div>
     </ErrorBoundary>

@@ -10,7 +10,7 @@ import fs from 'fs';
 import multer from 'multer';
 import crypto from 'crypto';
 import { v2 as cloudinary } from 'cloudinary';
-import { createNotifier, pushEnabled, pushPublicKey, emailEnabled, emailOrderPlaced, emailOrderUpdate } from './notify.js';
+import { createNotifier, pushEnabled, pushPublicKey, emailEnabled, emailOrderPlaced, emailOrderUpdate, emailPasswordReset, passwordResetUrl } from './notify.js';
 
 dotenv.config();
 
@@ -42,10 +42,10 @@ if (!cloudinaryEnabled && !fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-const uploadToCloudinary = (buffer) => new Promise((resolve, reject) => {
+const uploadToCloudinary = (buffer, folder = 'chari/products') => new Promise((resolve, reject) => {
   const stream = cloudinary.uploader.upload_stream(
     {
-      folder: 'chari/products',
+      folder,
       resource_type: 'image',
       // Cap stored originals at 2000px so phone photos don't eat the free quota.
       transformation: [{ width: 2000, height: 2000, crop: 'limit' }],
@@ -74,6 +74,24 @@ const upload = multer({
     cb(new Error('Only image files (JPG, PNG, WEBP, GIF, AVIF) are allowed'));
   }
 });
+
+// Customers attaching a screenshot to "Request an item": smaller limit, images only.
+const requestPhotoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, cb) => {
+    const allowed = /jpeg|jpg|png|webp|avif/;
+    if (allowed.test(path.extname(file.originalname).toLowerCase()) && allowed.test(file.mimetype)) return cb(null, true);
+    cb(new Error('Please choose a photo (JPG, PNG or WEBP).'));
+  },
+});
+// Only links to photos we stored ourselves can be attached to a request.
+const isOurRequestPhoto = (url) => {
+  const value = String(url || '');
+  if (/^\/uploads\/req-[a-z0-9-]+\.(jpe?g|png|webp|avif)$/i.test(value)) return true;
+  const cloud = cloudinary.config().cloud_name;
+  return Boolean(cloud) && value.startsWith(`https://res.cloudinary.com/${cloud}/image/upload/`) && value.includes('/chari/requests/');
+};
 
 // "Food & Snacks" → "food-snacks" (must match src/utils/categories.js)
 const slugify = (value) => String(value || '').toLowerCase().replace(/&/g, ' ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -152,6 +170,14 @@ app.use((req, res, next) => {
 // ---------------------------------------------------------------------------
 // Auth Helper Middlewares
 // ---------------------------------------------------------------------------
+// `v` is the user's tokenVersion: changing the password bumps it, so older logins stop working.
+const signToken = (user) => jwt.sign(
+  { id: user.id, email: user.email, role: user.role, v: user.tokenVersion || 0 },
+  JWT_SECRET,
+  { expiresIn: '30d' }
+);
+const tokenStillValid = (decoded, user) => (decoded.v || 0) === (user.tokenVersion || 0);
+
 const authenticateUser = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
@@ -173,11 +199,15 @@ const authenticateUser = async (req, res, next) => {
         city: true,
         address: true,
         createdAt: true,
+        tokenVersion: true,
       },
     });
 
     if (!user) {
       return res.status(401).json({ success: false, error: 'User no longer exists.' });
+    }
+    if (!tokenStillValid(decoded, user)) {
+      return res.status(401).json({ success: false, error: 'Your password was changed. Please sign in again.' });
     }
 
     req.user = user;
@@ -196,7 +226,7 @@ const optionalAuth = async (req, res, next) => {
       const user = await prisma.user.findUnique({
         where: { id: decoded.id },
       });
-      if (user) req.user = user;
+      if (user && tokenStillValid(decoded, user)) req.user = user;
     }
   } catch {
     // Ignore invalid token in optional auth
@@ -289,11 +319,7 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
       },
     });
 
-    const token = jwt.sign(
-      { id: newUser.id, email: newUser.email, role: newUser.role },
-      JWT_SECRET,
-      { expiresIn: '30d' }
-    );
+    const token = signToken(newUser);
 
     console.log(`👤 New user registered: ${newUser.name} (${newUser.email})`);
 
@@ -331,11 +357,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
       return res.status(401).json({ success: false, error: 'Invalid email or password.' });
     }
 
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      JWT_SECRET,
-      { expiresIn: '30d' }
-    );
+    const token = signToken(user);
 
     const userProfile = {
       id: user.id,
@@ -430,10 +452,90 @@ app.put('/api/auth/password', authLimiter, authenticateUser, async (req, res) =>
     if (!user || !(await bcrypt.compare(String(currentPassword || ''), user.password))) {
       return res.status(400).json({ success: false, error: 'Your current password is not correct.' });
     }
-    await prisma.user.update({ where: { id: user.id }, data: { password: await bcrypt.hash(String(newPassword), 10) } });
-    res.json({ success: true, message: 'Password changed.' });
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: { password: await bcrypt.hash(String(newPassword), 10), tokenVersion: { increment: 1 }, resetTokenHash: null, resetTokenExpires: null },
+    });
+    // Other devices are signed out; this one gets a fresh login so the customer stays signed in.
+    res.json({ success: true, message: 'Password changed.', token: signToken(updated) });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Could not change the password.' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Forgot password
+//   1. POST /api/auth/forgot-password { email } → emails a one-time link (valid 1 hour).
+//   2. POST /api/auth/reset-password { token, password } → sets the new password and signs in.
+// Only a SHA-256 hash of the code is stored, and the reply never says whether an account exists.
+// ---------------------------------------------------------------------------
+const RESET_TTL_MS = 60 * 60 * 1000;
+// Sending emails is limited more tightly than trying the new password.
+const forgotLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 5, message: 'Too many reset requests. Please wait 15 minutes and try again.' });
+const resetLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: 'Too many attempts. Please wait 15 minutes and try again.' });
+const hashResetToken = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
+
+// POST /api/auth/forgot-password
+app.post('/api/auth/forgot-password', forgotLimiter, async (req, res) => {
+  const email = String(req.body.email || '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ success: false, error: 'Please enter a valid email address.' });
+  }
+  // Without email set up there is no way to deliver the link, so say so instead of pretending.
+  if (!emailEnabled) {
+    console.warn('Password reset requested but SMTP_URL is not set — no email sent.');
+    return res.status(503).json({ success: false, emailUnavailable: true, error: 'Password reset by email isn\'t available right now. Please contact us on WhatsApp.' });
+  }
+  try {
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (user) {
+      const token = crypto.randomBytes(32).toString('base64url');
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { resetTokenHash: hashResetToken(token), resetTokenExpires: new Date(Date.now() + RESET_TTL_MS) },
+      });
+      const sent = await emailPasswordReset(user, passwordResetUrl(token));
+      console.log(`🔑 Password reset requested for ${email}${sent ? '' : ' (email failed to send)'}`);
+    }
+    // Same answer either way, so this form can't be used to find out who has an account.
+    res.json({ success: true, message: 'If an account exists for that email, we have sent a reset link.' });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ success: false, error: 'Could not send the reset email. Please try again.' });
+  }
+});
+
+// POST /api/auth/reset-password
+app.post('/api/auth/reset-password', resetLimiter, async (req, res) => {
+  const token = String(req.body.token || '');
+  const password = String(req.body.password || '');
+  if (password.length < 8) {
+    return res.status(400).json({ success: false, error: 'Password must be at least 8 characters.' });
+  }
+  try {
+    const user = token && await prisma.user.findUnique({ where: { resetTokenHash: hashResetToken(token) } });
+    if (!user || !user.resetTokenExpires || user.resetTokenExpires < new Date()) {
+      return res.status(400).json({ success: false, expired: true, error: 'This reset link has expired or was already used. Please ask for a new one.' });
+    }
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: await bcrypt.hash(password, 10),
+        resetTokenHash: null,
+        resetTokenExpires: null,
+        tokenVersion: { increment: 1 }, // signs out every other device
+      },
+    });
+    console.log(`🔑 Password reset completed for ${updated.email}`);
+    res.json({
+      success: true,
+      message: 'Your password has been changed.',
+      token: signToken(updated),
+      user: { id: updated.id, name: updated.name, email: updated.email, phone: updated.phone, role: updated.role, city: updated.city, address: updated.address, createdAt: updated.createdAt },
+    });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ success: false, error: 'Could not reset the password. Please try again.' });
   }
 });
 
@@ -608,7 +710,14 @@ const parseProductInput = (body, { partial = false } = {}) => {
   if (has('inStock') || !partial) data.inStock = body.inStock === undefined ? true : Boolean(body.inStock);
   if (has('badge')) data.badge = body.badge ? String(body.badge).trim().slice(0, 30) : null;
   if (has('description') || !partial) data.description = String(body.description || '').trim();
-  if (has('specs')) data.specs = body.specs || null;
+  // Details shown to shoppers: a short list of { label, value } text pairs.
+  // (Saved as a list, even when empty — the database won't take a plain null here.)
+  if (has('specs')) {
+    data.specs = (Array.isArray(body.specs) ? body.specs : [])
+      .map((s) => ({ label: String(s?.label || '').trim().slice(0, 40), value: String(s?.value || '').trim().slice(0, 120) }))
+      .filter((s) => s.label && s.value)
+      .slice(0, 12);
+  }
 
   if (has('gallery') || has('image') || !partial) {
     const gallery = (Array.isArray(body.gallery) ? body.gallery : [])
@@ -812,7 +921,7 @@ app.put('/api/settings', authenticateUser, requireAdmin, async (req, res) => {
     for (const [key, value] of Object.entries(req.body || {})) {
       if (!SETTING_RULES[key]) continue;
       const clean = key === 'whatsappNumber' ? String(value).replace(/\D/g, '')
-        : key === 'announcements' ? value.map((m) => String(m).trim()).filter(Boolean)
+        : key === 'announcements' ? (Array.isArray(value) ? value.map((m) => String(m).trim()).filter(Boolean) : null)
         : typeof value === 'string' ? value.trim() : value;
       if (!SETTING_RULES[key](key === 'announcements' ? clean : value)) {
         return res.status(400).json({ success: false, error: `Please check the ${SETTING_LABELS[key] || key}.` });
@@ -1185,24 +1294,27 @@ app.get('/api/referrals/me', authenticateUser, async (req, res) => {
 
 app.post('/api/orders', optionalAuth, async (req, res) => {
   try {
-    const {
-      customerName,
-      phone,
-      email,
-      city,
-      address,
-      deliveryMethod,
-      deliveryMethodId,
-      paymentMethod,
-      items,
-      notes,
-    } = req.body;
+    const { deliveryMethod, deliveryMethodId, items } = req.body;
+    // Plain, length-capped text only — anything else (objects, huge strings) would break the insert.
+    const text = (value, max) => (value == null ? '' : String(value).trim().slice(0, max));
+    const customerName = text(req.body.customerName, 100);
+    const phone = text(req.body.phone, 30);
+    const email = text(req.body.email, 120);
+    const city = text(req.body.city, 80);
+    const address = text(req.body.address, 300);
+    const notes = text(req.body.notes, 1000);
+    // Everything is a pre-order paid in full by Mobile Money — there is no cash or pay-on-collection option.
+    const sentMethod = text(req.body.paymentMethod, 120);
+    const paymentMethod = /momo|mobile money/i.test(sentMethod) ? sentMethod : 'MoMo Transfer';
 
     if (!customerName || !phone || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
         success: false,
         error: 'Missing required customer details or order items',
       });
+    }
+    if (normalizePhone(phone).length < 9) {
+      return res.status(400).json({ success: false, error: 'Please enter a valid phone number.' });
     }
 
     // Re-price every line from the database — the browser's prices are ignored.
@@ -1286,8 +1398,8 @@ app.post('/api/orders', optionalAuth, async (req, res) => {
           city: city || 'Accra',
           address: address || '',
           deliveryMethod: delivery.name,
-          paymentMethod: paymentMethod || 'Cash on Delivery',
-          paymentStatus: paymentMethod === 'Cash on Delivery' ? 'PENDING' : 'VERIFYING',
+          paymentMethod,
+          paymentStatus: 'VERIFYING',
           orderStatus: 'PROCESSING',
           subtotal,
           deliveryFee: delivery.fee,
@@ -1421,13 +1533,43 @@ app.patch('/api/orders/:id/status', authenticateUser, requireAdmin, async (req, 
 // POST /api/inquiries (Contact Form)
 // Used by the Contact page and the "Request an item" form.
 // Phone (WhatsApp) is required so the team can reply; email is optional.
+// POST /api/inquiries/photo — a customer's screenshot for "Request an item" (no sign-in needed).
+const requestPhotoLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 6, message: 'Too many photos uploaded. Please wait a few minutes or send it on WhatsApp.' });
+app.post('/api/inquiries/photo', requestPhotoLimiter, (req, res) => {
+  requestPhotoUpload.single('image')(req, res, async (err) => {
+    if (err) {
+      const message = err.code === 'LIMIT_FILE_SIZE' ? 'That photo is too big. Please choose one under 5 MB.' : err.message;
+      return res.status(400).json({ success: false, error: message });
+    }
+    if (!req.file) return res.status(400).json({ success: false, error: 'No photo was attached.' });
+    try {
+      let url;
+      if (cloudinaryEnabled) {
+        const result = await uploadToCloudinary(req.file.buffer, 'chari/requests');
+        url = optimizedImageUrl(result.public_id);
+      } else {
+        const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
+        const filename = `req-${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ext}`;
+        await fs.promises.writeFile(path.join(uploadsDir, filename), req.file.buffer);
+        url = `/uploads/${filename}`;
+      }
+      res.json({ success: true, url });
+    } catch (error) {
+      console.error('Request photo upload failed:', error);
+      res.status(502).json({ success: false, error: 'The photo could not be uploaded. You can send it on WhatsApp instead.' });
+    }
+  });
+});
+
 app.post('/api/inquiries', inquiryLimiter, async (req, res) => {
   try {
     const name = String(req.body.name || '').trim().slice(0, 100);
     const phone = String(req.body.phone || '').trim().slice(0, 30);
     const email = String(req.body.email || '').trim().slice(0, 120);
     const subject = String(req.body.subject || 'General question').trim().slice(0, 80);
-    const message = String(req.body.message || '').trim().slice(0, 4000);
+    let message = String(req.body.message || '').trim().slice(0, 4000);
+    // A photo uploaded with "Request an item" — kept as a line the admin page turns into a thumbnail.
+    if (req.body.photoUrl && isOurRequestPhoto(req.body.photoUrl)) message = `${message}\nPhoto: ${req.body.photoUrl}`;
 
     if (!name || !message) {
       return res.status(400).json({ success: false, error: 'Please enter your name and message.' });
@@ -1595,6 +1737,19 @@ app.put('/api/discounts/:id', authenticateUser, requireAdmin, async (req, res) =
     if (expiresAt !== undefined) data.expiresAt = expiresAt ? endOfDay(expiresAt) : null;
     if (isActive !== undefined) data.isActive = Boolean(isActive);
 
+    const existing = await prisma.discount.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ success: false, error: 'Promo code not found.' });
+    // Same rules as creating a code.
+    if (data.value !== undefined && (!Number.isFinite(data.value) || data.value <= 0)) {
+      return res.status(400).json({ success: false, error: 'Discount value must be a number above 0.' });
+    }
+    if ((data.type || existing.type) !== 'FIXED' && (data.value ?? existing.value) > 100) {
+      return res.status(400).json({ success: false, error: 'A percentage discount cannot be more than 100%.' });
+    }
+    if (data.code && data.code !== existing.code && (await prisma.discount.findUnique({ where: { code: data.code } }))) {
+      return res.status(400).json({ success: false, error: `Discount code "${data.code}" already exists.` });
+    }
+
     const updated = await prisma.discount.update({
       where: { id },
       data
@@ -1602,7 +1757,8 @@ app.put('/api/discounts/:id', authenticateUser, requireAdmin, async (req, res) =
 
     res.json({ success: true, data: updated });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    console.error('Error updating discount:', error);
+    res.status(500).json({ success: false, error: 'Could not update the promo code.' });
   }
 });
 

@@ -3,7 +3,7 @@ import { useStore } from '../context/StoreContext';
 import { Home, ShoppingBag, Package, Grid, User } from 'lucide-react';
 
 export const MobileBottomNav = () => {
-  const { currentPage, navigate, cartCount, setCartDrawerOpen, user, openAuth } = useStore();
+  const { currentPage, navigate, cartCount, cartBump, setCartDrawerOpen, cartDrawerOpen, user, openAuth } = useStore();
 
   const navItems = [
     { label: 'Home', icon: Home, action: () => navigate('home'), page: 'home' },
@@ -22,15 +22,20 @@ export const MobileBottomNav = () => {
     <nav className="mobile-bottom-nav" aria-label="Mobile Navigation">
       {navItems.map((item) => {
         const Icon = item.icon;
-        const isActive = item.page && currentPage === item.page;
+        // The cart tab lights up while the cart is open; Shop stays lit on the Deals view too.
+        const isActive = item.label === 'Cart' ? cartDrawerOpen : item.page && currentPage === item.page && !cartDrawerOpen;
+        const isCart = item.label === 'Cart';
 
         return (
           <button
             key={item.label}
+            type="button"
             onClick={item.action}
             className={`bottom-nav-item ${isActive ? 'active' : ''}`}
+            aria-current={isActive ? 'page' : undefined}
+            aria-label={isCart ? `Cart, ${cartCount} item${cartCount === 1 ? '' : 's'}` : undefined}
           >
-            <div style={{ position: 'relative' }}>
+            <div style={{ position: 'relative' }} key={isCart ? `bump-${cartBump}` : undefined} className={isCart && cartBump ? 'cart-bump' : undefined}>
               <Icon
                 size={20}
                 strokeWidth={isActive ? 2.5 : 1.8}

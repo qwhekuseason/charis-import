@@ -100,7 +100,7 @@ export const StoreProvider = ({ children }) => {
   const getInitialPage = () => {
     try {
       const hash = window.location.hash.replace('#/', '').replace('#', '').trim();
-      const validPages = ['home', 'shop', 'categories', 'import-tips', 'about', 'contact', 'track-order', 'checkout', 'account', 'admin'];
+      const validPages = ['home', 'shop', 'categories', 'import-tips', 'about', 'contact', 'track-order', 'checkout', 'account', 'admin', 'reset-password'];
       if (validPages.includes(hash)) return hash;
       const params = new URLSearchParams(window.location.search);
       if (params.get('page') && validPages.includes(params.get('page'))) return params.get('page');
@@ -113,9 +113,12 @@ export const StoreProvider = ({ children }) => {
   useEffect(() => {
     const handleHash = () => {
       const hash = window.location.hash.replace('#/', '').replace('#', '').trim();
-      const validPages = ['home', 'shop', 'categories', 'import-tips', 'about', 'contact', 'track-order', 'checkout', 'account', 'admin'];
+      const validPages = ['home', 'shop', 'categories', 'import-tips', 'about', 'contact', 'track-order', 'checkout', 'account', 'admin', 'reset-password'];
       if (validPages.includes(hash)) {
         setCurrentPage(hash);
+        // Back/forward to another page shouldn't leave a popup or the cart covering it.
+        setSelectedProduct(null);
+        setCartDrawerOpen(false);
       }
     };
     window.addEventListener('hashchange', handleHash);
@@ -156,6 +159,10 @@ export const StoreProvider = ({ children }) => {
   const [cartDrawerOpen, setCartDrawerOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [quoteModalOpen, setQuoteModalOpen] = useState(false);
+  // Opens "Request an item" with fields already filled in (e.g. what a shopper searched for).
+  const [quoteDraft, setQuoteDraft] = useState(null);
+  const openQuote = (draft = null) => { setQuoteDraft(draft); setQuoteModalOpen(true); };
+  useEffect(() => { if (!quoteModalOpen) setQuoteDraft(null); }, [quoteModalOpen]);
   const [referralModalOpen, setReferralModalOpen] = useState(false);
   const [preorderTermsOpen, setPreorderTermsOpen] = useState(false);
 
@@ -197,6 +204,8 @@ export const StoreProvider = ({ children }) => {
 
   // Toasts
   const [toasts, setToasts] = useState([]);
+  // Goes up on every add-to-cart so the cart icon can give a little bounce.
+  const [cartBump, setCartBump] = useState(0);
 
   // Business details & banner text — set by the admin in Admin → Settings.
   const [settings, setSettings] = useState(DEFAULT_STORE_SETTINGS);
@@ -213,8 +222,13 @@ export const StoreProvider = ({ children }) => {
 
   const WHATSAPP_NUMBER = settings.whatsappNumber;
 
+  // Storage can be full or blocked (e.g. some private-browsing modes) — never let that crash the shop.
+  const saveLocal = (key, value) => {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  };
+
   useEffect(() => {
-    localStorage.setItem('charis_cart', JSON.stringify(cart));
+    saveLocal('charis_cart', cart);
   }, [cart]);
 
   // Keep cart prices in step with the live catalogue (a deal starting or ending, an admin price change).
@@ -224,11 +238,13 @@ export const StoreProvider = ({ children }) => {
       let changed = false;
       const next = prev.map((item) => {
         const fresh = products.find((p) => p.id === item.product.id);
-        if (!fresh || fresh.price === item.unitPrice) return item;
+        // Product removed from the store since it was added — drop it, or checkout would always fail.
+        if (!fresh) { changed = true; return null; }
+        if (fresh.price === item.unitPrice) return item;
         changed = true;
         return { ...item, product: fresh, unitPrice: fresh.price, total: fresh.price * item.quantity };
       });
-      return changed ? next : prev;
+      return changed ? next.filter(Boolean) : prev;
     });
   }, [products]);
 
@@ -245,16 +261,12 @@ export const StoreProvider = ({ children }) => {
   }, [products]);
 
   useEffect(() => {
-    localStorage.setItem('charis_wishlist', JSON.stringify(wishlist));
+    saveLocal('charis_wishlist', wishlist);
   }, [wishlist]);
 
   useEffect(() => {
-    localStorage.setItem('charis_orders', JSON.stringify(orders));
+    saveLocal('charis_orders', orders);
   }, [orders]);
-
-  useEffect(() => {
-    localStorage.setItem('chari_reviews', JSON.stringify(reviews));
-  }, [reviews]);
 
 
   // Fetch live products and categories from PostgreSQL via REST API
@@ -350,7 +362,7 @@ export const StoreProvider = ({ children }) => {
         return res.user;
       }
     } catch (err) {
-      showToast(err.message || 'Login failed', 'error');
+      // The sign-in form shows this error itself.
       throw err;
     }
   };
@@ -367,7 +379,7 @@ export const StoreProvider = ({ children }) => {
         return res.user;
       }
     } catch (err) {
-      showToast(err.message || 'Registration failed', 'error');
+      // The sign-in form shows this error itself.
       throw err;
     }
   };
@@ -396,18 +408,20 @@ export const StoreProvider = ({ children }) => {
   };
 
   // Toast helper
-  const showToast = (message, type = 'info') => {
+  // options: { action: { label, onClick }, duration }. At most 3 on screen; the oldest goes first.
+  const dismissToast = (id) => setToasts((prev) => prev.filter((t) => t.id !== id));
+  const showToast = (message, type = 'info', options = {}) => {
     const id = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    setToasts((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3500);
+    setToasts((prev) => [...prev.slice(-2), { id, message, type, action: options.action }]);
+    setTimeout(() => dismissToast(id), options.duration || (options.action ? 5000 : 3500));
   };
 
   // Navigation helper
   const navigate = (page, params = {}) => {
     setCurrentPage(page);
     setPageParams(params);
+    setSelectedProduct(null);
+    setCartDrawerOpen(false);
     try {
       window.location.hash = page;
     } catch {}
@@ -460,7 +474,10 @@ export const StoreProvider = ({ children }) => {
       }
     });
 
-    showToast(`Added ${qtyToAdd}x "${product.name}" to cart!`, 'success');
+    setCartBump((n) => n + 1);
+    showToast(`Added to cart: ${product.name}`, 'success', {
+      action: { label: 'View cart', onClick: () => setCartDrawerOpen(true) },
+    });
     return true;
   };
 
@@ -485,13 +502,32 @@ export const StoreProvider = ({ children }) => {
 
   // Remove from cart
   const removeFromCart = (productId) => {
+    const index = cart.findIndex((item) => item.product.id === productId);
+    const removed = cart[index];
     setCart((prev) => prev.filter((item) => item.product.id !== productId));
-    showToast('Item removed from cart', 'info');
+    showToast('Item removed from cart', 'info', removed ? {
+      action: {
+        label: 'Undo',
+        onClick: () => setCart((prev) => (prev.some((i) => i.product.id === productId)
+          ? prev
+          : [...prev.slice(0, index), removed, ...prev.slice(index)])),
+      },
+    } : {});
   };
 
   // Clear cart
   const clearCart = () => {
     setCart([]);
+  };
+
+  // Emptying the bag by hand can be undone for a few seconds.
+  const emptyCartWithUndo = () => {
+    const snapshot = cart;
+    setCart([]);
+    showToast('Your bag was emptied', 'info', {
+      action: { label: 'Undo', onClick: () => setCart(snapshot) },
+      duration: 6000,
+    });
   };
 
   // Wishlist toggle
@@ -585,7 +621,7 @@ export const StoreProvider = ({ children }) => {
         address: newOrder.destination || newOrder.deliveryAddress || newOrder.address || '',
         deliveryMethod: newOrder.shippingMethod || newOrder.deliveryMethodTitle || newOrder.deliveryMethod || 'Standard Delivery',
         deliveryMethodId: newOrder.shippingMethodId || null,
-        paymentMethod: newOrder.paymentMethodTitle || newOrder.paymentMethod || 'Cash on Delivery',
+        paymentMethod: newOrder.paymentMethodTitle || newOrder.paymentMethod || 'MoMo Transfer',
         items: newOrder.items || [],
         subtotal: parseFloat(newOrder.subtotal || 0),
         deliveryFee: shippingFee,
@@ -671,6 +707,8 @@ export const StoreProvider = ({ children }) => {
         updateCartQuantity,
         removeFromCart,
         clearCart,
+        emptyCartWithUndo,
+        cartBump,
         cartCount,
         cartSubtotal,
         wishlist,
@@ -682,6 +720,8 @@ export const StoreProvider = ({ children }) => {
         setCartDrawerOpen,
         quoteModalOpen,
         setQuoteModalOpen,
+        quoteDraft,
+        openQuote,
         referralModalOpen,
         setReferralModalOpen,
         referralInfo,
@@ -704,6 +744,7 @@ export const StoreProvider = ({ children }) => {
         addPlacedOrder,
         toasts,
         showToast,
+        dismissToast,
         calculateTierPrice,
         getWhatsAppOrderLink,
         WHATSAPP_NUMBER,

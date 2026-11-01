@@ -4,19 +4,19 @@ import { X, CheckCircle2, AlertCircle, Ship, Clock, Scale, ShieldAlert, FileChec
 export const PREORDER_TERMS = [
   {
     icon: CheckCircle2,
-    color: '#2563eb',
+    color: '#8a6a22',
     title: 'Payment Confirms Your Order',
     desc: 'Your pre-order is confirmed once we receive your payment by Mobile Money or at pickup.'
   },
   {
     icon: Clock,
-    color: '#3b82f6',
+    color: '#b8913a',
     title: 'Close to factory prices',
     desc: 'We group orders together to get you lower prices from overseas suppliers.'
   },
   {
     icon: Ship,
-    color: '#0ea5e9',
+    color: '#b8913a',
     title: 'Shipping Times',
     desc: 'Sea shipping takes about 35–45 working days. Air cargo takes 7–12 working days.'
   },
@@ -28,13 +28,13 @@ export const PREORDER_TERMS = [
   },
   {
     icon: Scale,
-    color: '#10b981',
+    color: '#2f8f5b',
     title: 'No hidden fees',
     desc: 'Your shipping fee is calculated and clearly shown at checkout so you know exactly what you are paying.'
   },
   {
     icon: ShieldCheck,
-    color: '#2563eb',
+    color: '#8a6a22',
     title: 'Check Your Specs',
     desc: 'Please ensure you have selected your preferred size, colour, or model before completing payment.'
   },
@@ -46,7 +46,7 @@ export const PREORDER_TERMS = [
   },
   {
     icon: AlertCircle,
-    color: '#2563eb',
+    color: '#8a6a22',
     title: 'Realistic Estimates',
     desc: 'Delivery times are estimates and can sometimes be delayed by shipping schedules, weather or customs checks.'
   },
@@ -67,7 +67,7 @@ export const PreorderTermsModal = ({ isOpen, onClose }) => {
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(15, 23, 42, 0.72)',        zIndex: 1000,
+        backgroundColor: 'rgba(23, 20, 15, 0.72)',        zIndex: 1000,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -84,7 +84,7 @@ export const PreorderTermsModal = ({ isOpen, onClose }) => {
           backgroundColor: 'rgba(255, 255, 255, 0.94)',
           borderRadius: '24px',
           border: '1px solid rgba(255, 255, 255, 0.6)',
-          boxShadow: '0 25px 60px -15px rgba(15, 23, 42, 0.35)',
+          boxShadow: '0 25px 60px -15px rgba(23, 20, 15, 0.35)',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -95,11 +95,11 @@ export const PreorderTermsModal = ({ isOpen, onClose }) => {
         <div
           style={{
             padding: '24px 28px',
-            borderBottom: '1px solid rgba(226, 232, 240, 0.8)',
+            borderBottom: '1px solid rgba(236, 229, 216, 0.8)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            background: 'rgba(37, 99, 235,0.06)'
+            background: 'rgba(138, 106, 34,0.06)'
           }}
         >
           <div>
@@ -156,7 +156,7 @@ export const PreorderTermsModal = ({ isOpen, onClose }) => {
                   backgroundColor: 'var(--bg-card)',
                   borderRadius: '14px',
                   border: '1px solid var(--border-light)',
-                  boxShadow: '0 2px 6px rgba(15,23,42,0.03)'
+                  boxShadow: '0 2px 6px rgba(23, 20, 15,0.03)'
                 }}
               >
                 
@@ -178,12 +178,12 @@ export const PreorderTermsModal = ({ isOpen, onClose }) => {
               marginTop: '10px',
               padding: '16px',
               borderRadius: '14px',
-              background: '#1e40af',
+              background: '#5c4415',
               color: '#ffffff',
               textAlign: 'center'
             }}
           >
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#93c5fd', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#d9c08a', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
               Our Promise
             </div>
             <div style={{ fontSize: '1.05rem', fontWeight: 800, marginTop: '4px' }}>
@@ -212,7 +212,7 @@ export const PreorderTermsModal = ({ isOpen, onClose }) => {
           <button
             onClick={onClose}
             style={{
-              background: '#2563eb',
+              background: '#8a6a22',
               color: '#ffffff',
               padding: '10px 24px',
               borderRadius: '10px',
