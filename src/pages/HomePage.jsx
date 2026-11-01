@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
 import { useStore } from '../context/StoreContext';
 import { ProductCard } from '../components/ProductCard';
 import { SmartImage } from '../components/SmartImage';
@@ -146,6 +146,11 @@ export const HomePage = () => {
   const homeRef = useRef(null);
   const [introOn, setIntroOn] = useState(shouldPlayIntro);
   const endIntro = useCallback(() => setIntroOn(false), []);
+  // Real photos from the shop make up the intro globe (small copies, so they load fast).
+  const introPhotos = useMemo(() => [
+    ...products.map((p) => p.images?.[0] || p.image),
+    ...categories.map((c) => c.image),
+  ].filter(Boolean).map((url) => sizedImage(url, 200)), [products, categories]);
 
   // Remember it played (even if the page is refreshed half-way), and keep the page still behind it.
   useEffect(() => {
@@ -264,7 +269,7 @@ export const HomePage = () => {
     <div className={`home hm ${introOn ? 'hm-intro-on' : ''}`} ref={homeRef}>
       {introOn && (
         <Suspense fallback={<div style={{ position: 'fixed', inset: 0, zIndex: 3000, background: '#0e0c09' }} />}>
-          <GlobeIntro onDone={endIntro} />
+          <GlobeIntro onDone={endIntro} photos={introPhotos} />
         </Suspense>
       )}
       {/* Hero — ink, like the logo */}
