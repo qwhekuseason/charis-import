@@ -127,3 +127,4 @@
   .tr-facts { grid-template-columns: minmax(0, 1fr); }
   .tr-help .btn { width: 100%; }
 }
+.tr-item-options { display: block; font-size: 0.78rem; font-weight: 700; color: var(--gold-text); }

@@ -4,6 +4,7 @@ import { sizedImage } from '../utils/images';
 import { productCategorySlug } from '../utils/categories';
 import { HiddenGem } from './HiddenGem';
 import { SmartImage } from './SmartImage';
+import { productOptions, selectionComplete, cleanSelection } from '../utils/options';
 import './ProductDetailModal.css';
 import {
   X,
@@ -79,7 +80,10 @@ export const ProductDetailModal = () => {
   const [userReview, setUserReview] = useState({ title: '', comment: '', rating: 5 });
   const [postingReview, setPostingReview] = useState(false);
   const [submittedReview, setSubmittedReview] = useState(false);
+  const [selected, setSelected] = useState({}); // the buyer's choices, e.g. { Size: 'M' }
+  const [optionError, setOptionError] = useState(false);
   const scrollRef = useRef(null);
+  const optionsRef = useRef(null);
   const trackRef = useRef(null);
   const tabsRef = useRef(null);
 
@@ -89,6 +93,8 @@ export const ProductDetailModal = () => {
   useEffect(() => {
     if (!selectedProduct) return;
     setQuantity(1);
+    setSelected({});
+    setOptionError(false);
     setActiveImageIndex(0);
     setActiveTab('details');
     setAdded(false);
@@ -150,13 +156,29 @@ export const ProductDetailModal = () => {
 
   const changeQty = (delta) => setQuantity((q) => Math.min(999, Math.max(1, q + delta)));
 
+  const options = productOptions(product);
+  const missing = options.find((o) => !o.values.includes(selected[o.name]));
+  const choose = (name, value) => {
+    setSelected((prev) => ({ ...prev, [name]: value }));
+    setOptionError(false);
+  };
+  // Every choice must be made first; if not, point the buyer at the one that's missing.
+  const readyToAdd = () => {
+    if (selectionComplete(product, selected)) return true;
+    setOptionError(true);
+    optionsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return false;
+  };
+
   const handleAddToCart = () => {
-    addToCart(product, quantity);
+    if (!readyToAdd()) return;
+    addToCart(product, quantity, cleanSelection(product, selected));
     setAdded(true);
   };
 
   const handleBuyNow = () => {
-    addToCart(product, quantity);
+    if (!readyToAdd()) return;
+    addToCart(product, quantity, cleanSelection(product, selected));
     close();
     navigate('checkout');
   };
@@ -330,6 +352,36 @@ export const ProductDetailModal = () => {
                 {soldOut ? 'Out of stock right now' : 'Available to order · price fixed in cedis'}
               </p>
 
+              {/* The buyer's choices: size, colour… */}
+              {!soldOut && options.length > 0 && (
+                <div ref={optionsRef} className={`pd-options ${optionError ? 'has-error' : ''}`}>
+                  {options.map((o) => (
+                    <div key={o.name} className="pd-option" role="radiogroup" aria-label={o.name}>
+                      <span className="pd-option-label">
+                        {o.name}{selected[o.name] ? <>: <strong>{selected[o.name]}</strong></> : <em> — choose one</em>}
+                      </span>
+                      <div className="pd-option-values">
+                        {o.values.map((v) => (
+                          <button
+                            key={v}
+                            type="button"
+                            role="radio"
+                            aria-checked={selected[o.name] === v}
+                            className={`pd-chip ${selected[o.name] === v ? 'is-active' : ''}`}
+                            onClick={() => choose(o.name, v)}
+                          >
+                            {v}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  {optionError && missing && (
+                    <p className="pd-option-error" role="alert">Please choose a {missing.name.toLowerCase()}.</p>
+                  )}
+                </div>
+              )}
+
               {/* Buy box (desktop; phones get the bar at the bottom) */}
               {soldOut ? (
                 <a href={backInStockLink} target="_blank" rel="noreferrer" className="btn btn-whatsapp btn-block pd-buy-inline">
@@ -348,7 +400,7 @@ export const ProductDetailModal = () => {
               )}
 
               {!soldOut && (
-                <a href={getWhatsAppOrderLink(product, quantity)} target="_blank" rel="noreferrer" className="pd-wa-link">
+                <a href={getWhatsAppOrderLink(product, quantity, cleanSelection(product, selected))} target="_blank" rel="noreferrer" className="pd-wa-link">
                   <MessageCircle size={16} /> Prefer WhatsApp? Order this in a chat
                 </a>
               )}

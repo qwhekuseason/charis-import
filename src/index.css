@@ -3389,3 +3389,7 @@ h2.co-label { font-weight: 700 !important; }
 .site-footer-top:hover { color: #fff !important; background: rgba(255, 255, 255, 0.08) !important; }
 .site-footer a:focus-visible, .site-footer button:focus-visible { box-shadow: 0 0 0 3px rgba(212, 175, 90, 0.5); }
 .nav-drawer-cta.is-earn { background: var(--gold-wash) !important; color: var(--gold-text) !important; }
+.adm-option-adds { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.adm-options .adm-help { margin: -2px 0 8px; }
+.cd-item-options { align-self: flex-start; padding: 2px 8px; border-radius: 6px; background: var(--gold-wash); color: var(--gold-text); font-size: 0.76rem; font-weight: 700; }
+.adm-item-options { display: block; margin-top: 2px; font-size: 0.8rem; color: var(--gold-text); }

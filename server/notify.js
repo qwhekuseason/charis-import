@@ -144,7 +144,11 @@ const PAYMENT_STATUS_TEXT = {
 
 const layout = ({ heading, intro, order, extra = '' }) => {
   const rows = (Array.isArray(order.items) ? order.items : [])
-    .map((i) => `<tr><td style="padding:6px 0;color:#334155">${esc(i.name)} × ${esc(i.qty)}</td><td style="padding:6px 0;text-align:right;color:#0f172a">${money(i.price * i.qty)}</td></tr>`)
+    .map((i) => {
+      // The buyer's choices (size, colour…) under the item name.
+      const picked = Object.entries(i.options || {}).map(([k, v]) => `${esc(k)}: ${esc(v)}`).join(' · ');
+      return `<tr><td style="padding:6px 0;color:#334155">${esc(i.name)} × ${esc(i.qty)}${picked ? `<br><span style="font-size:12px;color:#6f675b">${picked}</span>` : ''}</td><td style="padding:6px 0;text-align:right;color:#0f172a">${money(i.price * i.qty)}</td></tr>`;
+    })
     .join('');
   const extraRow = (text, amount) => `<tr><td style="padding:6px 0;color:#64748b">${text}</td><td style="padding:6px 0;text-align:right;color:#64748b">${amount}</td></tr>`;
   const summary = [

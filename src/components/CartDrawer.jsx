@@ -4,6 +4,7 @@ import { sizedImage } from '../utils/images';
 import { SmartImage } from './SmartImage';
 import { getFoundCodes } from '../utils/hunt';
 import { validateDiscountCode } from '../services/api';
+import { lineIdOf, optionsLabel } from '../utils/options';
 import { X, Trash2, Plus, Minus, ShoppingBag, ArrowRight, Tag, Check, AlertTriangle, Lock, Truck } from 'lucide-react';
 
 const money = (n) => `GH₵${Number(n || 0).toFixed(2)}`;
@@ -131,16 +132,18 @@ export const CartDrawer = () => {
                   const p = item.product;
                   const out = p.inStock === false;
                   const was = Number(p.originalPrice);
+                  const line = lineIdOf(item);
                   return (
-                    <li key={p.id} className={`cd-item ${out ? 'is-out' : ''}`}>
+                    <li key={line} className={`cd-item ${out ? 'is-out' : ''}`}>
                       <button type="button" className="cd-thumb-btn" onClick={() => openProduct(p)} aria-label={`View ${p.name}`}>
                         <SmartImage src={sizedImage(p.images?.[0] || p.image || '', 160)} alt="" className="cart-thumb cd-thumb" />
                       </button>
                       <div className="cd-item-main">
                         <div className="cd-item-top">
                           <button type="button" className="cd-item-name" onClick={() => openProduct(p)}>{p.name}</button>
-                          <button type="button" className="cd-remove" onClick={() => removeFromCart(p.id)} aria-label={`Remove ${p.name}`} title="Remove"><Trash2 size={16} /></button>
+                          <button type="button" className="cd-remove" onClick={() => removeFromCart(line)} aria-label={`Remove ${p.name}`} title="Remove"><Trash2 size={16} /></button>
                         </div>
+                        {item.options && <span className="cd-item-options">{optionsLabel(item.options)}</span>}
                         <div className="cd-item-price">
                           {money(item.unitPrice)} each
                           {was > item.unitPrice && <s>{money(was)}</s>}
@@ -149,13 +152,13 @@ export const CartDrawer = () => {
                         <div className="cd-item-bottom">
                           <div className="cd-qty" role="group" aria-label={`Quantity of ${p.name}`}>
                             {item.quantity > 1 ? (
-                              <button type="button" onClick={() => updateCartQuantity(p.id, item.quantity - 1)} aria-label="One less"><Minus size={16} /></button>
+                              <button type="button" onClick={() => updateCartQuantity(line, item.quantity - 1)} aria-label="One less"><Minus size={16} /></button>
                             ) : (
                               // At 1, the left button removes the item (with Undo) instead of silently deleting it.
-                              <button type="button" onClick={() => removeFromCart(p.id)} aria-label={`Remove ${p.name}`} className="is-remove"><Trash2 size={15} /></button>
+                              <button type="button" onClick={() => removeFromCart(line)} aria-label={`Remove ${p.name}`} className="is-remove"><Trash2 size={15} /></button>
                             )}
                             <span aria-live="polite">{item.quantity}</span>
-                            <button type="button" onClick={() => updateCartQuantity(p.id, Math.min(999, item.quantity + 1))} aria-label="One more" disabled={out}><Plus size={16} /></button>
+                            <button type="button" onClick={() => updateCartQuantity(line, Math.min(999, item.quantity + 1))} aria-label="One more" disabled={out}><Plus size={16} /></button>
                           </div>
                           <strong className="cd-line-total">{money(item.total)}</strong>
                         </div>

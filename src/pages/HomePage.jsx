@@ -24,7 +24,7 @@ import { HiddenGem } from '../components/HiddenGem';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Where customers find things — scrolls past in the band under the hero.
-const SOURCES = ['Shein', '1688', 'Alibaba', 'Taobao', 'TikTok Shop', 'Instagram', 'AliExpress'];
+const SOURCES = ['Turkey', 'Dubai', 'China', 'UK', '1688', 'Pinduoduo', 'Alibaba'];
 
 const BATCH_STAGE_LABELS = {
   CONFIRMED: 'Booking orders now',
@@ -478,8 +478,8 @@ export const HomePage = () => {
         </div>
         <div className="hm-promo is-gold" data-reveal style={{ '--i': 1 }}>
           <span className="hm-promo-icon"><Gift size={20} aria-hidden="true" /></span>
-          <h2>Give GH₵25, get GH₵25</h2>
-          <p>Your friend gets GH₵25 off their first order. You get GH₵25 store credit when they pay.</p>
+          <h2>Give GH₵10, get GH₵10</h2>
+          <p>Your friend gets GH₵10 off their first order. You get GH₵10 store credit when they pay.</p>
           <div className="hm-promo-actions">
             <button type="button" className="btn btn-primary" onClick={() => setReferralModalOpen(true)}>Get my invite link</button>
           </div>

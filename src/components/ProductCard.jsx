@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../context/StoreContext';
+import { productOptions } from '../utils/options';
 import { sizedImage, imageSrcSet } from '../utils/images';
 import { SmartImage } from './SmartImage';
 import { Heart, Plus, Check, Star } from 'lucide-react';
@@ -42,6 +43,7 @@ export const ProductCard = ({ product }) => {
     : null;
 
   const open = () => setSelectedProduct(product);
+  const needsChoice = productOptions(product).length > 0;
 
   return (
     <article className={`pcard ${soldOut ? 'is-soldout' : ''}`}>
@@ -75,8 +77,9 @@ export const ProductCard = ({ product }) => {
           <button
             type="button"
             className={`pcard-icon pcard-add ${added ? 'is-added' : ''}`}
-            onClick={() => { addToCart(product, 1); setAdded(true); }}
-            aria-label={`Add ${product.name} to cart`}
+            // Products with sizes/colours open first so the buyer can choose.
+            onClick={() => (needsChoice ? open() : (addToCart(product, 1), setAdded(true)))}
+            aria-label={needsChoice ? `Choose options for ${product.name}` : `Add ${product.name} to cart`}
           >
             {added ? <Check size={18} /> : <Plus size={18} />}
           </button>

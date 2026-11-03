@@ -732,6 +732,18 @@ const parseProductInput = (body, { partial = false } = {}) => {
       .filter((s) => s.label && s.value)
       .slice(0, 12);
   }
+  // Choices the buyer must pick (size, colour…): up to 4 options with up to 30 values each.
+  if (has('options')) {
+    data.options = (Array.isArray(body.options) ? body.options : [])
+      .map((o) => {
+        const raw = Array.isArray(o?.values) ? o.values : String(o?.values || '').split(',');
+        const values = [...new Set(raw.map((v) => String(v).trim().slice(0, 40)).filter(Boolean))].slice(0, 30);
+        return { name: String(o?.name || '').trim().slice(0, 30), values };
+      })
+      .filter((o) => o.name && o.values.length)
+      .filter((o, i, all) => all.findIndex((x) => x.name.toLowerCase() === o.name.toLowerCase()) === i)
+      .slice(0, 4);
+  }
 
   if (has('gallery') || has('image') || !partial) {
     const gallery = (Array.isArray(body.gallery) ? body.gallery : [])
@@ -882,7 +894,7 @@ const DEFAULT_SETTINGS = {
   pickupPoint: 'Kumasi',
   openingHours: 'Monday – Saturday, 8:00 am – 6:30 pm',
   announcements: [
-    'Invite a friend, earn GH₵25 in store credit',
+    'Invite a friend, earn GH₵10 in store credit',
     "Seen it online? Request any item and we'll source it",
   ],
 };
@@ -1202,12 +1214,12 @@ const normalizePhone = (value) => String(value || '').replace(/\D/g, '').slice(-
 
 // ---------------------------------------------------------------------------
 // Referral programme
-//   • A signed-up friend gets GH₵25 off their first order.
-//   • The person who invited them gets GH₵25 store credit once that order is marked PAID.
+//   • A signed-up friend gets GH₵10 off their first order.
+//   • The person who invited them gets GH₵10 store credit once that order is marked PAID.
 //   • Credit is stored on the server, logged in CreditTransaction, and spent at checkout.
 // ---------------------------------------------------------------------------
-const REFERRAL_REWARD = 25;
-const REFERRAL_WELCOME_DISCOUNT = 25;
+const REFERRAL_REWARD = 10;
+const REFERRAL_WELCOME_DISCOUNT = 10;
 
 async function generateReferralCode() {
   for (;;) {
@@ -1349,12 +1361,22 @@ app.post('/api/orders', optionalAuth, async (req, res) => {
       if (!Number.isInteger(qty) || qty < 1 || qty > 1000) {
         return res.status(400).json({ success: false, error: `Invalid quantity for "${product.name}".` });
       }
+      // Every option the product has must be picked, from the values the admin set.
+      const options = {};
+      for (const option of Array.isArray(product.options) ? product.options : []) {
+        const picked = item.options?.[option.name];
+        if (!option.values?.includes(picked)) {
+          return res.status(400).json({ success: false, error: `Please choose a ${String(option.name).toLowerCase()} for "${product.name}".` });
+        }
+        options[option.name] = picked;
+      }
       pricedItems.push({
         id: product.id,
         name: product.name,
         qty,
         price: effectivePrice(product),
         image: product.image,
+        ...(Object.keys(options).length && { options }),
       });
     }
 

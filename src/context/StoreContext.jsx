@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { lineIdOf, optionsLabel, productOptions, selectionComplete } from '../utils/options';
 import {
   getProducts,
   getCategories,
@@ -36,7 +37,7 @@ export const DEFAULT_STORE_SETTINGS = {
   pickupPoint: 'Kumasi',
   openingHours: 'Monday – Saturday, 8:00 am – 6:30 pm',
   announcements: [
-    'Invite a friend, earn GH₵25 in store credit',
+    'Invite a friend, earn GH₵10 in store credit',
     "Seen it online? Request any item and we'll source it",
   ],
 };
@@ -240,6 +241,8 @@ export const StoreProvider = ({ children }) => {
         const fresh = products.find((p) => p.id === item.product.id);
         // Product removed from the store since it was added — drop it, or checkout would always fail.
         if (!fresh) { changed = true; return null; }
+        // The admin removed the size/colour this line was for — checkout would refuse it.
+        if (productOptions(fresh).length && !selectionComplete(fresh, item.options)) { changed = true; return null; }
         if (fresh.price === item.unitPrice) return item;
         changed = true;
         return { ...item, product: fresh, unitPrice: fresh.price, total: fresh.price * item.quantity };
@@ -444,11 +447,14 @@ export const StoreProvider = ({ children }) => {
   };
 
   // Add to cart (retail e-commerce)
-  const addToCart = (product, quantity = 1) => {
+  // `options` are the buyer's choices, e.g. { Size: 'M' } — each choice gets its own cart line.
+  const addToCart = (product, quantity = 1, options = {}) => {
     const qtyToAdd = Math.max(1, quantity || 1);
+    const chosen = options && Object.keys(options).length ? options : undefined;
+    const lineId = lineIdOf({ product, options: chosen });
 
     setCart((prevCart) => {
-      const existingIndex = prevCart.findIndex((item) => item.product.id === product.id);
+      const existingIndex = prevCart.findIndex((item) => lineIdOf(item) === lineId);
       if (existingIndex > -1) {
         const updated = [...prevCart];
         const newQty = updated[existingIndex].quantity + qtyToAdd;
@@ -465,7 +471,9 @@ export const StoreProvider = ({ children }) => {
         return [
           ...prevCart,
           {
+            lineId,
             product,
+            ...(chosen && { options: chosen }),
             quantity: qtyToAdd,
             unitPrice,
             total: unitPrice * qtyToAdd
@@ -475,17 +483,17 @@ export const StoreProvider = ({ children }) => {
     });
 
     setCartBump((n) => n + 1);
-    showToast(`Added to cart: ${product.name}`, 'success', {
+    showToast(`Added to cart: ${product.name}${chosen ? ` (${optionsLabel(chosen)})` : ''}`, 'success', {
       action: { label: 'View cart', onClick: () => setCartDrawerOpen(true) },
     });
     return true;
   };
 
   // Update item quantity
-  const updateCartQuantity = (productId, newQty) => {
+  const updateCartQuantity = (lineId, newQty) => {
     setCart((prevCart) => {
       return prevCart.map((item) => {
-        if (item.product.id === productId) {
+        if (lineIdOf(item) === lineId) {
           if (newQty <= 0) return null;
           const unitPrice = item.product.price;
           return {
@@ -501,14 +509,14 @@ export const StoreProvider = ({ children }) => {
   };
 
   // Remove from cart
-  const removeFromCart = (productId) => {
-    const index = cart.findIndex((item) => item.product.id === productId);
+  const removeFromCart = (lineId) => {
+    const index = cart.findIndex((item) => lineIdOf(item) === lineId);
     const removed = cart[index];
-    setCart((prev) => prev.filter((item) => item.product.id !== productId));
+    setCart((prev) => prev.filter((item) => lineIdOf(item) !== lineId));
     showToast('Item removed from cart', 'info', removed ? {
       action: {
         label: 'Undo',
-        onClick: () => setCart((prev) => (prev.some((i) => i.product.id === productId)
+        onClick: () => setCart((prev) => (prev.some((i) => lineIdOf(i) === lineId)
           ? prev
           : [...prev.slice(0, index), removed, ...prev.slice(index)])),
       },
@@ -549,13 +557,13 @@ export const StoreProvider = ({ children }) => {
   };
 
   // WhatsApp Direct link generator
-  const getWhatsAppOrderLink = (product, quantity = 1) => {
+  const getWhatsAppOrderLink = (product, quantity = 1, options = {}) => {
     const qty = quantity || 1;
     const unitPrice = product.price;
     const total = (unitPrice * qty).toFixed(2);
     
     const message = encodeURIComponent(
-      `Hello CHARI Team,\n\nI want to purchase:\nProduct: *${product.name}*\nQuantity: *${qty}*\nUnit Price: GH₵${unitPrice.toFixed(2)}\nTotal: *GH₵${total}*\n\nPlease confirm availability and delivery details.`
+      `Hello CHARI Team,\n\nI want to purchase:\nProduct: *${product.name}*\n${Object.keys(options || {}).length ? `Choice: *${optionsLabel(options)}*\n` : ''}Quantity: *${qty}*\nUnit Price: GH₵${unitPrice.toFixed(2)}\nTotal: *GH₵${total}*\n\nPlease confirm availability and delivery details.`
     );
     return `https://wa.me/${WHATSAPP_NUMBER}?text=${message}`;
   };

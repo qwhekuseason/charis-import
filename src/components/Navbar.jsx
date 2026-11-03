@@ -146,9 +146,9 @@ export const Navbar = () => {
             <PackagePlus size={15} />
             <span className="nav-cta-text">Request Item</span>
           </button>
-          <button type="button" onClick={() => setReferralModalOpen(true)} className="navbar-cta-btn nav-cta-earn" title="Give GH₵25, get GH₵25" aria-label="Invite a friend and earn GH₵25">
+          <button type="button" onClick={() => setReferralModalOpen(true)} className="navbar-cta-btn nav-cta-earn" title="Give GH₵10, get GH₵10" aria-label="Invite a friend and earn GH₵10">
             <Gift size={15} />
-            <span className="nav-cta-text">Earn GH₵25</span>
+            <span className="nav-cta-text">Earn GH₵10</span>
           </button>
 
           {user ? (
@@ -283,7 +283,7 @@ export const Navbar = () => {
           </button>
           <button type="button" className="nav-drawer-cta is-earn" onClick={() => { setMenuOpen(false); setReferralModalOpen(true); }}>
             <Gift size={18} />
-            <span><strong>Earn GH₵25</strong><small>Invite a friend</small></span>
+            <span><strong>Earn GH₵10</strong><small>Invite a friend</small></span>
           </button>
         </div>
 

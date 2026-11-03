@@ -190,3 +190,17 @@
   .pd-qty button { width: 34px; }
   .pd-qty input { width: 34px; }
 }
+
+/* Buyer's choices (size, colour…) */
+.pd-options { display: flex; flex-direction: column; gap: 14px; margin: 4px 0 16px; padding: 14px; border-radius: 14px; border: 1.5px solid var(--border-light); background: var(--bg-card); transition: border-color 0.2s ease, box-shadow 0.2s ease; }
+.pd-options.has-error { border-color: #dc2626; box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.12); animation: pdShake 0.35s ease; }
+.pd-option-label { display: block; margin-bottom: 8px; font-size: 0.86rem; font-weight: 700; color: var(--text-secondary); }
+.pd-option-label strong { color: var(--ink); }
+.pd-option-label em { font-style: normal; font-weight: 600; color: var(--text-muted); }
+.pd-option-values { display: flex; flex-wrap: wrap; gap: 8px; }
+.pd-chip { min-width: 46px; min-height: 40px; padding: 8px 14px; border-radius: 10px; border: 1.5px solid var(--border-medium); background: var(--bg-card); font-size: 0.9rem; font-weight: 700; color: var(--ink); transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease; }
+.pd-chip:hover { border-color: var(--gold); }
+.pd-chip.is-active { background: var(--ink); border-color: var(--ink); color: var(--gold-bright); }
+.pd-option-error { margin: -4px 0 0; font-size: 0.84rem; font-weight: 700; color: #dc2626; }
+@keyframes pdShake { 0%, 100% { transform: none; } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+@media (prefers-reduced-motion: reduce) { .pd-options.has-error { animation: none; } }

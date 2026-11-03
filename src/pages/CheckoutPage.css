@@ -193,3 +193,4 @@
   .co-pay { padding: 14px; }
   .floating-wa-btn.is-checkout { display: none; }
 }
+.co-item-options { display: block; font-size: 0.76rem; font-weight: 700; color: var(--gold-text); }
