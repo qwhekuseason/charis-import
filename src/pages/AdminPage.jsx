@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../context/StoreContext';
+import { optionsLabel } from '../utils/options';
 import * as admin from '../services/adminApi';
 import { sizedImage } from '../utils/images';
 import { X, Plus, Trash2, RefreshCw, Search, Upload, MessageCircle, ArrowLeft, ArrowRight, Phone, Check, AlertTriangle, Copy } from 'lucide-react';
@@ -265,7 +266,10 @@ const OrdersTab = ({ orders, setOrders, view, setView, searchRequest }) => {
                       {items.map((it, i) => (
                         <li key={i}>
                           <SmartImage src={sizedImage(it.image || '', 96)} alt="" className="adm-item-thumb" />
-                          <span>{it.qty} × {it.name} <span className="adm-muted">@ {money(it.price)}</span></span>
+                          <span>
+                            {it.qty} × {it.name} <span className="adm-muted">@ {money(it.price)}</span>
+                            {it.options && <strong className="adm-item-options">{optionsLabel(it.options)}</strong>}
+                          </span>
                         </li>
                       ))}
                     </ul>
@@ -312,7 +316,7 @@ const OrdersTab = ({ orders, setOrders, view, setView, searchRequest }) => {
           })}
         </div>
       )}
-      <p className="adm-help">Setting payment to <strong>Paid</strong> also gives the customer who invited this buyer their GH₵25 reward (first order only). Cancelling an order returns any store credit it used.</p>
+      <p className="adm-help">Setting payment to <strong>Paid</strong> also gives the customer who invited this buyer their GH₵10 reward (first order only). Cancelling an order returns any store credit it used.</p>
     </>
   );
 };
@@ -320,7 +324,7 @@ const OrdersTab = ({ orders, setOrders, view, setView, searchRequest }) => {
 // ---------------------------------------------------------------------------
 // Products
 // ---------------------------------------------------------------------------
-const emptyProduct = (category) => ({ name: '', category, price: '', originalPrice: '', inStock: true, isNew: false, photos: [], description: '', specs: [] });
+const emptyProduct = (category) => ({ name: '', category, price: '', originalPrice: '', inStock: true, isNew: false, photos: [], description: '', specs: [], options: [] });
 
 // Turns a product from the server into the editor's form fields.
 const productToForm = (p) => ({
@@ -334,7 +338,16 @@ const productToForm = (p) => ({
   photos: (p.gallery && p.gallery.length ? p.gallery : p.images?.length ? p.images : [p.image]).filter(Boolean),
   description: p.description || '',
   specs: (p.specifications || p.specs || []).map((s) => ({ label: s.label || '', value: s.value || '' })),
+  // Values are edited as one comma-separated line: "S, M, L, XL".
+  options: (Array.isArray(p.options) ? p.options : []).map((o) => ({ name: o.name || '', values: (o.values || []).join(', ') })),
 });
+
+// Ready-made choices the admin can start from.
+const OPTION_PRESETS = [
+  { name: 'Size', values: 'S, M, L, XL, XXL' },
+  { name: 'Colour', values: 'Black, White' },
+  { name: 'Shoe size', values: '38, 39, 40, 41, 42, 43, 44' },
+];
 
 // What's wrong with the form, field by field (the server checks the same things).
 const productProblems = (f) => {
@@ -349,6 +362,8 @@ const productProblems = (f) => {
   }
   if (f.photos.length === 0) found.photos = 'Add at least one photo.';
   if (!f.category) found.category = 'Choose a category.';
+  const badOption = (f.options || []).findIndex((o) => (o.name.trim() || o.values.trim()) && (!o.name.trim() || !o.values.split(',').some((v) => v.trim())));
+  if (badOption > -1) found.options = 'Each choice needs a name and at least one option, e.g. Size: S, M, L.';
   return found;
 };
 
@@ -405,6 +420,9 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
     }
     setSaving(true);
     const specs = editing.specs.map((s) => ({ label: s.label.trim(), value: s.value.trim() })).filter((s) => s.label && s.value);
+    const options = editing.options
+      .map((o) => ({ name: o.name.trim(), values: [...new Set(o.values.split(',').map((v) => v.trim()).filter(Boolean))] }))
+      .filter((o) => o.name && o.values.length);
     const payload = {
       name: editing.name,
       category: editing.category,
@@ -416,6 +434,7 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
       gallery: editing.photos,
       description: editing.description,
       specs,
+      options,
     };
     try {
       if (editing.id) {
@@ -660,8 +679,37 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
               ))}
               {editing.specs.length < 12 && (
                 <button type="button" className="adm-add-spec" onClick={() => setField('specs', [...editing.specs, { label: '', value: '' }])}>
-                  <Plus size={14} /> Add a detail (size, colour, material…)
+                  <Plus size={14} /> Add a detail (material, weight, power…)
                 </button>
+              )}
+            </div>
+
+            {/* Choices the buyer must pick before adding to cart */}
+            <div className="adm-specs adm-options" data-field="options">
+              <span className="form-label">Choices buyers pick <span className="form-optional">(optional)</span></span>
+              <p className="adm-help">Buyers must choose one of each before adding to cart, e.g. <strong>Size</strong>: S, M, L. Separate the choices with commas.</p>
+              {editing.options.map((o, i) => (
+                <div key={i} className="adm-spec-row">
+                  <input className="form-input" placeholder="e.g. Size" aria-label={`Choice ${i + 1} name`} value={o.name}
+                    onChange={(e) => setField('options', editing.options.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
+                  <input className="form-input" placeholder="e.g. S, M, L, XL" aria-label={`Choice ${i + 1} options`} value={o.values}
+                    onChange={(e) => setField('options', editing.options.map((x, j) => (j === i ? { ...x, values: e.target.value } : x)))} />
+                  <button type="button" className="btn btn-outline btn-sm adm-danger" aria-label={`Remove choice ${i + 1}`}
+                    onClick={() => setField('options', editing.options.filter((_, j) => j !== i))}><X size={14} /></button>
+                </div>
+              ))}
+              {problem('options')}
+              {editing.options.length < 4 && (
+                <div className="adm-option-adds">
+                  {OPTION_PRESETS.filter((preset) => !editing.options.some((o) => o.name.trim().toLowerCase() === preset.name.toLowerCase())).map((preset) => (
+                    <button key={preset.name} type="button" className="adm-add-spec" onClick={() => setField('options', [...editing.options, { ...preset }])}>
+                      <Plus size={14} /> {preset.name}
+                    </button>
+                  ))}
+                  <button type="button" className="adm-add-spec" onClick={() => setField('options', [...editing.options, { name: '', values: '' }])}>
+                    <Plus size={14} /> Other choice
+                  </button>
+                </div>
               )}
             </div>
           </form>

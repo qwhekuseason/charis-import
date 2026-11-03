@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../context/StoreContext';
+import { productOptions, selectionComplete, cleanSelection } from '../utils/options';
 import { getCurrentUser, changePassword } from '../services/api';
 import { SmartImage } from '../components/SmartImage';
 import { sizedImage } from '../utils/images';
@@ -157,7 +158,7 @@ export const AccountPage = () => {
           <ul className="ac-perks">
             <li><Package size={16} aria-hidden="true" /> See every order and where it is</li>
             <li><Truck size={16} aria-hidden="true" /> Faster checkout with your saved address</li>
-            <li><Gift size={16} aria-hidden="true" /> Earn GH₵25 credit for each friend you invite</li>
+            <li><Gift size={16} aria-hidden="true" /> Earn GH₵10 credit for each friend you invite</li>
           </ul>
           <div className="ac-signedout-actions">
             <button type="button" onClick={() => openAuth('login')} className="btn btn-primary btn-lg">Sign in</button>
@@ -188,8 +189,10 @@ export const AccountPage = () => {
     let added = 0;
     items.forEach((it) => {
       const product = (products || []).find((p) => p.id === it.id);
-      if (product && product.inStock !== false) {
-        addToCart(product, it.qty || it.quantity || 1);
+      // Same size/colour as last time — unless that choice no longer exists.
+      const choiceStillValid = !productOptions(product).length || selectionComplete(product, it.options);
+      if (product && product.inStock !== false && choiceStillValid) {
+        addToCart(product, it.qty || it.quantity || 1, cleanSelection(product, it.options));
         added += 1;
       }
     });
@@ -294,7 +297,7 @@ export const AccountPage = () => {
             <span className="ac-stat-icon is-orange"><Gift size={18} /></span>
             <span className="ac-stat-body">
               <strong>Invite a friend</strong>
-              <span>You both get GH₵{referralInfo?.rewardAmount ?? 25}</span>
+              <span>You both get GH₵{referralInfo?.rewardAmount ?? 10}</span>
             </span>
             <ArrowRight size={16} className="ac-stat-arrow" />
           </button>

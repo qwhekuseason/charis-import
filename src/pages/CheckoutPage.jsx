@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useStore } from '../context/StoreContext';
+import { lineIdOf, optionsLabel } from '../utils/options';
 import { sizedImage } from '../utils/images';
 import { SmartImage } from '../components/SmartImage';
 import { GHANA_REGIONS } from '../data/products';
@@ -308,6 +309,7 @@ export const CheckoutPage = () => {
           qty: i.quantity,
           price: i.unitPrice,
           image: i.product?.images?.[0] || i.product?.image || i.image || '',
+          ...(i.options && { options: i.options }),
         })),
         subtotal: cartSubtotal,
         shippingCost,
@@ -352,7 +354,7 @@ export const CheckoutPage = () => {
   const getOrderWhatsAppLink = (order) => {
     const code = order.orderCode || order.orderId;
     const itemsList = (order.items || [])
-      .map((it) => `• ${it.name} (${it.qty} pcs) @ GH₵${(it.price || 0).toFixed(2)}`)
+      .map((it) => `• ${it.name}${it.options ? ` — ${optionsLabel(it.options)}` : ''} (${it.qty} pcs) @ GH₵${(it.price || 0).toFixed(2)}`)
       .join('\n');
 
     const msg = encodeURIComponent(
@@ -386,7 +388,7 @@ export const CheckoutPage = () => {
     <>
       <ul className="co-items">
         {cart.map((item) => (
-          <li key={item.product.id} className="co-item">
+          <li key={lineIdOf(item)} className="co-item">
             <div className="co-item-thumb">
               <SmartImage
                 src={sizedImage(item.product.images ? item.product.images[0] : (item.product.image || ''), 160)}
@@ -397,6 +399,7 @@ export const CheckoutPage = () => {
             </div>
             <div className="co-item-info">
               <span className="co-item-name">{item.product.name}</span>
+              {item.options && <span className="co-item-options">{optionsLabel(item.options)}</span>}
               <span className="co-item-each">{money(item.unitPrice)} each</span>
             </div>
             <span className="co-item-total">{money(item.total)}</span>

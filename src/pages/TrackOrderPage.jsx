@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../context/StoreContext';
+import { optionsLabel } from '../utils/options';
 import { HiddenGem } from '../components/HiddenGem';
 import { SmartImage } from '../components/SmartImage';
 import { sizedImage } from '../utils/images';
@@ -338,6 +339,7 @@ export const TrackOrderPage = () => {
                         <SmartImage src={sizedImage(it.image || '', 160)} alt="" className="tr-item-img" />
                         <div className="tr-item-info">
                           <span className="tr-item-name">{it.name}</span>
+                          {it.options && <span className="tr-item-options">{optionsLabel(it.options)}</span>}
                           <span className="tr-item-each">{qty} × {money(it.price)}</span>
                         </div>
                         <span className="tr-item-total">{money(qty * (it.price || 0))}</span>

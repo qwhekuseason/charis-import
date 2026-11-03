@@ -21,8 +21,8 @@ export const ReferralModal = () => {
   }, [user?.id]);
 
   const close = () => setReferralModalOpen(false);
-  const reward = referralInfo?.rewardAmount ?? 25;
-  const welcome = referralInfo?.welcomeDiscount ?? 25;
+  const reward = referralInfo?.rewardAmount ?? 10;
+  const welcome = referralInfo?.welcomeDiscount ?? 10;
   const shareLink = referralInfo ? `${window.location.origin}/?ref=${referralInfo.referralCode}` : '';
 
   const copyLink = async () => {

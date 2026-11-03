@@ -22,6 +22,7 @@ model Product {
   gallery       String[]  @default([])
   description   String
   specs         Json?
+  options       Json? // choices the buyer picks, e.g. [{ "name": "Size", "values": ["S","M","L"] }]
   tags          String[]  @default([])
   // Time-limited deal set from Admin: while dealEndsAt is in the future, customers pay dealPrice.
   dealPrice     Float?

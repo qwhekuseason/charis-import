@@ -207,7 +207,7 @@ export const AuthModal = () => {
             <ul className="auth-perks">
               <li><Package size={14} aria-hidden="true" /> Follow every order</li>
               <li><Truck size={14} aria-hidden="true" /> Faster checkout</li>
-              <li><Gift size={14} aria-hidden="true" /> GH₵25 per friend invited</li>
+              <li><Gift size={14} aria-hidden="true" /> GH₵10 per friend invited</li>
             </ul>
           )}
 
@@ -298,7 +298,7 @@ export const AuthModal = () => {
                   <div className="form-field">
                     <label className="form-label" htmlFor="auth-invite">Invite code <span className="form-optional">(optional)</span></label>
                     <input id="auth-invite" className="form-input auth-code" placeholder="CHARI-7KQ2MX" value={inviteCode} onChange={(e) => setInviteCode(e.target.value.toUpperCase())} />
-                    {inviteCode && <p className="form-hint">If the code is valid, you’ll get GH₵25 off your first order.</p>}
+                    {inviteCode && <p className="form-hint">If the code is valid, you’ll get GH₵10 off your first order.</p>}
                   </div>
                 ) : (
                   <button type="button" className="auth-invite-toggle" onClick={() => setShowInvite(true)}>
