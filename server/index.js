@@ -163,11 +163,41 @@ const inquiryLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 8, message: 'T
 const trackLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: 'Too many tracking lookups. Please wait a few minutes and try again.' });
 // Promo codes are short words, so checking them is limited to stop anyone trying thousands to find one.
 // (Generous enough for a shopper changing quantities in the cart, which re-checks the code.)
+// Placing orders: plenty for a real shopper, but stops scripted floods of fake orders (each one
+// alerts the admins and emails the address given, which could be used to spam strangers).
+const orderLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 8, message: 'Too many orders from this connection. Please wait a few minutes or message us on WhatsApp.' });
+const reviewLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 6, message: 'Too many reviews at once. Please try again later.' });
 const promoLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 60, message: 'Too many promo code checks. Please wait a few minutes and try again.' });
+
+// Browser safety rules for every page and API reply from this server.
+app.disable('x-powered-by'); // don't advertise what the server runs on
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self'", // only the shop's own code can run — injected scripts are blocked
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com data:",
+  "img-src 'self' data: blob: https:",
+  "connect-src 'self' https:",
+  "worker-src 'self'",
+  "manifest-src 'self'",
+  "frame-ancestors 'none'", // the shop can't be shown inside another site (click-jacking)
+  "base-uri 'self'",
+  "form-action 'self'",
+  "object-src 'none'",
+].join('; ');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  if (!req.path.startsWith('/uploads')) res.setHeader('Content-Security-Policy', CONTENT_SECURITY_POLICY);
+  next();
+});
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '200kb' }));
 // Uploaded files are only ever shown as pictures: browsers must not guess another type or run anything in them.
 app.use('/uploads', express.static(uploadsDir, {
   setHeaders: (res) => {
@@ -178,7 +208,8 @@ app.use('/uploads', express.static(uploadsDir, {
 
 // Request logger
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  // Path only — query strings can hold phone numbers (order tracking) that don't belong in logs.
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   next();
 });
 
@@ -192,6 +223,8 @@ const signToken = (user) => jwt.sign(
   { expiresIn: '30d' }
 );
 const tokenStillValid = (decoded, user) => (decoded.v || 0) === (user.tokenVersion || 0);
+// Compared against when an email has no account, so sign-in takes the same time either way.
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync('not-a-real-password-just-for-timing', 10);
 
 const authenticateUser = async (req, res, next) => {
   try {
@@ -201,7 +234,7 @@ const authenticateUser = async (req, res, next) => {
     }
 
     const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },
@@ -237,7 +270,7 @@ const optionalAuth = async (req, res, next) => {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.split(' ')[1];
-      const decoded = jwt.verify(token, JWT_SECRET);
+      const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
       const user = await prisma.user.findUnique({
         where: { id: decoded.id },
       });
@@ -262,18 +295,17 @@ const requireAdmin = (req, res, next) => {
 app.get('/api/health', async (req, res) => {
   try {
     const productCount = await prisma.product.count();
-    const userCount = await prisma.user.count();
     res.json({
       status: 'healthy',
       database: 'connected (Neon PostgreSQL)',
       productCount,
-      userCount,
       // Where uploaded photos go: 'cloudinary' (permanent), 'off' (not set up on a host that wipes files) or 'local'.
       photoStorage: cloudinaryEnabled ? 'cloudinary' : photoStorageMissing ? 'off' : 'local',
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    res.status(500).json({ status: 'unhealthy', error: error.message });
+    console.error('Health check failed:', error);
+    res.status(500).json({ status: 'unhealthy' });
   }
 });
 
@@ -284,17 +316,27 @@ app.get('/api/health', async (req, res) => {
 // POST /api/auth/register
 app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
-    const { name, email, password, phone, city, address } = req.body;
+    // Plain, length-capped text only — anything else is treated as missing.
+    const field = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
+    const name = field(req.body.name, 100);
+    const email = field(req.body.email, 120).toLowerCase();
+    const password = typeof req.body.password === 'string' ? req.body.password : '';
+    const phone = field(req.body.phone, 30);
+    const city = field(req.body.city, 80);
+    const address = field(req.body.address, 300);
 
     if (!name || !email || !password) {
       return res.status(400).json({ success: false, error: 'Name, email, and password are required.' });
     }
-    if (String(password).length < 8) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ success: false, error: 'Please enter a valid email address.' });
+    }
+    if (password.length < 8 || password.length > 200) {
       return res.status(400).json({ success: false, error: 'Password must be at least 8 characters.' });
     }
 
     const existingUser = await prisma.user.findUnique({
-      where: { email: email.trim().toLowerCase() },
+      where: { email },
     });
 
     if (existingUser) {
@@ -314,12 +356,12 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
 
     const newUser = await prisma.user.create({
       data: {
-        name: name.trim(),
-        email: email.trim().toLowerCase(),
+        name,
+        email,
         password: hashedPassword,
-        phone: phone ? phone.trim() : null,
-        city: city ? city.trim() : 'Accra',
-        address: address ? address.trim() : null,
+        phone: phone || null,
+        city: city || 'Accra',
+        address: address || null,
         role: 'CUSTOMER',
         referralCode: await generateReferralCode(),
         referredById,
@@ -348,29 +390,28 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
     });
   } catch (error) {
     console.error('Registration error:', error);
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
 // POST /api/auth/login
 app.post('/api/auth/login', authLimiter, async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase().slice(0, 120) : '';
+    const password = typeof req.body.password === 'string' ? req.body.password.slice(0, 200) : '';
 
     if (!email || !password) {
       return res.status(400).json({ success: false, error: 'Please provide both email and password.' });
     }
 
     const user = await prisma.user.findUnique({
-      where: { email: email.trim().toLowerCase() },
+      where: { email },
     });
 
-    if (!user) {
-      return res.status(401).json({ success: false, error: 'Invalid email or password.' });
-    }
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
+    // Always run the (slow) password check, so the reply takes as long for an unknown email
+    // as for a real one — otherwise timing would reveal which emails have accounts.
+    const isMatch = await bcrypt.compare(password, user?.password || DUMMY_PASSWORD_HASH);
+    if (!user || !isMatch) {
       return res.status(401).json({ success: false, error: 'Invalid email or password.' });
     }
 
@@ -397,7 +438,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
@@ -423,7 +464,7 @@ app.get('/api/auth/me', authenticateUser, async (req, res) => {
 
     res.json({ success: true, user: userWithOrders });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
@@ -456,7 +497,7 @@ app.put('/api/auth/profile', authenticateUser, async (req, res) => {
 
     res.json({ success: true, message: 'Profile updated successfully', user: updated });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
@@ -583,7 +624,7 @@ app.get('/api/auth/users', authenticateUser, requireAdmin, async (req, res) => {
 
     res.json({ success: true, count: users.length, data: users });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
@@ -658,7 +699,7 @@ app.get('/api/products/:idOrSlug', async (req, res) => {
       data: formatProduct(product),
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
@@ -1121,7 +1162,7 @@ app.get('/api/categories', async (req, res) => {
 
     res.json({ success: true, data: categoriesWithCount });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
@@ -1331,7 +1372,7 @@ app.get('/api/referrals/me', authenticateUser, async (req, res) => {
   }
 });
 
-app.post('/api/orders', optionalAuth, async (req, res) => {
+app.post('/api/orders', orderLimiter, optionalAuth, async (req, res) => {
   try {
     const { deliveryMethod, deliveryMethodId, items } = req.body;
     // Plain, length-capped text only — anything else (objects, huge strings) would break the insert.
@@ -1354,6 +1395,12 @@ app.post('/api/orders', optionalAuth, async (req, res) => {
     }
     if (normalizePhone(phone).length < 9) {
       return res.status(400).json({ success: false, error: 'Please enter a valid phone number.' });
+    }
+    if (items.length > 50) {
+      return res.status(400).json({ success: false, error: 'That is a very large order — please split it, or message us on WhatsApp.' });
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ success: false, error: 'Please enter a valid email address, or leave it empty.' });
     }
 
     // Re-price every line from the database — the browser's prices are ignored.
@@ -1402,7 +1449,7 @@ app.post('/api/orders', optionalAuth, async (req, res) => {
     const subtotal = roundMoney(pricedItems.reduce((sum, i) => sum + i.price * i.qty, 0));
 
     // Promo codes are re-validated here; an invalid or expired code simply gives no discount.
-    const requestedCode = (req.body.couponCode || req.body.promoCode || '').trim().toUpperCase();
+    const requestedCode = text(req.body.couponCode || req.body.promoCode, 40).toUpperCase();
     const promo = requestedCode ? await evaluateDiscount(requestedCode, subtotal) : null;
     const promoDiscount = promo?.valid ? roundMoney(promo.discountAmount) : 0;
 
@@ -1523,7 +1570,7 @@ app.get('/api/orders/:code', trackLimiter, optionalAuth, async (req, res) => {
 
     res.json({ success: true, data: order });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
@@ -1535,7 +1582,7 @@ app.get('/api/orders', authenticateUser, requireAdmin, async (req, res) => {
     });
     res.json({ success: true, count: orders.length, data: orders });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
@@ -1574,7 +1621,7 @@ app.patch('/api/orders/:id/status', authenticateUser, requireAdmin, async (req, 
 
     res.json({ success: true, data: updated, emailed });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
@@ -1654,7 +1701,7 @@ app.post('/api/inquiries', inquiryLimiter, async (req, res) => {
     });
   } catch (error) {
     console.error('Error saving inquiry:', error);
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
@@ -1680,7 +1727,7 @@ app.get('/api/inquiries', authenticateUser, requireAdmin, async (req, res) => {
     });
     res.json({ success: true, count: inquiries.length, data: inquiries });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
@@ -1699,7 +1746,7 @@ app.get('/api/discounts', authenticateUser, requireAdmin, async (req, res) => {
     });
     res.json({ success: true, count: discounts.length, data: discounts });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
@@ -1762,7 +1809,7 @@ app.post('/api/discounts', authenticateUser, requireAdmin, async (req, res) => {
     res.status(201).json({ success: true, data: created });
   } catch (error) {
     console.error('Error creating discount:', error);
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
@@ -1825,14 +1872,14 @@ app.delete('/api/discounts/:id', authenticateUser, requireAdmin, async (req, res
     await prisma.discount.delete({ where: { id } });
     res.json({ success: true, message: 'Discount deleted successfully' });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
 // POST /api/discounts/validate (Public / Customer validate promo code)
 // Shared promo-code rules — used both for the checkout preview and when an order is actually placed.
 async function evaluateDiscount(code, subtotal) {
-  const cleanCode = String(code || '').trim().toUpperCase();
+  const cleanCode = String(code || '').trim().toUpperCase().slice(0, 40);
   const discount = await prisma.discount.findUnique({ where: { code: cleanCode } });
 
   if (!discount) return { valid: false, status: 404, error: `Promo code "${cleanCode}" is invalid.` };
@@ -1885,7 +1932,7 @@ app.post('/api/discounts/validate', promoLimiter, async (req, res) => {
         : `GH₵${discount.value.toFixed(2)} discount applied!`
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
@@ -1904,7 +1951,7 @@ app.get('/api/batches', async (req, res) => {
     res.json({ success: true, count: batches.length, data: batches });
   } catch (error) {
     console.error('Error fetching batches:', error);
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
@@ -1929,7 +1976,7 @@ app.get('/api/batches/active', async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
@@ -2001,7 +2048,7 @@ app.post('/api/batches', authenticateUser, requireAdmin, async (req, res) => {
     res.status(201).json({ success: true, data: created });
   } catch (error) {
     console.error('Error creating batch:', error);
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
@@ -2064,7 +2111,7 @@ app.put('/api/batches/:id', authenticateUser, requireAdmin, async (req, res) => 
     res.json({ success: true, data: updated });
   } catch (error) {
     console.error('Error updating batch:', error);
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
@@ -2099,18 +2146,18 @@ app.get('/api/reviews', async (req, res) => {
     });
     res.json({ success: true, count: reviews.length, data: reviews });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
 // POST /api/reviews (Submit a verified customer review)
 // Only signed-in customers who have actually ordered the product may review it,
 // so every review on the site is genuinely from a buyer.
-app.post('/api/reviews', authenticateUser, async (req, res) => {
+app.post('/api/reviews', reviewLimiter, authenticateUser, async (req, res) => {
   try {
     const { productId, rating, title, comment } = req.body;
 
-    if (!productId || !comment || !String(comment).trim()) {
+    if (typeof productId !== 'string' || !productId || !comment || !String(comment).trim()) {
       return res.status(400).json({ success: false, error: 'Product ID and comment are required.' });
     }
 
@@ -2119,13 +2166,18 @@ app.post('/api/reviews', authenticateUser, async (req, res) => {
       return res.status(404).json({ success: false, error: 'Product not found.' });
     }
 
+    // Only orders on this account that were actually paid count (an unpaid order costs nothing to place).
     const userOrders = await prisma.order.findMany({
-      where: { OR: [{ userId: req.user.id }, { email: req.user.email }] },
+      where: { userId: req.user.id, paymentStatus: 'PAID' },
       select: { items: true },
     });
     const hasBought = userOrders.some((o) => Array.isArray(o.items) && o.items.some((i) => i && i.id === productId));
     if (!hasBought) {
-      return res.status(403).json({ success: false, error: 'Only customers who have ordered this product can review it.' });
+      return res.status(403).json({ success: false, error: 'Only customers who have bought this product can review it.' });
+    }
+    const already = await prisma.review.findFirst({ where: { productId, userId: req.user.id } });
+    if (already) {
+      return res.status(409).json({ success: false, error: 'You have already reviewed this product.' });
     }
 
     const numericRating = Math.min(5, Math.max(1, parseInt(rating, 10) || 5));
@@ -2133,6 +2185,7 @@ app.post('/api/reviews', authenticateUser, async (req, res) => {
     const review = await prisma.review.create({
       data: {
         productId,
+        userId: req.user.id,
         userName: req.user.name,
         userCity: req.user.city || 'Accra',
         rating: numericRating,
@@ -2162,7 +2215,7 @@ app.post('/api/reviews', authenticateUser, async (req, res) => {
     });
   } catch (error) {
     console.error('Error submitting review:', error);
-    res.status(500).json({ success: false, error: error.message });
+    { console.error(`${req.method} ${req.path} failed:`, error); res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' }); }
   }
 });
 
@@ -2239,6 +2292,15 @@ if (fs.existsSync(distDir)) {
 }
 
 // Start server
+// Errors that reach here (e.g. a request body that isn't valid JSON) get a plain reply, never details.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  if (err?.type === 'entity.parse.failed') return res.status(400).json({ success: false, error: 'The request could not be read.' });
+  if (err?.type === 'entity.too.large') return res.status(413).json({ success: false, error: 'The request is too large.' });
+  console.error(`${req.method} ${req.path} failed:`, err);
+  res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' });
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 CHARI server running on http://localhost:${PORT}`);
   console.log(`📦 Connected to Neon PostgreSQL Database with JWT Auth`);
