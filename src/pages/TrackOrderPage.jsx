@@ -321,8 +321,10 @@ export const TrackOrderPage = () => {
               <div className="tr-fact">
                 <span className="tr-fact-label">Total</span>
                 <strong className="tr-total">{money(searchedOrder.total)}</strong>
-                {Number(searchedOrder.deliveryFee || searchedOrder.shippingCost) > 0 && (
+                {Number(searchedOrder.deliveryFee || searchedOrder.shippingCost) > 0 ? (
                   <span>Includes {money(searchedOrder.deliveryFee || searchedOrder.shippingCost)} delivery</span>
+                ) : (
+                  <span>Shipping cost: we'll confirm it with you</span>
                 )}
                 {searchedOrder.paymentMethod && <span>{searchedOrder.paymentMethod}</span>}
               </div>

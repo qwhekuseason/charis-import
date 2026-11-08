@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../context/StoreContext';
 import { optionsLabel } from '../utils/options';
 import * as admin from '../services/adminApi';
+import { checkServerHealth } from '../services/api';
 import { sizedImage } from '../utils/images';
 import { X, Plus, Trash2, RefreshCw, Search, Upload, MessageCircle, ArrowLeft, ArrowRight, Phone, Check, AlertTriangle, Copy } from 'lucide-react';
 import { SmartImage } from '../components/SmartImage';
@@ -276,7 +277,7 @@ const OrdersTab = ({ orders, setOrders, view, setView, searchRequest }) => {
                   </div>
                   <div>
                     <div className="adm-label">Money</div>
-                    <div className="adm-muted">Items {money(o.subtotal)} · Delivery {money(o.deliveryFee)}</div>
+                    <div className="adm-muted">Items {money(o.subtotal)} · Shipping {Number(o.deliveryFee) > 0 ? money(o.deliveryFee) : 'to confirm with customer'}</div>
                     {o.discountAmount > 0 && <div className="adm-muted">Discount −{money(o.discountAmount)}{o.couponCode ? ` (${o.couponCode})` : ''}</div>}
                     {o.creditUsed > 0 && <div className="adm-muted">Store credit −{money(o.creditUsed)}</div>}
                     <div className="adm-muted">{o.deliveryMethod} · {o.paymentMethod}</div>
@@ -367,7 +368,17 @@ const productProblems = (f) => {
   return found;
 };
 
-const STOCK_FILTERS = [['all', 'All'], ['in', 'In stock'], ['out', 'Out of stock'], ['new', 'New'], ['deal', 'On deal']];
+const STOCK_FILTERS = [['all', 'All'], ['in', 'In stock'], ['out', 'Out of stock'], ['new', 'New'], ['deal', 'On deal'], ['lost', 'Needs new photos']];
+// Photos saved on the server's own disk (/uploads/…) — on Render that disk is wiped, so they're gone.
+const usesServerDisk = (p) => [p.image, ...(p.gallery || []), ...(p.images || [])].some((u) => typeof u === 'string' && u.startsWith('/uploads/'));
+const STOCK_TESTS = {
+  all: () => true,
+  in: (p) => p.inStock !== false,
+  out: (p) => p.inStock === false,
+  new: (p) => p.badge === 'New',
+  deal: (p) => p.onDeal,
+  lost: usesServerDisk,
+};
 
 const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => {
   const { showToast } = useStore();
@@ -381,13 +392,11 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
   const [uploading, setUploading] = useState(false);
   const [priceDrafts, setPriceDrafts] = useState({});
 
-  const stockTest = {
-    all: () => true,
-    in: (p) => p.inStock !== false,
-    out: (p) => p.inStock === false,
-    new: (p) => p.badge === 'New',
-    deal: (p) => p.onDeal,
-  }[stock];
+  const stockTest = STOCK_TESTS[stock];
+  // Where uploaded photos are kept: 'cloudinary' (permanent), 'off' (not set up) or 'local' (development).
+  const [photoStorage, setPhotoStorage] = useState(null);
+  useEffect(() => { checkServerHealth().then((h) => setPhotoStorage(h.photoStorage || null)); }, []);
+  const lostPhotoCount = photoStorage && photoStorage !== 'local' ? products.filter(usesServerDisk).length : 0;
   const shown = products.filter((p) => (category === 'all' || p.category === category)
     && stockTest(p)
     && `${p.name} ${p.category}`.toLowerCase().includes(query.toLowerCase()));
@@ -503,9 +512,26 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
         </select>
         <button type="button" className="btn btn-primary" onClick={openNew}><Plus size={16} /> Add product</button>
       </div>
+      {photoStorage === 'off' && (
+        <div className="adm-alert is-danger" role="alert">
+          <AlertTriangle size={16} />
+          <span><strong>Photo storage isn't set up.</strong> New photos can't be saved until <code>CLOUDINARY_URL</code> is added in Render → Environment.</span>
+        </div>
+      )}
+      {lostPhotoCount > 0 && (
+        <div className="adm-alert is-warning" role="status">
+          <AlertTriangle size={16} />
+          <span>
+            <strong>{lostPhotoCount} product{lostPhotoCount === 1 ? ' needs' : 's need'} new photos.</strong> Their photos were saved on the server, which Render clears when it restarts, so they're gone.
+            {photoStorage === 'cloudinary' ? ' Edit each one and upload the photos again — they\'ll now be kept safely.' : ' Set up photo storage first, then upload them again.'}
+          </span>
+          {stock !== 'lost' && <button type="button" className="btn btn-outline btn-sm" onClick={() => setStock('lost')}>Show them</button>}
+        </div>
+      )}
       <div className="adm-views" role="tablist" aria-label="Product filters">
         {STOCK_FILTERS.map(([id, text]) => {
-          const count = products.filter({ all: () => true, in: (p) => p.inStock !== false, out: (p) => p.inStock === false, new: (p) => p.badge === 'New', deal: (p) => p.onDeal }[id]).length;
+          const count = products.filter(STOCK_TESTS[id]).length;
+          if (id === 'lost' && (!lostPhotoCount || !count)) return null;
           return (
             <button key={id} type="button" role="tab" aria-selected={stock === id} className={`adm-view ${stock === id ? 'is-active' : ''}`} onClick={() => setStock(id)}>
               {text} <span>{count}</span>

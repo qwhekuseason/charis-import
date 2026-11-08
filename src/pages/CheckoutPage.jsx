@@ -24,14 +24,15 @@ import {
   Lock
 } from 'lucide-react';
 
-// Delivery options shown at checkout. Fees must match DELIVERY_OPTIONS in server/index.js.
+// Delivery options shown at checkout (ids must match DELIVERY_OPTIONS in server/index.js).
+// Shipping costs differ from item to item, so no price is shown or charged here —
+// the team confirms the shipping cost with the customer after the order.
 const FREIGHT_OPTIONS = [
   {
     id: 'sea_freight',
     name: 'Sea shipping',
     type: 'SEA_FREIGHT',
     icon: Ship,
-    cost: 35.00,
     time: '35 – 45 working days',
     desc: 'Shipped by sea from China to Tema Port. Most affordable.'
   },
@@ -40,7 +41,6 @@ const FREIGHT_OPTIONS = [
     name: 'Air shipping',
     type: 'AIR_FREIGHT',
     icon: Plane,
-    cost: 75.00,
     time: '7 – 12 working days',
     desc: 'Flown to Ghana by air cargo for quicker delivery.'
   },
@@ -49,7 +49,6 @@ const FREIGHT_OPTIONS = [
     name: 'Local delivery (Kumasi)',
     type: 'LOCAL_DISPATCH',
     icon: Truck,
-    cost: 40.00,
     time: '1 – 2 working days',
     desc: 'For items already in stock — delivered to your door in Kumasi.'
   }
@@ -216,7 +215,7 @@ export const CheckoutPage = () => {
     showToast('Promo code removed', 'info');
   };
 
-  const shippingCost = selectedShipping.cost;
+  const shippingCost = 0; // confirmed by the team after ordering
   // Mirrors the server's rules so the total shown here matches what's charged:
   // the invited-friend welcome discount and a promo code don't combine — the bigger one applies.
   const welcomeDiscount = referralInfo?.welcomeDiscountAvailable ? Math.min(referralInfo.welcomeDiscount, cartSubtotal) : 0;
@@ -367,10 +366,10 @@ export const CheckoutPage = () => {
       `*Delivery:* ${order.shippingMethod || order.deliveryMethod}\n\n` +
       `*ORDER ITEMS:*\n${itemsList}\n\n` +
       `*Subtotal:* GH₵${(order.subtotal || 0).toFixed(2)}\n` +
-      `*Delivery / Shipping:* GH₵${(order.shippingCost || order.deliveryFee || 0).toFixed(2)}\n` +
+      `*Shipping:* ${(order.shippingCost || order.deliveryFee) ? `GH₵${Number(order.shippingCost || order.deliveryFee).toFixed(2)}` : 'To be confirmed by CHARI'}\n` +
       (order.discountAmount ? `*Discount:* -GH₵${order.discountAmount.toFixed(2)}\n` : '') +
       (order.creditUsed ? `*Store credit:* -GH₵${order.creditUsed.toFixed(2)}\n` : '') +
-      `*TOTAL PAYABLE:* GH₵${(order.total || 0).toFixed(2)}\n\n` +
+      `*TOTAL PAYABLE NOW (items):* GH₵${(order.total || 0).toFixed(2)}\n\n` +
       `*Payment Method:* ${order.paymentMethod}\n` +
       `*Pay to MoMo:* ${settings.momoNumber} (${settings.momoName})\n\nHello CHARI, I have placed this order on your website and will send my payment receipt now.`
     );
@@ -443,7 +442,7 @@ export const CheckoutPage = () => {
 
       <dl className="co-totals">
         <div><dt>Items ({totalItemsCount})</dt><dd>{money(cartSubtotal)}</dd></div>
-        <div><dt>Delivery · {selectedShipping.name}</dt><dd>{money(shippingCost)}</dd></div>
+        <div className="co-ship-tbc"><dt>Shipping · {selectedShipping.name}</dt><dd>To be confirmed</dd></div>
         {effectiveDiscount > 0 && (
           <div className="is-saving"><dt>{usingWelcome ? 'Welcome discount' : 'Discount'}</dt><dd>−{money(effectiveDiscount)}</dd></div>
         )}
@@ -496,6 +495,9 @@ export const CheckoutPage = () => {
                 <Smartphone size={18} aria-hidden="true" />
                 <h2>Pay {money(orderTotal)} by Mobile Money</h2>
               </div>
+              <p className="co-pay-note-ship">
+                This pays for your items. Shipping costs differ by item, so we'll message you the shipping cost on WhatsApp before your order ships.
+              </p>
 
               <div className="co-pay-rows">
                 {[
@@ -641,6 +643,7 @@ export const CheckoutPage = () => {
 
                   <fieldset className="co-fieldset">
                     <legend className="co-label">Delivery method</legend>
+                    <p className="co-ship-hint">Shipping costs differ by item, so there's no charge here — we'll confirm the cost with you after you order.</p>
                     <div className="co-options">
                       {FREIGHT_OPTIONS.map((method) => {
                         const Icon = method.icon;
@@ -657,7 +660,7 @@ export const CheckoutPage = () => {
                             <span className="co-option-body">
                               <span className="co-option-top">
                                 <span className="co-option-name">{method.name}</span>
-                                <span className="co-option-price">{money(method.cost)}</span>
+
                               </span>
                               <span className="co-option-desc">{method.desc}</span>
                               <span className="co-option-time">Arrives in {method.time}</span>
@@ -756,7 +759,7 @@ export const CheckoutPage = () => {
                       <span>
                         I agree to the{' '}
                         <button type="button" className="co-link" onClick={() => setPreorderTermsOpen(true)}>pre-order terms</button>.
-                        {' '}Pre-orders are paid in full, the price is fixed in cedis, and delivery takes the time shown above.
+                        {' '}Items are paid in full now and the price is fixed in cedis. We'll confirm the shipping cost with you before your order ships.
                       </span>
                     </label>
                     {termsError && !termsAgreed && (

@@ -44,7 +44,7 @@ export const ContactPage = () => {
     ['How long does delivery take?', 'Sea shipping takes about 35–45 working days and air shipping 7–12 working days. Items already in stock in Kumasi arrive in 1–2 working days.'],
     ['How do I pay?', `By Mobile Money (MTN, Telecel or AT) to ${settings.momoNumber} (${settings.momoName}), using your order code as the reference. All orders are pre-orders, paid in full before we buy from the supplier.`],
     ['Can I change or cancel an order?', 'Pre-orders are bought from the supplier once paid, so they usually can’t be changed after that. Message us as soon as possible and we’ll do our best.'],
-    ['Are customs and duties included?', 'Yes. The price at checkout includes customs clearance; you only add the delivery option you choose.'],
+    ['Are customs and duties included?', 'Yes, customs clearance is included. Shipping costs differ by item, so we confirm your shipping cost with you after you order.'],
     ['Do you deliver outside Kumasi?', 'Yes — anywhere in Ghana, to your door or your nearest bus station.'],
   ];
 

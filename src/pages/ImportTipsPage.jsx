@@ -18,11 +18,12 @@ import {
 } from 'lucide-react';
 import './InfoPages.css';
 
-// Must match the delivery options and fees at checkout (DELIVERY_OPTIONS in server/index.js).
+// The delivery choices at checkout (DELIVERY_OPTIONS in server/index.js). Costs differ by item,
+// so no prices here — the team confirms the shipping cost after the order.
 const DELIVERY = [
-  { icon: Ship, name: 'Sea shipping', fee: 35, time: '35–45 working days', best: 'Heavy or bulky items — mannequins, furniture, bulk orders. Cheapest.' },
-  { icon: Plane, name: 'Air shipping', fee: 75, time: '7–12 working days', best: 'Light or urgent items — clothes, samples, small electronics.' },
-  { icon: Truck, name: 'Local delivery (Kumasi)', fee: 40, time: '1–2 working days', best: 'Items already in stock in Kumasi.' },
+  { icon: Ship, name: 'Sea shipping', time: '35–45 working days', best: 'Heavy or bulky items — mannequins, furniture, bulk orders. Usually the cheapest.' },
+  { icon: Plane, name: 'Air shipping', time: '7–12 working days', best: 'Light or urgent items — clothes, samples, small electronics.' },
+  { icon: Truck, name: 'Local delivery (Kumasi)', time: '1–2 working days', best: 'Items already in stock in Kumasi.' },
 ];
 
 export const ImportTipsPage = () => {
@@ -31,7 +32,7 @@ export const ImportTipsPage = () => {
 
   const SHOP_STEPS = [
     [ShoppingBag, 'Add items to your cart', 'Browse the shop and add what you want. The price you see is fixed in cedis.'],
-    [Truck, 'Choose delivery at checkout', 'Pick sea, air or local delivery. The delivery fee is shown before you pay, and customs is included.'],
+    [Truck, 'Choose delivery at checkout', 'Pick sea, air or local delivery. Shipping costs differ by item, so we confirm the cost with you after you order. Customs is included.'],
     [Smartphone, 'Pay by Mobile Money', `Send the total to ${settings.momoNumber} (${settings.momoName}) with your order code as the reference. Pre-orders are paid in full before we buy.`],
     [ShieldCheck, 'We buy and check it', 'Our team orders from the supplier, checks the items for faults and packs them for shipping.'],
     [Package, 'Track it', 'Follow your order with your code on the Track order page. We also message you on WhatsApp.'],
@@ -85,14 +86,14 @@ export const ImportTipsPage = () => {
 
         <section aria-label="Delivery options">
           <h2 className="ip-section-title">Delivery options</h2>
-          <p className="ip-section-sub">For shop orders, this is exactly what you pay at checkout. Requested items are priced individually.</p>
+          <p className="ip-section-sub">Shipping costs differ by size and weight, so we work out the cost for your order and message it to you before it ships.</p>
           <div className="ip-delivery">
-            {DELIVERY.map(({ icon: Icon, name, fee, time, best }) => (
+            {DELIVERY.map(({ icon: Icon, name, time, best }) => (
               <div key={name} className="ip-delivery-card">
                 <span className="ip-value-icon" aria-hidden="true"><Icon size={20} /></span>
                 <h3>{name}</h3>
                 <dl>
-                  <div><dt>Fee</dt><dd>GH₵{fee}</dd></div>
+                  <div><dt>Cost</dt><dd>We confirm it</dd></div>
                   <div><dt>Takes</dt><dd>{time}</dd></div>
                 </dl>
                 <p>{best}</p>
