@@ -152,7 +152,8 @@ const layout = ({ heading, intro, order, extra = '' }) => {
     .join('');
   const extraRow = (text, amount) => `<tr><td style="padding:6px 0;color:#64748b">${text}</td><td style="padding:6px 0;text-align:right;color:#64748b">${amount}</td></tr>`;
   const summary = [
-    order.deliveryFee ? extraRow(`Delivery${order.deliveryMethod ? ` (${esc(order.deliveryMethod)})` : ''}`, money(order.deliveryFee)) : '',
+    // Shipping is quoted after ordering; until then the email says so instead of showing GH₵0.
+    extraRow(`Shipping${order.deliveryMethod ? ` (${esc(order.deliveryMethod)})` : ''}`, order.deliveryFee ? money(order.deliveryFee) : "We'll confirm the cost"),
     order.discountAmount ? extraRow('Discount', `−${money(order.discountAmount)}`) : '',
     order.creditUsed ? extraRow('Store credit', `−${money(order.creditUsed)}`) : '',
   ].join('');

@@ -30,7 +30,7 @@ export const PREORDER_TERMS = [
     icon: Scale,
     color: '#2f8f5b',
     title: 'No hidden fees',
-    desc: 'Your shipping fee is calculated and clearly shown at checkout so you know exactly what you are paying.'
+    desc: 'Shipping costs differ by item, so we work out your shipping fee after you order and tell you before your items ship. You only pay for the items at checkout.'
   },
   {
     icon: ShieldCheck,
@@ -67,7 +67,8 @@ export const PreorderTermsModal = ({ isOpen, onClose }) => {
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(23, 20, 15, 0.72)',        zIndex: 1000,
+        backgroundColor: 'rgba(23, 20, 15, 0.72)',
+        zIndex: 1000,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',

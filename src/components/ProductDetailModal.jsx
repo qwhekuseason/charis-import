@@ -39,11 +39,11 @@ const timeLeft = (endsAt) => {
   return `${Math.max(1, Math.floor(ms / 60000))} min`;
 };
 
-// Same prices as checkout (and DELIVERY_OPTIONS on the server).
+// Delivery choices (same as checkout). Shipping costs differ by item, so no prices here — the team confirms them.
 const DELIVERY_OPTIONS = [
-  { icon: Ship, name: 'Sea shipping', time: '35–45 working days', fee: 35, note: 'Cheapest. Best for heavy or bulk items.' },
-  { icon: Plane, name: 'Air shipping', time: '7–12 working days', fee: 75, note: 'Faster, for urgent orders.' },
-  { icon: Truck, name: 'Local delivery (Kumasi)', time: '1–2 working days', fee: 40, note: 'For items already in stock in Kumasi.' },
+  { icon: Ship, name: 'Sea shipping', time: '35–45 working days', note: 'Usually cheapest. Best for heavy or bulk items.' },
+  { icon: Plane, name: 'Air shipping', time: '7–12 working days', note: 'Faster, for urgent orders.' },
+  { icon: Truck, name: 'Local delivery (Kumasi)', time: '1–2 working days', note: 'For items already in stock in Kumasi.' },
 ];
 
 const Stars = ({ value, size = 14 }) => (
@@ -462,14 +462,14 @@ export const ProductDetailModal = () => {
                           <li key={opt.name}>
                             <span className="pd-delivery-icon" aria-hidden="true"><Icon size={17} /></span>
                             <span className="pd-delivery-body">
-                              <span className="pd-delivery-top"><strong>{opt.name}</strong><strong>{money(opt.fee)}</strong></span>
+                              <span className="pd-delivery-top"><strong>{opt.name}</strong></span>
                               <span>{opt.time} · {opt.note}</span>
                             </span>
                           </li>
                         );
                       })}
                     </ul>
-                    <p className="pd-muted">You choose delivery at checkout. Customs clearance is included.</p>
+                    <p className="pd-muted">You choose delivery at checkout. Shipping costs differ by item, so we confirm the cost with you after you order. Customs clearance is included.</p>
                   </>
                 )}
 

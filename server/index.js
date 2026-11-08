@@ -33,9 +33,15 @@ if (!JWT_SECRET || JWT_SECRET.length < 32 || JWT_SECRET === 'your_secure_jwt_sec
 cloudinary.config(true); // re-read CLOUDINARY_URL now that dotenv has loaded it
 cloudinary.config({ secure: true });
 const cloudinaryEnabled = Boolean(process.env.CLOUDINARY_URL && cloudinary.config().cloud_name);
+// Hosts like Render wipe the server's disk on every redeploy/restart, so a photo saved there is
+// lost within days. There, uploads are refused until Cloudinary is set up, instead of vanishing.
+const diskIsTemporary = Boolean(process.env.RENDER || process.env.VERCEL);
+const photoStorageMissing = !cloudinaryEnabled && diskIsTemporary;
 console.log(cloudinaryEnabled
   ? `🖼️  Image uploads → Cloudinary (${cloudinary.config().cloud_name})`
-  : '⚠️  CLOUDINARY_URL not set — uploads are saved locally and will be lost on redeploy.');
+  : photoStorageMissing
+    ? '⛔ CLOUDINARY_URL not set — photo uploads are OFF (this host deletes saved files). Add CLOUDINARY_URL to turn them on.'
+    : '⚠️  CLOUDINARY_URL not set — uploads are saved locally (fine for development only).');
 
 const uploadsDir = path.join(__dirname, '../public/uploads');
 if (!cloudinaryEnabled && !fs.existsSync(uploadsDir)) {
@@ -262,6 +268,8 @@ app.get('/api/health', async (req, res) => {
       database: 'connected (Neon PostgreSQL)',
       productCount,
       userCount,
+      // Where uploaded photos go: 'cloudinary' (permanent), 'off' (not set up on a host that wipes files) or 'local'.
+      photoStorage: cloudinaryEnabled ? 'cloudinary' : photoStorageMissing ? 'off' : 'local',
       timestamp: new Date().toISOString()
     });
   } catch (error) {
@@ -656,6 +664,9 @@ app.get('/api/products/:idOrSlug', async (req, res) => {
 
 // POST /api/upload (Admin upload product image)
 app.post('/api/upload', authenticateUser, requireAdmin, (req, res) => {
+  if (photoStorageMissing) {
+    return res.status(503).json({ success: false, storageMissing: true, error: "Photo storage isn't set up, so photos can't be saved permanently. Add CLOUDINARY_URL in Render → Environment, then try again." });
+  }
   upload.single('image')(req, res, async (err) => {
     if (err instanceof multer.MulterError) {
       return res.status(400).json({ success: false, error: `Upload error: ${err.message}` });
@@ -1192,11 +1203,13 @@ app.delete('/api/categories/:id', authenticateUser, requireAdmin, async (req, re
 // ---------------------------------------------------------------------------
 
 // POST /api/orders (Checkout create order)
-// Delivery options offered at checkout. Fees are decided here, never by the browser.
+// Delivery options offered at checkout. Shipping costs differ from item to item, so nothing is
+// charged for delivery at checkout — the team works out the cost and tells the customer afterwards.
+// (Fees are decided here, never by the browser.)
 const DELIVERY_OPTIONS = [
-  { id: 'sea_freight', name: 'Sea shipping', fee: 35 },
-  { id: 'air_cargo', name: 'Air shipping', fee: 75 },
-  { id: 'local_express', name: 'Local delivery (Kumasi)', fee: 40 },
+  { id: 'sea_freight', name: 'Sea shipping', fee: 0 },
+  { id: 'air_cargo', name: 'Air shipping', fee: 0 },
+  { id: 'local_express', name: 'Local delivery (Kumasi)', fee: 0 },
 ];
 
 const roundMoney = (n) => Math.round(n * 100) / 100;
@@ -1575,6 +1588,9 @@ app.patch('/api/orders/:id/status', authenticateUser, requireAdmin, async (req, 
 // POST /api/inquiries/photo — a customer's screenshot for "Request an item" (no sign-in needed).
 const requestPhotoLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 6, message: 'Too many photos uploaded. Please wait a few minutes or send it on WhatsApp.' });
 app.post('/api/inquiries/photo', requestPhotoLimiter, (req, res) => {
+  if (photoStorageMissing) {
+    return res.status(503).json({ success: false, error: "Photo upload isn't available right now. Please send the photo on WhatsApp instead." });
+  }
   requestPhotoUpload.single('image')(req, res, async (err) => {
     if (err) {
       const message = err.code === 'LIMIT_FILE_SIZE' ? 'That photo is too big. Please choose one under 5 MB.' : err.message;

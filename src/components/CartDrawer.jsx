@@ -221,7 +221,7 @@ export const CartDrawer = () => {
             <dl className="cd-totals">
               <div><dt>Items ({itemCount})</dt><dd>{money(cartSubtotal)}</dd></div>
               {discountAmount > 0 && <div className="is-saving"><dt>Promo {promo.code}</dt><dd>−{money(discountAmount)}</dd></div>}
-              <div className="cd-delivery"><dt><Truck size={14} /> Delivery</dt><dd>Chosen at checkout</dd></div>
+              <div className="cd-delivery"><dt><Truck size={14} /> Shipping</dt><dd>We confirm it after you order</dd></div>
               <div className="cd-grand"><dt>Total</dt><dd>{money(total)}</dd></div>
             </dl>
             {(productSavings + discountAmount) > 0 && (
