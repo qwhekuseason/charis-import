@@ -186,7 +186,7 @@ export const TrackOrderPage = () => {
                   autoCapitalize="characters"
                   autoComplete="off"
                   spellCheck={false}
-                  placeholder="CHR-SEA-7KQ2MX9P"
+                  placeholder="CHR-7KQ2MX"
                   value={searchInput}
                   onChange={(e) => { setSearchInput(e.target.value.toUpperCase()); setCodeError(''); }}
                   aria-invalid={Boolean(codeError)}

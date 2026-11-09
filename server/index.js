@@ -1257,8 +1257,10 @@ const roundMoney = (n) => Math.round(n * 100) / 100;
 
 // Unambiguous characters only (no 0/O, 1/I) so codes are easy to read out over the phone.
 const ORDER_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+// Short enough to type as a MoMo reference (e.g. CHR-3VKT5E). Still ~1 billion combinations, and
+// tracking an order also needs the customer's phone number, so short codes can't be guessed into.
 const generateOrderCode = (prefix) => {
-  const bytes = crypto.randomBytes(8);
+  const bytes = crypto.randomBytes(6);
   const suffix = Array.from(bytes, (b) => ORDER_CODE_ALPHABET[b % ORDER_CODE_ALPHABET.length]).join('');
   return `${prefix}-${suffix}`;
 };
@@ -1469,7 +1471,7 @@ app.post('/api/orders', orderLimiter, optionalAuth, async (req, res) => {
 
     const total = roundMoney(Math.max(0, subtotal - discountAmount - creditUsed + delivery.fee));
 
-    const codePrefix = delivery.id === 'sea_freight' ? 'CHR-SEA' : delivery.id === 'air_cargo' ? 'CHR-AIR' : 'CHR';
+    const codePrefix = 'CHR'; // sea/air is saved on the order itself, so it isn't repeated in the code
     let orderCode = generateOrderCode(codePrefix);
     while (await prisma.order.findUnique({ where: { orderCode } })) {
       orderCode = generateOrderCode(codePrefix);

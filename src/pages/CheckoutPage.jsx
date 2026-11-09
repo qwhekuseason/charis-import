@@ -285,9 +285,8 @@ export const CheckoutPage = () => {
     setIsSubmitting(true);
 
     try {
-      const orderPrefix = selectedShipping.type === 'SEA_FREIGHT' ? 'CHR-SEA' : selectedShipping.type === 'AIR_FREIGHT' ? 'CHR-AIR' : 'CHR';
-      const randomCode = Math.floor(1000 + Math.random() * 9000);
-      const orderId = `${orderPrefix}-${randomCode}`;
+      const randomCode = Math.floor(100000 + Math.random() * 900000);
+      const orderId = `CHR-${randomCode}`;
 
       const newOrder = {
         orderId,
