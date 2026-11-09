@@ -175,7 +175,7 @@ export const ContactPage = () => {
                 <div className={`form-field ${errors.message ? 'has-error' : ''}`}>
                   <label className="form-label" htmlFor="ct-message">Your message</label>
                   <textarea id="ct-message" className="form-input" rows={5} maxLength={4000}
-                    placeholder={formData.subject === 'Problem with an order' ? 'Your order code (e.g. CHR-SEA-7KQ2MX9P) and what went wrong…' : 'How can we help?'}
+                    placeholder={formData.subject === 'Problem with an order' ? 'Your order code (e.g. CHR-7KQ2MX) and what went wrong…' : 'How can we help?'}
                     value={formData.message} onChange={(e) => update('message', e.target.value)} {...aria('message')} />
                   <div className="ct-under">
                     {err('message') || <span />}
