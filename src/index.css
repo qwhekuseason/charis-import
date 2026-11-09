@@ -2903,6 +2903,8 @@ button.adm-product-cell:hover .adm-strong { color: var(--accent); text-decoratio
 .adm-preview-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 0.8rem; }
 .adm-specs { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 .adm-spec-row { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) auto; gap: 8px; align-items: center; }
+.adm-option-preview { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -2px 0 6px; font-size: 0.78rem; color: var(--text-muted, #6b6457); }
+.adm-option-preview em { font-style: normal; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: var(--ink); color: var(--gold-bright); }
 .adm-add-spec { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; padding: 8px 12px; border-radius: 10px; border: 1.5px dashed var(--border-medium); font-size: 0.84rem; font-weight: 700; color: var(--accent); }
 .adm-add-spec:hover { border-color: var(--accent); background: var(--accent-subtle); }
 
