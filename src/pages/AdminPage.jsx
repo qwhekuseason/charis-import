@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../context/StoreContext';
-import { optionsLabel } from '../utils/options';
+import { optionsLabel, splitChoices } from '../utils/options';
 import * as admin from '../services/adminApi';
 import { checkServerHealth } from '../services/api';
 import { sizedImage } from '../utils/images';
@@ -363,7 +363,7 @@ const productProblems = (f) => {
   }
   if (f.photos.length === 0) found.photos = 'Add at least one photo.';
   if (!f.category) found.category = 'Choose a category.';
-  const badOption = (f.options || []).findIndex((o) => (o.name.trim() || o.values.trim()) && (!o.name.trim() || !o.values.split(',').some((v) => v.trim())));
+  const badOption = (f.options || []).findIndex((o) => (o.name.trim() || o.values.trim()) && (!o.name.trim() || !splitChoices(o.values).length));
   if (badOption > -1) found.options = 'Each choice needs a name and at least one option, e.g. Size: S, M, L.';
   return found;
 };
@@ -430,7 +430,7 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
     setSaving(true);
     const specs = editing.specs.map((s) => ({ label: s.label.trim(), value: s.value.trim() })).filter((s) => s.label && s.value);
     const options = editing.options
-      .map((o) => ({ name: o.name.trim(), values: [...new Set(o.values.split(',').map((v) => v.trim()).filter(Boolean))] }))
+      .map((o) => ({ name: o.name.trim(), values: splitChoices(o.values) }))
       .filter((o) => o.name && o.values.length);
     const payload = {
       name: editing.name,
@@ -713,7 +713,7 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
             {/* Choices the buyer must pick before adding to cart */}
             <div className="adm-specs adm-options" data-field="options">
               <span className="form-label">Choices buyers pick <span className="form-optional">(optional)</span></span>
-              <p className="adm-help">Buyers must choose one of each before adding to cart, e.g. <strong>Size</strong>: S, M, L. Separate the choices with commas.</p>
+              <p className="adm-help">Buyers must choose one of each before adding to cart, e.g. <strong>Size</strong>: S, M, L. Separate the choices with commas (or /), e.g. <strong>Colour</strong>: Gold stand, Black stand. Check the buttons underneath — each one is a choice buyers can pick.</p>
               {editing.options.map((o, i) => (
                 <div key={i} className="adm-spec-row">
                   <input className="form-input" placeholder="e.g. Size" aria-label={`Choice ${i + 1} name`} value={o.name}
@@ -722,6 +722,12 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
                     onChange={(e) => setField('options', editing.options.map((x, j) => (j === i ? { ...x, values: e.target.value } : x)))} />
                   <button type="button" className="btn btn-outline btn-sm adm-danger" aria-label={`Remove choice ${i + 1}`}
                     onClick={() => setField('options', editing.options.filter((_, j) => j !== i))}><X size={14} /></button>
+                  {splitChoices(o.values).length > 0 && (
+                    <div className="adm-option-preview" aria-label={`Buyers will see for ${o.name || 'this choice'}`}>
+                      <span>Buyers see {splitChoices(o.values).length === 1 ? '1 choice' : `${splitChoices(o.values).length} choices`}:</span>
+                      {splitChoices(o.values).map((v) => <em key={v}>{v}</em>)}
+                    </div>
+                  )}
                 </div>
               ))}
               {problem('options')}

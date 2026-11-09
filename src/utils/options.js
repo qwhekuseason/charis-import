@@ -28,3 +28,12 @@ export const lineIdOf = (item) => {
   const label = Object.entries(item?.options || {}).map(([k, v]) => `${k}=${v}`).join(';');
   return item?.lineId || `${item?.product?.id}${label ? `|${label}` : ''}`;
 };
+
+// What the admin typed in a choice box → the separate choices buyers pick from.
+// Commas, slashes, semicolons, new lines and a spaced dash ("Gold - Black", "Gold- Black") all split;
+// a dash inside a word ("Off-white", "T-shirt") does not.
+export const splitChoices = (text) =>
+  [...new Set(String(text || '')
+    .split(/[,/;\n|]|\s-\s*|\s*-\s/)
+    .map((v) => v.trim().replace(/\s+/g, ' '))
+    .filter(Boolean))];
