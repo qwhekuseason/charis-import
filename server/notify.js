@@ -13,8 +13,8 @@ import nodemailer from 'nodemailer';
 //                                           only on hosts that allow outgoing SMTP)
 // ---------------------------------------------------------------------------
 
-// The shop customers use — links in emails (track order, reset password) open here.
-const SITE_URL = (process.env.SITE_URL || 'https://charis-import.vercel.app').replace(/\/$/, '');
+// The live shop (the Render site, which has the server) — links in emails open here.
+const SITE_URL = (process.env.SITE_URL || 'https://charis-import.onrender.com').replace(/\/$/, '');
 
 export const pushEnabled = Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
 if (pushEnabled) {
