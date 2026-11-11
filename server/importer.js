@@ -204,14 +204,52 @@ export const parseProductPage = (html, pageUrl) => {
 // ---- One link → one draft --------------------------------------------------
 // The admin can paste plain links, or the text an app's "Share" button copies
 // ("【Pinduoduo】Women's summer dress https://…") — the words before the link become the name.
+// Product names are capped at 120 characters — cut at a word or comma, not mid-word.
+const shorten = (text, max = 120) => {
+  const t = String(text || '').trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max + 1);
+  const at = Math.max(cut.lastIndexOf(', '), cut.lastIndexOf(' '), cut.lastIndexOf('，'));
+  return (at > max * 0.6 ? cut.slice(0, at) : t.slice(0, max)).replace(/[\s,，、]+$/, '');
+};
+
 export const splitPastedLinks = (text) => String(text || '').split(/\r?\n/)
   .map((line) => {
     const url = (line.match(/https?:\/\/[^\s<>"'，。]+/i) || [])[0];
     if (!url) return null;
-    const hint = clean(line.replace(url, '').replace(/[【】[\]]/g, ' ').replace(/^\s*(pinduoduo|拼多多|taobao|淘宝|1688)\s*/i, ''), 120);
-    return { url, hint };
+    // Share text from 1688 / Taobao / Pinduoduo: 【Product name】复制￥code￥，打开【手机阿里】…查看：link CZ1234
+    const bracketed = [...line.matchAll(/【([^】]+)】/g)].map((m) => m[1])
+      .find((t) => !/^(手机阿里|手机淘宝|淘宝|支付宝|拼多多|pinduoduo|1688)/i.test(t.trim()));
+    const rest = line.replace(url, ' ')
+      .replace(/复制[￥$€¥][^￥$€¥]*[￥$€¥]/g, ' ')
+      .replace(/[，,]?\s*打开[\s\S]*?查看[：:]?/g, ' ')
+      .replace(/\b[A-Z]{2}\d{3,6}\s*$/, ' ')
+      .replace(/[【】[\]]/g, ' ')
+      .replace(/^\s*(pinduoduo|拼多多|taobao|淘宝|1688)\s*/i, '');
+    return { url, hint: shorten(clean(bracketed || rest, 300)) };
   })
   .filter(Boolean);
+
+// Short share links (qr.1688.com/s/…, Pinduoduo ?ps=…) expire. Their reply names the item, so the
+// draft can keep the permanent item page instead. This is an ordinary visit — no login is attempted.
+const ITEM_LINKS = [
+  { site: '1688', find: /(?:offerId=|offer\?id=|\/offer\/)(\d{6,})/, link: (id) => `https://detail.1688.com/offer/${id}.html`, label: (id) => `1688 item ${id}` },
+  { site: 'Pinduoduo', find: /goods_id=(\d{6,})/, link: (id) => `https://mobile.yangkeduo.com/goods.html?goods_id=${id}`, label: (id) => `Pinduoduo item ${id}` },
+  { site: 'Taobao', find: /[?&]id=(\d{6,})/, link: (id) => `https://item.taobao.com/item.htm?id=${id}`, label: (id) => `Taobao item ${id}` },
+];
+const resolveItemLink = async (url, site) => {
+  const rule = ITEM_LINKS.find((r) => r.site === site);
+  if (!rule) return null;
+  let id = (url.toString().match(rule.find) || [])[1];
+  if (!id) {
+    try {
+      const page = await fetchPublic(url.toString(), { limit: 512 * 1024 });
+      id = (`${page.url} ${page.body.toString('latin1').slice(0, 200000)}`.match(rule.find) || [])[1];
+    } catch { /* keep the original link */ }
+  }
+  return id ? { sourceUrl: rule.link(id), label: rule.label(id) } : null;
+};
+const hasChinese = (t) => /[\u4e00-\u9fff]/.test(t || '');
 
 const tidyName = (name, site) => name
   .replace(new RegExp(`\\s*[|\\-–—:]\\s*${site.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*$`, 'i'), '')
@@ -224,7 +262,12 @@ export const importLink = async ({ url: raw, hint }) => {
   const base = { sourceUrl: url.toString(), sourceSite: site, name: hint || '', description: '', images: [], sourcePrice: null, sourceCurrency: null, specs: [], options: [] };
 
   if (LOGIN_ONLY_SITES.some((s) => s.match.test(url.hostname.toLowerCase()))) {
-    return { ...base, status: 'NEEDS_INFO', note: `${site} only shows product details inside its app, so fill these in from the listing.` };
+    const item = await resolveItemLink(url, site);
+    const notes = [
+      `${item ? `${item.label}. ` : ''}${site} only shows details to signed-in app users — add the photos and price from the listing.`,
+      hasChinese(base.name) && 'The name is in Chinese — write it in English before approving.',
+    ].filter(Boolean);
+    return { ...base, ...(item && { sourceUrl: item.sourceUrl }), status: 'NEEDS_INFO', note: notes.join(' ') };
   }
   try {
     const page = await fetchPublic(url.toString());
@@ -232,7 +275,7 @@ export const importLink = async ({ url: raw, hint }) => {
     const found = parseProductPage(page.body.toString('utf8'), page.url);
     const draft = {
       ...base,
-      name: tidyName(found.name, site) || base.name,
+      name: shorten(tidyName(found.name, site)) || base.name,
       description: found.description,
       images: found.images,
       sourcePrice: found.price?.amount ?? null,
