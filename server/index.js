@@ -10,6 +10,7 @@ import fs from 'fs';
 import multer from 'multer';
 import crypto from 'crypto';
 import { v2 as cloudinary } from 'cloudinary';
+import { importLink, splitPastedLinks, suggestPrice, fetchImage } from './importer.js';
 import { createNotifier, pushEnabled, pushPublicKey, emailEnabled, emailOrderPlaced, emailOrderUpdate, emailPasswordReset, passwordResetUrl } from './notify.js';
 
 dotenv.config();
@@ -113,8 +114,9 @@ const effectivePrice = (p) => (isDealActive(p) ? p.dealPrice : p.price);
 // `listPrice` / `listWasPrice` are the normal prices Admin edits.
 const formatProduct = (p) => {
   const onDeal = isDealActive(p);
+  const { sourceUrl, ...rest } = p; // where the admin buys it — not for shoppers
   return {
-    ...p,
+    ...rest,
     price: onDeal ? p.dealPrice : p.price,
     // During a deal the crossed-out price is the normal price, so "−25%" means what the admin set.
     originalPrice: onDeal ? p.price : p.originalPrice,
@@ -633,7 +635,7 @@ app.get('/api/auth/users', authenticateUser, requireAdmin, async (req, res) => {
 // ---------------------------------------------------------------------------
 
 // GET /api/products
-app.get('/api/products', async (req, res) => {
+app.get('/api/products', optionalAuth, async (req, res) => {
   try {
     const { category, search, sort, featured } = req.query;
 
@@ -671,7 +673,9 @@ app.get('/api/products', async (req, res) => {
       orderBy,
     });
 
-    const formatted = products.map(formatProduct);
+    // The admin's list also shows where each product is bought from.
+    const isAdmin = req.user?.role === 'ADMIN';
+    const formatted = products.map((p) => (isAdmin ? { ...formatProduct(p), sourceUrl: p.sourceUrl || null } : formatProduct(p)));
 
     res.json({ success: true, count: formatted.length, data: formatted });
   } catch (error) {
@@ -879,6 +883,169 @@ app.delete('/api/products/:id', authenticateUser, requireAdmin, async (req, res)
   } catch (error) {
     res.status(500).json({ success: false, error: 'Could not delete the product. Please try again.' });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Import from link (Admin): paste supplier links → drafts to check → approve into the shop
+// ---------------------------------------------------------------------------
+const importLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: 'Too many imports at once. Please wait a few minutes.' });
+const IMPORT_CURRENCIES = ['CNY', 'USD', 'GBP', 'EUR', 'AED', 'TRY'];
+const DEFAULT_IMPORT_PRICING = { rates: {}, markupPercent: 0, addFixed: 0, defaultCurrency: 'CNY' };
+
+const loadImportPricing = async () => {
+  const row = await prisma.storeSetting.findUnique({ where: { key: 'importPricing' } });
+  return { ...DEFAULT_IMPORT_PRICING, ...(row?.value || {}) };
+};
+
+const cleanText = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+const cleanCurrency = (v) => (IMPORT_CURRENCIES.includes(String(v || '').toUpperCase()) ? String(v).toUpperCase() : null);
+const cleanAmount = (v) => { const n = Number(v); return v !== '' && v !== null && v !== undefined && Number.isFinite(n) && n > 0 && n < 1e7 ? roundMoney(n) : null; };
+
+// Fields the admin may save on a draft (looser than a product — a draft can be half done).
+const parseDraftInput = (body) => {
+  const data = {};
+  if (body.name !== undefined) data.name = cleanText(body.name, 120);
+  if (body.category !== undefined) data.category = cleanText(body.category, 60) || null;
+  if (body.description !== undefined) data.description = cleanText(body.description, 2000);
+  if (body.gallery !== undefined) data.images = (Array.isArray(body.gallery) ? body.gallery : []).map((u) => cleanText(u, 1000)).filter((u) => /^(https:\/\/|\/uploads\/)/.test(u)).slice(0, 8);
+  if (body.price !== undefined) data.price = cleanAmount(body.price);
+  if (body.sourcePrice !== undefined) data.sourcePrice = cleanAmount(body.sourcePrice);
+  if (body.sourceCurrency !== undefined) data.sourceCurrency = cleanCurrency(body.sourceCurrency);
+  if (body.specs !== undefined || body.options !== undefined) {
+    const { data: parsed } = parseProductInput({ specs: body.specs ?? [], options: body.options ?? [] }, { partial: true });
+    if (body.specs !== undefined) data.specs = parsed.specs;
+    if (body.options !== undefined) data.options = parsed.options;
+  }
+  return data;
+};
+
+// Photos still on the supplier's site are copied into our storage on approval — supplier links
+// often expire or block other websites from showing them.
+const isOurPhoto = (u) => u.startsWith('/uploads/') || (cloudinaryEnabled && u.startsWith(`https://res.cloudinary.com/${cloudinary.config().cloud_name}/`));
+const keepPhotos = async (urls) => {
+  const kept = [];
+  for (const u of urls) {
+    if (isOurPhoto(u) || !cloudinaryEnabled) { kept.push(u); continue; }
+    try {
+      const result = await uploadToCloudinary(await fetchImage(u));
+      kept.push(optimizedImageUrl(result.public_id));
+    } catch (err) {
+      console.warn('Could not copy an imported photo:', err.message);
+    }
+  }
+  return kept;
+};
+
+const genericError = (req, res, error) => {
+  console.error(`${req.method} ${req.path} failed:`, error);
+  res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' });
+};
+
+// GET /api/product-drafts — drafts waiting for review, plus the pricing rules
+app.get('/api/product-drafts', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const [drafts, pricing] = await Promise.all([
+      prisma.productDraft.findMany({ orderBy: { createdAt: 'desc' } }),
+      loadImportPricing(),
+    ]);
+    res.json({ success: true, data: drafts, pricing, currencies: IMPORT_CURRENCIES });
+  } catch (error) { genericError(req, res, error); }
+});
+
+// PUT /api/product-drafts/pricing — exchange rates and markup used for suggested prices
+app.put('/api/product-drafts/pricing', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const rates = {};
+    for (const c of IMPORT_CURRENCIES) {
+      const n = cleanAmount(req.body?.rates?.[c]);
+      if (n) rates[c] = n;
+    }
+    const markupPercent = Number(req.body?.markupPercent || 0);
+    const addFixed = Number(req.body?.addFixed || 0);
+    if (!Number.isFinite(markupPercent) || markupPercent < 0 || markupPercent > 1000) return res.status(400).json({ success: false, error: 'Markup must be between 0 and 1000%.' });
+    if (!Number.isFinite(addFixed) || addFixed < 0 || addFixed > 100000) return res.status(400).json({ success: false, error: 'The extra amount must be 0 or more.' });
+    const value = { rates, markupPercent, addFixed: roundMoney(addFixed), defaultCurrency: cleanCurrency(req.body?.defaultCurrency) || 'CNY' };
+    await prisma.storeSetting.upsert({ where: { key: 'importPricing' }, update: { value }, create: { key: 'importPricing', value } });
+    res.json({ success: true, pricing: value });
+  } catch (error) { genericError(req, res, error); }
+});
+
+// POST /api/product-drafts/import — { links: "one link per line" } → new drafts
+app.post('/api/product-drafts/import', importLimiter, authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const links = splitPastedLinks(typeof req.body?.links === 'string' ? req.body.links.slice(0, 20000) : '');
+    if (links.length === 0) return res.status(400).json({ success: false, error: 'Paste at least one product link (starting with https://).' });
+    if (links.length > 10) return res.status(400).json({ success: false, error: 'Import up to 10 links at a time.' });
+    const pricing = await loadImportPricing();
+
+    // Three pages at a time, so ten links don't take ten times as long.
+    const results = new Array(links.length);
+    let next = 0;
+    const worker = async () => {
+      while (next < links.length) {
+        const i = next++;
+        results[i] = await importLink(links[i]).catch((e) => ({ error: e.message, url: links[i].url }));
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+
+    const created = [];
+    const skipped = [];
+    for (const r of results) {
+      if (r.error) { skipped.push({ url: r.url, error: r.error }); continue; }
+      const currency = r.sourceCurrency || (r.sourcePrice ? pricing.defaultCurrency : null);
+      created.push(await prisma.productDraft.create({
+        data: { ...r, sourceUrl: r.sourceUrl.slice(0, 2000), sourceCurrency: currency, price: suggestPrice(r.sourcePrice, currency, pricing) },
+      }));
+    }
+    res.status(201).json({ success: true, data: created, skipped });
+  } catch (error) { genericError(req, res, error); }
+});
+
+// PUT /api/product-drafts/:id — save edits, approve later
+app.put('/api/product-drafts/:id', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const existing = await prisma.productDraft.findUnique({ where: { id: String(req.params.id) } });
+    if (!existing) return res.status(404).json({ success: false, error: 'That draft no longer exists.' });
+    const updated = await prisma.productDraft.update({ where: { id: existing.id }, data: parseDraftInput(req.body || {}) });
+    res.json({ success: true, data: updated });
+  } catch (error) { genericError(req, res, error); }
+});
+
+// DELETE /api/product-drafts/:id — throw a draft away
+app.delete('/api/product-drafts/:id', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const { count } = await prisma.productDraft.deleteMany({ where: { id: String(req.params.id) } });
+    if (!count) return res.status(404).json({ success: false, error: 'That draft no longer exists.' });
+    res.json({ success: true });
+  } catch (error) { genericError(req, res, error); }
+});
+
+// POST /api/product-drafts/:id/approve — the checked product goes live in the shop
+app.post('/api/product-drafts/:id/approve', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const draft = await prisma.productDraft.findUnique({ where: { id: String(req.params.id) } });
+    if (!draft) return res.status(404).json({ success: false, error: 'That draft no longer exists.' });
+
+    const { data, error } = parseProductInput(req.body || {});
+    if (error) return res.status(400).json({ success: false, error });
+    const wasError = checkWasPrice(data.price, data.originalPrice);
+    if (wasError) return res.status(400).json({ success: false, error: wasError });
+
+    if (photoStorageMissing && data.gallery.some((u) => !isOurPhoto(u))) {
+      return res.status(503).json({ success: false, storageMissing: true, error: "Photo storage isn't set up, so the supplier's photos can't be kept. Add CLOUDINARY_URL in Render → Environment, then try again." });
+    }
+    const gallery = await keepPhotos(data.gallery);
+    if (gallery.length === 0) {
+      return res.status(502).json({ success: false, error: "The supplier's photos couldn't be copied. Save them to your phone and upload them in this form instead." });
+    }
+
+    const product = await prisma.product.create({
+      data: { ...data, image: gallery[0], gallery, sourceUrl: draft.sourceUrl, slug: await uniqueProductSlug(data.name) },
+    });
+    await prisma.productDraft.delete({ where: { id: draft.id } }).catch(() => {});
+    res.status(201).json({ success: true, data: { ...formatProduct(product), sourceUrl: product.sourceUrl }, photosDropped: data.gallery.length - gallery.length });
+  } catch (error) { genericError(req, res, error); }
 });
 
 // ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@ import { optionsLabel, splitChoices } from '../utils/options';
 import * as admin from '../services/adminApi';
 import { checkServerHealth } from '../services/api';
 import { sizedImage } from '../utils/images';
-import { X, Plus, Trash2, RefreshCw, Search, Upload, MessageCircle, ArrowLeft, ArrowRight, Phone, Check, AlertTriangle, Copy } from 'lucide-react';
+import { X, Plus, Trash2, RefreshCw, Search, Upload, MessageCircle, ArrowLeft, ArrowRight, Phone, Check, AlertTriangle, Copy, Link2, ExternalLink } from 'lucide-react';
 import { SmartImage } from '../components/SmartImage';
 
 // ---------------------------------------------------------------------------
@@ -380,6 +380,85 @@ const STOCK_TESTS = {
   lost: usesServerDisk,
 };
 
+// ---- Import from link -----------------------------------------------------
+const CURRENCY_SIGNS = { CNY: '¥', USD: '$', GBP: '£', EUR: '€', AED: 'AED ', TRY: '₺', GHS: 'GH₵' };
+const supplierMoney = (amount, currency) => (amount ? `${CURRENCY_SIGNS[currency] ?? (currency ? `${currency} ` : '')}${Number(amount).toLocaleString('en-GB', { maximumFractionDigits: 2 })}` : '');
+// Same rule as the server: supplier price × rate × (1 + markup) + extra, rounded up to whole cedis.
+const suggestedPrice = (amount, currency, pricing) => {
+  const rate = currency === 'GHS' ? 1 : Number(pricing?.rates?.[currency]);
+  if (!(Number(amount) > 0) || !(rate > 0)) return null;
+  return Math.ceil(Number(amount) * rate * (1 + (Number(pricing.markupPercent) || 0) / 100) + (Number(pricing.addFixed) || 0));
+};
+const draftToForm = (d, fallbackCategory) => ({
+  ...emptyProduct(d.category || fallbackCategory),
+  id: null,
+  draftId: d.id,
+  sourceUrl: d.sourceUrl,
+  sourceSite: d.sourceSite,
+  note: d.note,
+  sourcePrice: d.sourcePrice ? String(d.sourcePrice) : '',
+  sourceCurrency: d.sourceCurrency || '',
+  name: d.name || '',
+  price: d.price ? String(d.price) : '',
+  photos: d.images || [],
+  description: d.description || '',
+  specs: (Array.isArray(d.specs) ? d.specs : []).map((x) => ({ label: x.label || '', value: x.value || '' })),
+  options: (Array.isArray(d.options) ? d.options : []).map((o) => ({ name: o.name || '', values: (o.values || []).join(', ') })),
+});
+
+// Exchange rates + markup used to suggest a cedi price for imported products.
+const PricingRules = ({ pricing, currencies, onSaved }) => {
+  const { showToast } = useStore();
+  const [form, setForm] = useState(() => ({
+    rates: Object.fromEntries(currencies.map((c) => [c, pricing.rates?.[c] ? String(pricing.rates[c]) : ''])),
+    markupPercent: String(pricing.markupPercent ?? 0),
+    addFixed: String(pricing.addFixed ?? 0),
+    defaultCurrency: pricing.defaultCurrency || 'CNY',
+  }));
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    setSaving(true);
+    try {
+      onSaved(await admin.saveImportPricing(form));
+      showToast('Price rules saved', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+  const example = suggestedPrice(100, form.defaultCurrency, { ...form, rates: form.rates });
+  return (
+    <div className="adm-import-pricing">
+      <p className="adm-help">How the suggested price is worked out: <strong>supplier price × exchange rate, + markup %, + extra GH₵</strong>, rounded up. You can still change every price before approving.</p>
+      <div className="adm-rate-grid">
+        {currencies.map((c) => (
+          <label key={c} className="adm-rate">
+            <span>1 {c} =</span>
+            <input className="form-input" type="number" inputMode="decimal" min="0" step="0.01" placeholder="GH₵" value={form.rates[c]}
+              onChange={(e) => setForm((f) => ({ ...f, rates: { ...f.rates, [c]: e.target.value } }))} aria-label={`Cedis for 1 ${c}`} />
+            <span>GH₵</span>
+          </label>
+        ))}
+      </div>
+      <div className="adm-rate-grid">
+        <label className="adm-rate"><span>Markup</span>
+          <input className="form-input" type="number" inputMode="decimal" min="0" step="1" value={form.markupPercent} onChange={(e) => setForm((f) => ({ ...f, markupPercent: e.target.value }))} aria-label="Markup percent" /><span>%</span></label>
+        <label className="adm-rate"><span>Plus</span>
+          <input className="form-input" type="number" inputMode="decimal" min="0" step="1" value={form.addFixed} onChange={(e) => setForm((f) => ({ ...f, addFixed: e.target.value }))} aria-label="Extra cedis per product" /><span>GH₵</span></label>
+        <label className="adm-rate"><span>If no currency shown, assume</span>
+          <select className="form-input" value={form.defaultCurrency} onChange={(e) => setForm((f) => ({ ...f, defaultCurrency: e.target.value }))}>
+            {currencies.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select></label>
+      </div>
+      <div className="adm-import-pricing-foot">
+        <span className="adm-muted">{example ? `Example: ${supplierMoney(100, form.defaultCurrency)} → ${money(example)}` : `Add the rate for ${form.defaultCurrency} to get suggested prices.`}</span>
+        <button type="button" className={`btn btn-primary btn-sm ${saving ? 'is-loading' : ''}`} onClick={save}>Save price rules</button>
+      </div>
+    </div>
+  );
+};
+
 const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => {
   const { showToast } = useStore();
   const [query, setQuery] = useState('');
@@ -391,6 +470,45 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [priceDrafts, setPriceDrafts] = useState({});
+  // Import from link: drafts waiting for review, and the pricing rules for suggested prices.
+  const [drafts, setDrafts] = useState([]);
+  const [importInfo, setImportInfo] = useState({ pricing: { rates: {}, markupPercent: 0, addFixed: 0, defaultCurrency: 'CNY' }, currencies: ['CNY', 'USD', 'GBP', 'EUR', 'AED', 'TRY'] });
+  const [importOpen, setImportOpen] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [showRules, setShowRules] = useState(false);
+  const loadDrafts = () => admin.listDrafts()
+    .then((r) => { setDrafts(r.data || []); setImportInfo({ pricing: r.pricing, currencies: r.currencies }); })
+    .catch(() => {});
+  useEffect(() => { loadDrafts(); }, []);
+  const ratesMissing = !Object.values(importInfo.pricing?.rates || {}).some(Boolean);
+
+  const runImport = async () => {
+    setImporting(true);
+    try {
+      const { data, skipped } = await admin.importLinks(importText);
+      setDrafts((prev) => [...data, ...prev]);
+      const ready = data.filter((d) => d.status === 'READY').length;
+      showToast(`${data.length} product${data.length === 1 ? '' : 's'} added to "To review"${data.length - ready ? ` — ${data.length - ready} need${data.length - ready === 1 ? 's' : ''} details filled in` : ''}${skipped.length ? `. ${skipped.length} link${skipped.length === 1 ? '' : 's'} skipped` : ''}.`, data.length ? 'success' : 'warning');
+      if (data.length) { setImportText(''); setImportOpen(false); }
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setImporting(false);
+    }
+  };
+  const fallbackCategory = category !== 'all' ? category : categories[0]?.name || '';
+  const openDraft = (d) => open(draftToForm(d, fallbackCategory));
+  const discardDraft = async (d) => {
+    if (!window.confirm(`Delete the draft "${d.name || d.sourceSite}"? It hasn't been added to the shop.`)) return;
+    try {
+      await admin.removeDraft(d.id);
+      setDrafts((prev) => prev.filter((x) => x.id !== d.id));
+      showToast('Draft deleted', 'info');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
 
   const stockTest = STOCK_TESTS[stock];
   // Where uploaded photos are kept: 'cloudinary' (permanent), 'off' (not set up) or 'local' (development).
@@ -446,7 +564,12 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
       options,
     };
     try {
-      if (editing.id) {
+      if (editing.draftId) {
+        const { data: created, photosDropped } = await admin.approveDraft(editing.draftId, payload);
+        setProducts((prev) => [created, ...prev]);
+        setDrafts((prev) => prev.filter((d) => d.id !== editing.draftId));
+        showToast(`"${created.name}" approved and added to the shop${photosDropped ? ` (${photosDropped} photo${photosDropped === 1 ? '' : 's'} couldn't be copied)` : ''}`, 'success');
+      } else if (editing.id) {
         const updated = await admin.editProduct(editing.id, payload);
         setProducts((prev) => prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)));
         showToast(`"${updated.name}" saved`, 'success');
@@ -463,6 +586,33 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
       setSaving(false);
     }
   };
+
+  // Keep a draft's edits without approving it yet.
+  const saveDraftForLater = async () => {
+    if (uploading) { showToast('Wait for the photos to finish uploading.', 'warning'); return; }
+    setSaving(true);
+    try {
+      const updated = await admin.editDraft(editing.draftId, {
+        name: editing.name,
+        category: editing.category,
+        price: editing.price,
+        sourcePrice: editing.sourcePrice,
+        sourceCurrency: editing.sourceCurrency,
+        gallery: editing.photos,
+        description: editing.description,
+        specs: editing.specs.map((x) => ({ label: x.label.trim(), value: x.value.trim() })).filter((x) => x.label && x.value),
+        options: editing.options.map((o) => ({ name: o.name.trim(), values: splitChoices(o.values) })).filter((o) => o.name && o.values.length),
+      });
+      setDrafts((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+      showToast('Draft saved — approve it when you\'re ready', 'success');
+      setEditing(null);
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+  const suggestion = editing?.draftId ? suggestedPrice(editing.sourcePrice, editing.sourceCurrency || importInfo.pricing?.defaultCurrency, importInfo.pricing) : null;
 
   const quickUpdate = async (p, changes, message) => {
     try {
@@ -510,8 +660,66 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
           <option value="all">All categories</option>
           {categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
         </select>
+        <button type="button" className="btn btn-outline" onClick={() => setImportOpen(true)}><Link2 size={16} /> Import from links</button>
         <button type="button" className="btn btn-primary" onClick={openNew}><Plus size={16} /> Add product</button>
       </div>
+
+      {drafts.length > 0 && (
+        <section className="adm-review" aria-label="Products to review">
+          <div className="adm-review-head">
+            <h3>To review <span>{drafts.length}</span></h3>
+            <p className="adm-muted">Imported from supplier links. Shoppers can't see these until you approve them.</p>
+          </div>
+          <ul className="adm-review-list">
+            {drafts.map((d) => {
+              const suggested = d.price || suggestedPrice(d.sourcePrice, d.sourceCurrency, importInfo.pricing);
+              return (
+                <li key={d.id} className="adm-review-item">
+                  <SmartImage src={d.images?.[0] || ''} alt="" className="adm-product-thumb" fallbackLabel="No photo" />
+                  <div className="adm-review-body">
+                    <span className="adm-strong">{d.name || <em className="adm-muted">No name yet</em>}</span>
+                    <span className="adm-review-meta">
+                      <span className="adm-pill is-muted">{d.sourceSite}</span>
+                      {d.status === 'READY'
+                        ? <span className="adm-pill is-info">Ready to check</span>
+                        : <span className="adm-pill is-warning">Needs details</span>}
+                      {d.sourcePrice ? <span>{supplierMoney(d.sourcePrice, d.sourceCurrency)}{suggested ? ` → ${money(suggested)}` : ''}</span> : null}
+                    </span>
+                    {d.note && <span className="adm-muted adm-review-note">{d.note}</span>}
+                  </div>
+                  <div className="adm-row-actions">
+                    <button type="button" className="btn btn-primary btn-sm" onClick={() => openDraft(d)}>Review</button>
+                    <button type="button" className="btn btn-outline btn-sm adm-danger" onClick={() => discardDraft(d)} aria-label={`Delete draft ${d.name || d.sourceSite}`} title="Delete draft"><Trash2 size={14} /></button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
+      {importOpen && (
+        <Modal
+          title="Import from links"
+          onClose={() => { if (!importing) setImportOpen(false); }}
+          footer={(
+            <>
+              <span className="adm-footer-note">{importing ? 'Fetching the products… this can take up to 30 seconds' : ''}</span>
+              <button type="button" className="btn btn-outline" onClick={() => setImportOpen(false)} disabled={importing}>Cancel</button>
+              <button type="button" className={`btn btn-primary ${importing ? 'is-loading' : ''}`} onClick={runImport} disabled={importing || !importText.trim()}>Fetch products</button>
+            </>
+          )}
+        >
+          <Field label="Product links" hint="One per line, up to 10 at a time. You can paste the text an app's Share button copies — the words before the link become the name.">
+            <textarea className="form-input" rows={7} value={importText} onChange={(e) => setImportText(e.target.value)}
+              placeholder={'https://www.alibaba.com/product-detail/…\nhttps://mobile.yangkeduo.com/goods2.html?ps=…'} autoFocus />
+          </Field>
+          <p className="adm-help">The website fetches each product's name, photos, description and price, and puts it in <strong>To review</strong>. Nothing goes in the shop until you approve it. Pinduoduo, 1688 and Taobao only show details inside their apps, so those come in with just the link for you to fill in.</p>
+          {ratesMissing && <div className="adm-alert is-warning" role="status"><AlertTriangle size={16} /><span>Set your exchange rates below to get suggested cedi prices.</span></div>}
+          <button type="button" className="shop-link-btn" onClick={() => setShowRules((v) => !v)}>{showRules ? 'Hide price rules' : 'Price rules (exchange rates and markup)'}</button>
+          {showRules && <PricingRules pricing={importInfo.pricing} currencies={importInfo.currencies} onSaved={(pricing) => setImportInfo((i) => ({ ...i, pricing }))} />}
+        </Modal>
+      )}
       {photoStorage === 'off' && (
         <div className="adm-alert is-danger" role="alert">
           <AlertTriangle size={16} />
@@ -617,14 +825,15 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
 
       {editing && (
         <Modal
-          title={editing.id ? 'Edit product' : 'Add product'}
+          title={editing.draftId ? 'Review imported product' : editing.id ? 'Edit product' : 'Add product'}
           onClose={closeEditor}
           footer={(
             <>
               <span className="adm-footer-note">{uploading ? 'Uploading photos…' : isDirty ? 'Unsaved changes' : ''}</span>
               <button type="button" className="btn btn-outline" onClick={closeEditor} disabled={saving}>Cancel</button>
+              {editing.draftId && <button type="button" className="btn btn-outline" onClick={saveDraftForLater} disabled={saving || uploading}>Save for later</button>}
               <button type="submit" form="product-form" className={`btn btn-primary ${saving ? 'is-loading' : ''}`} disabled={uploading}>
-                {editing.id ? 'Save changes' : 'Add to shop'}
+                {editing.draftId ? 'Approve & add to shop' : editing.id ? 'Save changes' : 'Add to shop'}
               </button>
             </>
           )}
@@ -646,6 +855,31 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
                 </span>
               </div>
             </div>
+
+            {editing.draftId && (
+              <div className="adm-supplier-box">
+                <div className="adm-supplier-head">
+                  <strong>From {editing.sourceSite}</strong>
+                  <a href={editing.sourceUrl} target="_blank" rel="noopener noreferrer" className="shop-link-btn">Open the listing <ExternalLink size={13} /></a>
+                </div>
+                {editing.note && <p className="adm-muted">{editing.note}</p>}
+                <div className="adm-supplier-price">
+                  <label className="adm-rate"><span>Supplier price</span>
+                    <input className="form-input" type="number" inputMode="decimal" min="0" step="0.01" value={editing.sourcePrice} onChange={(e) => setField('sourcePrice', e.target.value)} aria-label="Supplier price" />
+                  </label>
+                  <select className="form-input" value={editing.sourceCurrency || importInfo.pricing?.defaultCurrency || 'CNY'} onChange={(e) => setField('sourceCurrency', e.target.value)} aria-label="Supplier currency">
+                    {importInfo.currencies.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  {suggestion
+                    ? <button type="button" className="btn btn-outline btn-sm" onClick={() => setField('price', String(suggestion))}>Use {money(suggestion)}</button>
+                    : <span className="adm-muted">{editing.sourcePrice ? 'Set exchange rates in Import from links → Price rules.' : ''}</span>}
+                </div>
+                <p className="adm-help">Check everything against the listing — the price below is what customers pay.</p>
+              </div>
+            )}
+            {!editing.draftId && editing.id && products.find((p) => p.id === editing.id)?.sourceUrl && (
+              <p className="adm-help"><Link2 size={12} /> Bought from: <a href={products.find((p) => p.id === editing.id).sourceUrl} target="_blank" rel="noopener noreferrer">{(() => { try { return new URL(products.find((p) => p.id === editing.id).sourceUrl).hostname; } catch { return 'supplier'; } })()}</a></p>
+            )}
 
             <div data-field="name">
               <Field label="Name">
