@@ -327,6 +327,29 @@ const OrdersTab = ({ orders, setOrders, view, setView, searchRequest }) => {
 // ---------------------------------------------------------------------------
 const emptyProduct = (category) => ({ name: '', category, price: '', originalPrice: '', inStock: true, isNew: false, photos: [], description: '', specs: [], options: [] });
 
+// Options in the editor: values as one line, plus an optional price per choice (as text while typing).
+const optionsToForm = (options) => (Array.isArray(options) ? options : []).map((o) => ({
+  name: o.name || '',
+  values: (o.values || []).join(', '),
+  priced: Boolean(o.prices && Object.keys(o.prices).length),
+  prices: Object.fromEntries(Object.entries(o.prices || {}).map(([k, v]) => [k, String(v)])),
+}));
+// Editor options → what the server stores. Prices are only sent for the option that has them on.
+const optionsFromForm = (options) => options
+  .map((o) => {
+    const values = splitChoices(o.values);
+    const prices = o.priced ? Object.fromEntries(values.filter((v) => Number(o.prices?.[v]) > 0).map((v) => [v, Number(o.prices[v])])) : null;
+    return { name: o.name.trim(), values, ...(prices && Object.keys(prices).length && { prices }) };
+  })
+  .filter((o) => o.name && o.values.length);
+// With sizes priced separately, the product's own price is the cheapest size (used for "From GH₵…").
+const lowestChoicePrice = (options) => {
+  const priced = options.find((o) => o.priced);
+  if (!priced) return null;
+  const all = splitChoices(priced.values).map((v) => Number(priced.prices?.[v])).filter((n) => n > 0);
+  return all.length ? Math.min(...all) : null;
+};
+
 // Turns a product from the server into the editor's form fields.
 const productToForm = (p) => ({
   id: p.id,
@@ -340,7 +363,7 @@ const productToForm = (p) => ({
   description: p.description || '',
   specs: (p.specifications || p.specs || []).map((s) => ({ label: s.label || '', value: s.value || '' })),
   // Values are edited as one comma-separated line: "S, M, L, XL".
-  options: (Array.isArray(p.options) ? p.options : []).map((o) => ({ name: o.name || '', values: (o.values || []).join(', ') })),
+  options: optionsToForm(p.options),
 });
 
 // Ready-made choices the admin can start from.
@@ -365,6 +388,11 @@ const productProblems = (f) => {
   if (!f.category) found.category = 'Choose a category.';
   const badOption = (f.options || []).findIndex((o) => (o.name.trim() || o.values.trim()) && (!o.name.trim() || !splitChoices(o.values).length));
   if (badOption > -1) found.options = 'Each choice needs a name and at least one option, e.g. Size: S, M, L.';
+  const priced = (f.options || []).find((o) => o.priced);
+  if (!found.options && priced) {
+    const unpriced = splitChoices(priced.values).filter((v) => !(Number(priced.prices?.[v]) > 0));
+    if (unpriced.length) found.options = `Enter a price for every ${priced.name.trim().toLowerCase() || 'choice'} (missing: ${unpriced.join(', ')}).`;
+  }
   return found;
 };
 
@@ -403,7 +431,7 @@ const draftToForm = (d, fallbackCategory) => ({
   photos: d.images || [],
   description: d.description || '',
   specs: (Array.isArray(d.specs) ? d.specs : []).map((x) => ({ label: x.label || '', value: x.value || '' })),
-  options: (Array.isArray(d.options) ? d.options : []).map((o) => ({ name: o.name || '', values: (o.values || []).join(', ') })),
+  options: optionsToForm(d.options),
 });
 
 // Exchange rates + markup used to suggest a cedi price for imported products.
@@ -535,6 +563,27 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
     setEditing((prev) => ({ ...prev, [key]: value }));
     if (problems[key]) setProblems((prev) => ({ ...prev, [key]: undefined }));
   };
+  // Per-choice prices: only one option can have them; the main price follows the cheapest.
+  const withLowest = (options) => (prev) => {
+    const lowest = lowestChoicePrice(options);
+    return { ...prev, options, ...(lowest && { price: String(lowest) }) };
+  };
+  const setOptionPriced = (i, on) => {
+    const options = editing.options.map((x, j) => {
+      if (j !== i) return on ? { ...x, priced: false } : x;
+      // Start every choice at the current price, so she only changes the ones that differ.
+      const prices = { ...(x.prices || {}) };
+      if (on) splitChoices(x.values).forEach((v) => { if (!(Number(prices[v]) > 0) && Number(editing.price) > 0) prices[v] = String(editing.price); });
+      return { ...x, priced: on, prices };
+    });
+    setEditing(withLowest(options));
+    setProblems((prev) => ({ ...prev, options: undefined }));
+  };
+  const setOptionPrice = (i, value, price) => {
+    const options = editing.options.map((x, j) => (j === i ? { ...x, prices: { ...(x.prices || {}), [value]: price } } : x));
+    setEditing(withLowest(options));
+    if (problems.options) setProblems((prev) => ({ ...prev, options: undefined }));
+  };
 
   const save = async (e) => {
     e.preventDefault();
@@ -547,13 +596,11 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
     }
     setSaving(true);
     const specs = editing.specs.map((s) => ({ label: s.label.trim(), value: s.value.trim() })).filter((s) => s.label && s.value);
-    const options = editing.options
-      .map((o) => ({ name: o.name.trim(), values: splitChoices(o.values) }))
-      .filter((o) => o.name && o.values.length);
+    const options = optionsFromForm(editing.options);
     const payload = {
       name: editing.name,
       category: editing.category,
-      price: editing.price,
+      price: lowestChoicePrice(editing.options) ?? editing.price,
       originalPrice: editing.originalPrice === '' ? null : editing.originalPrice,
       inStock: editing.inStock,
       badge: editing.isNew ? 'New' : null,
@@ -595,13 +642,13 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
       const updated = await admin.editDraft(editing.draftId, {
         name: editing.name,
         category: editing.category,
-        price: editing.price,
+        price: lowestChoicePrice(editing.options) ?? editing.price,
         sourcePrice: editing.sourcePrice,
         sourceCurrency: editing.sourceCurrency,
         gallery: editing.photos,
         description: editing.description,
         specs: editing.specs.map((x) => ({ label: x.label.trim(), value: x.value.trim() })).filter((x) => x.label && x.value),
-        options: editing.options.map((o) => ({ name: o.name.trim(), values: splitChoices(o.values) })).filter((o) => o.name && o.values.length),
+        options: optionsFromForm(editing.options),
       });
       setDrafts((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
       showToast('Draft saved — approve it when you\'re ready', 'success');
@@ -899,8 +946,9 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
             </div>
             <div className="form-row">
               <div data-field="price">
-                <Field label="Price (GH₵)">
-                  <input className="form-input" type="number" inputMode="decimal" min="0.01" step="0.01" placeholder="450" value={editing.price} onChange={(e) => setField('price', e.target.value)} aria-invalid={Boolean(problems.price)} />
+                <Field label="Price (GH₵)" hint={editing.options.some((o) => o.priced) ? 'Set per choice below — this shows the cheapest.' : null}>
+                  <input className="form-input" type="number" inputMode="decimal" min="0.01" step="0.01" placeholder="450" value={editing.price} onChange={(e) => setField('price', e.target.value)} aria-invalid={Boolean(problems.price)}
+                    readOnly={editing.options.some((o) => o.priced)} />
                 </Field>
                 {problem('price')}
               </div>
@@ -956,10 +1004,28 @@ const ProductsTab = ({ products, setProducts, categories, onCatalogChange }) => 
                     onChange={(e) => setField('options', editing.options.map((x, j) => (j === i ? { ...x, values: e.target.value } : x)))} />
                   <button type="button" className="btn btn-outline btn-sm adm-danger" aria-label={`Remove choice ${i + 1}`}
                     onClick={() => setField('options', editing.options.filter((_, j) => j !== i))}><X size={14} /></button>
-                  {splitChoices(o.values).length > 0 && (
+                  {splitChoices(o.values).length > 0 && !o.priced && (
                     <div className="adm-option-preview" aria-label={`Buyers will see for ${o.name || 'this choice'}`}>
                       <span>Buyers see {splitChoices(o.values).length === 1 ? '1 choice' : `${splitChoices(o.values).length} choices`}:</span>
                       {splitChoices(o.values).map((v) => <em key={v}>{v}</em>)}
+                    </div>
+                  )}
+                  {splitChoices(o.values).length > 1 && (
+                    <label className="adm-option-priced">
+                      <input type="checkbox" checked={Boolean(o.priced)} onChange={(e) => setOptionPriced(i, e.target.checked)} />
+                      Price changes by {o.name.trim().toLowerCase() || 'choice'}
+                    </label>
+                  )}
+                  {o.priced && (
+                    <div className="adm-option-prices">
+                      {splitChoices(o.values).map((v) => (
+                        <label key={v} className="adm-option-price">
+                          <em>{v}</em>
+                          <span>GH₵</span>
+                          <input className="form-input" type="number" inputMode="decimal" min="0.01" step="0.01" value={o.prices?.[v] ?? ''}
+                            aria-label={`Price for ${o.name} ${v}`} onChange={(e) => setOptionPrice(i, v, e.target.value)} />
+                        </label>
+                      ))}
                     </div>
                   )}
                 </div>

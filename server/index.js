@@ -109,6 +109,15 @@ const slugify = (value) => String(value || '').toLowerCase().replace(/&/g, ' ').
 const isDealActive = (p) =>
   p.dealPrice != null && p.dealEndsAt != null && new Date(p.dealEndsAt) > new Date() && p.dealPrice < p.price;
 const effectivePrice = (p) => (isDealActive(p) ? p.dealPrice : p.price);
+// One option (e.g. Size) can give each choice its own price. Choices without one use the normal
+// price; during a deal every choice gets the same % off.
+const choicePrice = (p, picked = {}) => {
+  const option = (Array.isArray(p.options) ? p.options : []).find((o) => o?.prices && Object.keys(o.prices).length);
+  const own = option ? Number(option.prices[picked[option.name]]) : 0;
+  const now = effectivePrice(p);
+  if (!(own > 0) || own === p.price) return now;
+  return Math.round(now * (own / p.price) * 100) / 100;
+};
 
 // Product as the shop and Admin see it. `price` is what customers pay right now;
 // `listPrice` / `listWasPrice` are the normal prices Admin edits.
@@ -794,11 +803,27 @@ const parseProductInput = (body, { partial = false } = {}) => {
       .map((o) => {
         const raw = Array.isArray(o?.values) ? o.values : String(o?.values || '').split(',');
         const values = [...new Set(raw.map((v) => String(v).trim().slice(0, 40)).filter(Boolean))].slice(0, 30);
-        return { name: String(o?.name || '').trim().slice(0, 30), values };
+        // Optional price for each choice, e.g. { "50cm": 120, "70cm": 180 } — only for choices that exist.
+        const prices = {};
+        if (o?.prices && typeof o.prices === 'object' && !Array.isArray(o.prices)) {
+          for (const v of values) {
+            const n = Number(o.prices[v]);
+            if (Number.isFinite(n) && n > 0 && n < 1e7) prices[v] = roundMoney(n);
+          }
+        }
+        return { name: String(o?.name || '').trim().slice(0, 30), values, ...(Object.keys(prices).length && { prices }) };
       })
       .filter((o) => o.name && o.values.length)
       .filter((o, i, all) => all.findIndex((x) => x.name.toLowerCase() === o.name.toLowerCase()) === i)
       .slice(0, 4);
+    // Only one option can set prices — otherwise "Size L + Colour Gold" would have two prices.
+    let priced = false;
+    data.options = data.options.map((o) => {
+      if (!o.prices) return o;
+      if (priced) { const { prices, ...rest } = o; return rest; }
+      priced = true;
+      return o;
+    });
   }
 
   if (has('gallery') || has('image') || !partial) {
@@ -1603,7 +1628,7 @@ app.post('/api/orders', orderLimiter, optionalAuth, async (req, res) => {
         id: product.id,
         name: product.name,
         qty,
-        price: effectivePrice(product),
+        price: choicePrice(product, options),
         image: product.image,
         ...(Object.keys(options).length && { options }),
       });

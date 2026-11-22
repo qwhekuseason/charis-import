@@ -3434,3 +3434,10 @@ h2.co-label { font-weight: 700 !important; }
   .adm-review-item .adm-product-thumb { width: 48px; height: 48px; }
   .adm-review-item .adm-row-actions { grid-column: 1 / -1; justify-content: flex-end; }
 }
+.pcard-from { font-size: 0.72em; font-weight: 600; opacity: 0.7; }
+.adm-option-priced { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
+.adm-option-priced input { width: 16px; height: 16px; accent-color: var(--ink, #17140f); }
+.adm-option-prices { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; margin-bottom: 8px; }
+.adm-option-price { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; }
+.adm-option-price em { font-style: normal; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--ink, #17140f); color: var(--gold-bright, #d4af5a); white-space: nowrap; max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+.adm-option-price .form-input { min-width: 0; flex: 1; padding: 7px 9px; }

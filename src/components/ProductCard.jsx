@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../context/StoreContext';
-import { productOptions } from '../utils/options';
+import { productOptions, priceRange } from '../utils/options';
 import { sizedImage, imageSrcSet } from '../utils/images';
 import { SmartImage } from './SmartImage';
 import { Heart, Plus, Check, Star } from 'lucide-react';
@@ -34,6 +34,7 @@ export const ProductCard = ({ product }) => {
     ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
     : null;
   const reviewCount = product.reviewCount || product.reviewsCount || 0;
+  const range = priceRange(product); // sizes with their own prices → "From GH₵…"
   const dealLeft = product.onDeal && product.dealEndsAt ? timeLeft(product.dealEndsAt) : null;
 
   // One label at most, in order of importance.
@@ -90,8 +91,8 @@ export const ProductCard = ({ product }) => {
         <h3 className="pcard-name">{product.name}</h3>
 
         <div className="pcard-price">
-          <span className="pcard-now">{cedis(product.price)}</span>
-          {discount && (
+          <span className="pcard-now">{range.varies && <small className="pcard-from">From </small>}{cedis(range.varies ? range.min : product.price)}</span>
+          {discount && !range.varies && (
             <>
               <s className="pcard-was">{cedis(product.originalPrice)}</s>
               <span className="pcard-off">−{discount}%</span>

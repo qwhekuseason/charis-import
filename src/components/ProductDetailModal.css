@@ -204,3 +204,7 @@
 .pd-option-error { margin: -4px 0 0; font-size: 0.84rem; font-weight: 700; color: #dc2626; }
 @keyframes pdShake { 0%, 100% { transform: none; } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
 @media (prefers-reduced-motion: reduce) { .pd-options.has-error { animation: none; } }
+
+/* Sizes with their own prices */
+.pd-chip-price { display: block; margin-top: 2px; font-size: 0.74rem; font-weight: 600; opacity: 0.75; }
+.pd-from { font-size: 0.6em; font-weight: 600; opacity: 0.7; }

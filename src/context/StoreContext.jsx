@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { lineIdOf, optionsLabel, productOptions, selectionComplete } from '../utils/options';
+import { lineIdOf, optionsLabel, productOptions, selectionComplete, priceFor } from '../utils/options';
 import {
   getProducts,
   getCategories,
@@ -243,9 +243,11 @@ export const StoreProvider = ({ children }) => {
         if (!fresh) { changed = true; return null; }
         // The admin removed the size/colour this line was for — checkout would refuse it.
         if (productOptions(fresh).length && !selectionComplete(fresh, item.options)) { changed = true; return null; }
-        if (fresh.price === item.unitPrice) return item;
+        const freshPrice = priceFor(fresh, item.options).price;
+        if (freshPrice === item.unitPrice && fresh === item.product) return item;
+        if (freshPrice === item.unitPrice) return { ...item, product: fresh };
         changed = true;
-        return { ...item, product: fresh, unitPrice: fresh.price, total: fresh.price * item.quantity };
+        return { ...item, product: fresh, unitPrice: freshPrice, total: freshPrice * item.quantity };
       });
       return changed ? next.filter(Boolean) : prev;
     });
@@ -458,7 +460,7 @@ export const StoreProvider = ({ children }) => {
       if (existingIndex > -1) {
         const updated = [...prevCart];
         const newQty = updated[existingIndex].quantity + qtyToAdd;
-        const unitPrice = product.price;
+        const unitPrice = priceFor(product, chosen).price;
         updated[existingIndex] = {
           ...updated[existingIndex],
           quantity: newQty,
@@ -467,7 +469,7 @@ export const StoreProvider = ({ children }) => {
         };
         return updated;
       } else {
-        const unitPrice = product.price;
+        const unitPrice = priceFor(product, chosen).price;
         return [
           ...prevCart,
           {
@@ -495,7 +497,7 @@ export const StoreProvider = ({ children }) => {
       return prevCart.map((item) => {
         if (lineIdOf(item) === lineId) {
           if (newQty <= 0) return null;
-          const unitPrice = item.product.price;
+          const unitPrice = priceFor(item.product, item.options).price;
           return {
             ...item,
             quantity: newQty,
@@ -559,7 +561,7 @@ export const StoreProvider = ({ children }) => {
   // WhatsApp Direct link generator
   const getWhatsAppOrderLink = (product, quantity = 1, options = {}) => {
     const qty = quantity || 1;
-    const unitPrice = product.price;
+    const unitPrice = priceFor(product, options).price;
     const total = (unitPrice * qty).toFixed(2);
     
     const message = encodeURIComponent(

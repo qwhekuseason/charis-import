@@ -37,3 +37,33 @@ export const splitChoices = (text) =>
     .split(/[,/;\n|]|\s-\s*|\s*-\s/)
     .map((v) => v.trim().replace(/\s+/g, ' '))
     .filter(Boolean))];
+
+// ---- Prices that depend on a choice (e.g. each Size has its own price) ----
+// The admin can give ONE option's choices their own prices: { name: 'Size', values: [...], prices: { '50cm': 120, '70cm': 180 } }.
+// Choices without a price use the product's normal price.
+const round2 = (n) => Math.round(n * 100) / 100;
+export const pricedOption = (product) =>
+  productOptions(product).find((o) => o.prices && typeof o.prices === 'object' && Object.values(o.prices).some((p) => Number(p) > 0));
+
+// Shop price (and crossed-out "was" price) for the buyer's choices. During a deal every choice
+// gets the same % off, so the deal still means what the admin set.
+export const priceFor = (product, selected) => {
+  const now = Number(product?.price) || 0;
+  const was = Number(product?.originalPrice) > now ? Number(product.originalPrice) : null;
+  const option = pricedOption(product);
+  const list = Number(product?.listPrice ?? product?.price) || 0;
+  const own = option ? Number(option.prices[selected?.[option.name]]) : 0;
+  if (!(own > 0) || !(list > 0) || own === list) return { price: now, was };
+  const ratio = own / list;
+  return { price: round2(now * ratio), was: was ? round2(was * ratio) : null };
+};
+
+// Cheapest and dearest choice, for "From GH₵…" on product cards.
+export const priceRange = (product) => {
+  const option = pricedOption(product);
+  if (!option) return { min: Number(product?.price) || 0, max: Number(product?.price) || 0, varies: false };
+  const all = option.values.map((v) => priceFor(product, { [option.name]: v }).price);
+  const min = Math.min(...all);
+  const max = Math.max(...all);
+  return { min, max, varies: max > min };
+};
