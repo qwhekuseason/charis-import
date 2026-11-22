@@ -1,0 +1,25 @@
+/* Opening video — full screen on black, so the video's own black edges disappear. */
+.vi { position: fixed; inset: 0; z-index: 3000; display: grid; place-items: center; overflow: hidden; background: #000;
+  transition: opacity 0.5s ease, transform 0.5s cubic-bezier(0.7, 0, 0.2, 1); }
+.vi.is-leaving { opacity: 0; transform: scale(1.04); pointer-events: none; }
+
+/* Wide screens: the whole picture, as large as fits. */
+.vi-video { width: 100%; height: 100%; object-fit: contain; background: #000; opacity: 0; transition: opacity 0.4s ease; }
+.vi.is-playing .vi-video { opacity: 1; }
+
+/* Upright phones: enlarge it and trim the sides, so the logo and name are big enough to read.
+   (The ring, logo and name sit in the middle third of the picture.) */
+@media (orientation: portrait) {
+  .vi-video { position: absolute; left: 50%; top: 50%; width: 178vw; max-width: none; height: auto; transform: translate(-50%, -50%); }
+}
+
+.vi-skip { position: absolute; right: 20px; bottom: calc(20px + env(safe-area-inset-bottom)); padding: 9px 16px; border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.25); background: rgba(255, 255, 255, 0.06); color: #e9e2d4; font-size: 0.85rem; font-weight: 600;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); animation: viIn 0.6s ease 0.6s both; }
+.vi-skip:hover { border-color: var(--gold-bright); color: var(--gold-bright); }
+.vi-skip:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(212, 175, 90, 0.5); }
+@keyframes viIn { from { opacity: 0; } to { opacity: 1; } }
+
+@media (max-width: 640px) {
+  .vi-skip { right: 50%; transform: translateX(50%); bottom: calc(28px + env(safe-area-inset-bottom)); }
+}
