@@ -2,9 +2,8 @@ import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 
 import { useStore } from '../context/StoreContext';
 import { ProductCard } from '../components/ProductCard';
 import { SmartImage } from '../components/SmartImage';
-import { getActiveBatches } from '../services/api';
 import { sizedImage } from '../utils/images';
-import { ArrowRight, Search, Smartphone, ShieldCheck, Truck, ChevronLeft, ChevronRight, Plane, PackagePlus, Link2, Gift, MessageCircle, Clock } from 'lucide-react';
+import { ArrowRight, Search, ChevronLeft, ChevronRight, Plane, PackagePlus, Link2, Gift, MessageCircle, Clock } from 'lucide-react';
 import './HomePage.css';
 
 // The globe intro's code only downloads when it actually plays.
@@ -21,23 +20,9 @@ const shouldPlayIntro = () => {
 };
 import { HiddenGem } from '../components/HiddenGem';
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 // Where customers find things — scrolls past in the band under the hero.
 const SOURCES = ['Turkey', 'Dubai', 'China', 'UK', '1688', 'Pinduoduo', 'Alibaba'];
 
-const BATCH_STAGE_LABELS = {
-  CONFIRMED: 'Booking orders now',
-  QC_BATCHING: 'Being checked and packed',
-  HIGH_SEAS: 'On the way to Ghana',
-  CUSTOMS_CLEARANCE: 'Clearing customs',
-  CUSTOMS_CLEARING: 'Clearing customs',
-  ACCRA_HUB: 'Arrived in Kumasi',
-  DELIVERY_READY: 'Out for delivery',
-};
-
-const formatShortDate = (isoDate) =>
-  new Date(`${isoDate}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 
 
 // "2d 04:15:09" or "04:15:09" — time left until a deal ends.
@@ -96,34 +81,6 @@ const ProductRail = ({ products, onSeeAll, seeAllLabel, label, showMore = true }
   );
 };
 
-// Turns a live batch record into the copy shown on the hero card.
-const describeBatch = (batch) => {
-  if (!batch) return null;
-  const isSea = batch.type === 'SEA_FCL';
-  const capacity = isSea ? batch.capacityCbm : batch.capacityKg;
-  const allocated = isSea ? batch.allocatedCbm : batch.allocatedKg;
-  const percentFull = capacity ? Math.min(100, Math.round((allocated / capacity) * 100)) : null;
-  const daysToCutoff = batch.cutoffDate
-    ? Math.round((Date.parse(`${batch.cutoffDate}T00:00:00Z`) - (Date.now() - (Date.now() % DAY_MS))) / DAY_MS)
-    : null;
-  const isOpen = daysToCutoff !== null && daysToCutoff >= 0;
-  const from = (batch.originPort || 'China').split(',').pop().trim();
-
-  if (isOpen) {
-    return {
-      isOpen: true,
-      title: `Next ${isSea ? 'sea' : 'air'} shipment from ${from}`,
-      status: `${percentFull !== null ? `${percentFull}% full · ` : ''}${daysToCutoff === 0 ? 'closes today' : `closes in ${daysToCutoff} day${daysToCutoff === 1 ? '' : 's'}`}`,
-      progress: percentFull,
-    };
-  }
-  return {
-    isOpen: false,
-    title: `Current ${isSea ? 'sea' : 'air'} shipment from ${from}`,
-    status: `${BATCH_STAGE_LABELS[batch.status] || 'In transit'}${batch.eta ? ` · arriving around ${formatShortDate(batch.eta)}` : ''}`,
-    progress: null,
-  };
-};
 
 
 export const HomePage = () => {
@@ -142,7 +99,6 @@ export const HomePage = () => {
     setSelectedProduct
   } = useStore();
   const [moreFilter, setMoreFilter] = useState('all');
-  const [activeBatch, setActiveBatch] = useState(null);
   const [heroSearch, setHeroSearch] = useState('');
   const homeRef = useRef(null);
   const [introOn, setIntroOn] = useState(shouldPlayIntro);
@@ -191,19 +147,6 @@ export const HomePage = () => {
   };
   const now = Date.now();
 
-  useEffect(() => {
-    let cancelled = false;
-    getActiveBatches().then((batches) => {
-      if (cancelled || !batches) return;
-      // Prefer whichever batch is still taking orders; otherwise show the shipment in transit.
-      const candidates = [batches.sea, batches.air].filter(Boolean);
-      const open = candidates.find((b) => describeBatch(b)?.isOpen);
-      setActiveBatch(open || batches.sea || batches.air || null);
-    });
-    return () => { cancelled = true; };
-  }, []);
-
-  const batchInfo = describeBatch(activeBatch);
 
   // Only real reviews written by customers — the section stays hidden until there are some.
   const customerReviews = (reviews || [])
@@ -333,29 +276,6 @@ export const HomePage = () => {
             </div>
           </div>
 
-          {/* Glass card: the shipment on its way, or why buying here is safe */}
-          <aside className="hm-stage-card" aria-label={batchInfo ? 'Current shipment' : 'Why order with us'}>
-            {batchInfo ? (
-              <>
-                <span className="hm-stage-card-lines"><strong>{batchInfo.title}</strong><span>{batchInfo.status}</span></span>
-                {batchInfo.progress !== null && (
-                  <>
-                    <span className="hm-stage-card-big">{Math.round(batchInfo.progress)}%</span>
-                    <span className="hm-shipment-bar" aria-hidden="true"><span style={{ width: `${batchInfo.progress}%` }} /></span>
-                  </>
-                )}
-              </>
-            ) : (
-              <>
-                <span className="hm-stage-card-lines">
-                  <span><Smartphone size={13} aria-hidden="true" /> Pay with MoMo</span>
-                  <span><ShieldCheck size={13} aria-hidden="true" /> Customs included</span>
-                  <span><Truck size={13} aria-hidden="true" /> Delivered across Ghana</span>
-                </span>
-                {products.length > 0 && <span className="hm-stage-card-big">{products.length}<small> items in store</small></span>}
-              </>
-            )}
-          </aside>
         </div>
       </section>
 
