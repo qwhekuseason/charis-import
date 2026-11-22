@@ -1,3 +1,5 @@
+import { AccentTitle } from '../components/AccentTitle';
+import { sizedImage } from '../utils/images';
 import React, { useState, useMemo, useEffect } from 'react';
 import { useStore } from '../context/StoreContext';
 import { HiddenGem } from '../components/HiddenGem';
@@ -148,13 +150,20 @@ export const ShopPage = () => {
     : selectedCategory === 'all'
     ? 'All products'
     : selectedCategoryName || 'Products';
+  // The banner photo: the chosen category's picture, or the first category that has one.
+  const heroPhoto = sizedImage(
+    (categories || []).find((c) => c.slug === selectedCategory && c.image)?.image
+      || (categories || []).find((c) => c.image)?.image || '',
+    1400,
+  );
 
   return (
     <div className="section shop-page">
       <div className="container">
         {/* Header */}
-        <div className="shop-header">
-          <h1 className="shop-title">{pageTitle} <HiddenGem spot="shop-header" /></h1>
+        <div className="shop-header page-hero" style={heroPhoto ? { '--ph-img': `url("${heroPhoto}")` } : undefined}>
+          <span className="ip-eyebrow">{onlyWishlist ? 'Your list' : onlyDeals ? 'Price drops' : 'Shop'} · {filteredProducts.length} item{filteredProducts.length === 1 ? '' : 's'}</span>
+          <h1 className="shop-title"><AccentTitle text={pageTitle} /> <HiddenGem spot="shop-header" /></h1>
           <p className="shop-subtitle">
             Order from overseas suppliers and we deliver to you anywhere in Ghana.
           </p>

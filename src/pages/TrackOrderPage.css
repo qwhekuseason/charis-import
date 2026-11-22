@@ -128,3 +128,18 @@
   .tr-help .btn { width: 100%; }
 }
 .tr-item-options { display: block; font-size: 0.78rem; font-weight: 700; color: var(--gold-text); }
+
+/* Refreshed: the search sits in an ink banner like the other pages */
+.tr-search-card { position: relative; isolation: isolate; overflow: hidden; padding: 40px 36px 30px; border-radius: 28px; border: 0;
+  background: radial-gradient(circle at 90% 120%, rgba(212, 175, 90, 0.25), transparent 45%), var(--ink); color: #e6dece; box-shadow: 0 30px 60px -36px rgba(23, 20, 15, 0.6); }
+.tr-search-icon { border-radius: 50%; background: rgba(212, 175, 90, 0.14); color: var(--gold-bright); border: 1px solid rgba(212, 175, 90, 0.3); }
+.tr-search-card h1 { font-family: var(--font-serif); font-weight: 600; font-size: clamp(2rem, 4.6vw, 2.8rem); color: #fff; letter-spacing: -0.01em; }
+.tr-search-card h1 em { font-style: italic; font-weight: 500; color: var(--gold-bright); }
+.tr-search-card .tr-sub { color: #d8cfbf; }
+.tr-search-card .tr-field label { color: #e6dece; }
+.tr-search-card .tr-input { background: #fff; border-radius: 999px; }
+.tr-submit { border-radius: 999px; background: var(--gold); color: var(--ink); border-color: var(--gold); }
+.tr-submit:hover:not(:disabled) { background: var(--gold-bright); }
+.tr-search-card > p:last-child, .tr-search-card .tr-signed { color: #bfb5a3; }
+.tr-card { border-radius: 24px; }
+.tr-head h2 { font-family: var(--font-serif); font-weight: 600; }

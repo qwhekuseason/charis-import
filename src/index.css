@@ -3458,3 +3458,65 @@ h2.co-label { font-weight: 700 !important; }
   .pcard-cart span { display: none; }
   .pcard-now { font-size: 0.92rem; }
 }
+
+/* ══════════════════════════════════════════════════════════
+   Page banners — every page opens like the home page: a rounded
+   ink card (with a photo when there is one), serif title with one
+   italic gold word. Doubled class so it beats each page's own CSS.
+   ══════════════════════════════════════════════════════════ */
+.page-hero.page-hero { position: relative; isolation: isolate; overflow: hidden; text-align: left; margin: 6px 0 28px; padding: 46px 42px;
+  border-radius: 28px; background: var(--ink); color: #e6dece; border: 0; box-shadow: 0 30px 60px -36px rgba(23, 20, 15, 0.6); }
+.page-hero.page-hero::before { content: ''; position: absolute; inset: 0; z-index: -2; background: var(--ph-img, none) center / cover no-repeat; opacity: 0.6;
+  animation: phKen 2.4s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.page-hero.page-hero::after { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: radial-gradient(circle at 92% 115%, rgba(212, 175, 90, 0.24), transparent 42%),
+              linear-gradient(95deg, rgba(14, 12, 9, 0.96) 0%, rgba(14, 12, 9, 0.8) 48%, rgba(14, 12, 9, 0.35) 100%); }
+@keyframes phKen { from { transform: scale(1.12); } to { transform: scale(1.02); } }
+.page-hero.page-hero h1 { font-family: var(--font-serif); font-weight: 600; color: #fff; font-size: clamp(2rem, 4.6vw, 3.2rem); line-height: 1.06; margin: 0 0 12px; letter-spacing: -0.01em; max-width: 760px; }
+.page-hero.page-hero h1 em { font-style: italic; font-weight: 500; color: var(--gold-bright); }
+.page-hero.page-hero > p { color: #d8cfbf; max-width: 580px; margin: 0; font-size: 1rem; line-height: 1.65; }
+.page-hero.page-hero .ip-eyebrow { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 16px; padding: 6px 13px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.16); color: var(--gold-bright);
+  font-size: 0.72rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.page-hero.page-hero .ip-facts { max-width: 640px; margin-top: 26px; border-top-color: rgba(255, 255, 255, 0.14); text-align: left; }
+.page-hero.page-hero .ip-facts dt { font-family: var(--font-serif); font-style: italic; font-weight: 600; color: var(--gold-bright); }
+.page-hero.page-hero .ip-facts dd { color: #cfc6b6; }
+.page-hero.page-hero .shop-subtitle { color: #d8cfbf; margin: 0; }
+.page-hero.page-hero .shop-search { max-width: 540px; margin-top: 22px; padding: 4px 6px 4px 18px; border: 0; border-radius: 999px; background: #fff; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25); }
+.page-hero.page-hero .shop-search:focus-within { box-shadow: 0 0 0 3px rgba(212, 175, 90, 0.6), 0 10px 30px rgba(0, 0, 0, 0.25); }
+@media (max-width: 760px) {
+  .page-hero.page-hero { margin: 0 0 22px; padding: 28px 20px; border-radius: 22px; }
+  .page-hero.page-hero::after { background: radial-gradient(circle at 92% 115%, rgba(212, 175, 90, 0.22), transparent 45%), linear-gradient(180deg, rgba(14, 12, 9, 0.7), rgba(14, 12, 9, 0.92)); }
+  .page-hero.page-hero h1 { font-size: clamp(1.8rem, 8.5vw, 2.4rem); }
+  .page-hero.page-hero > p { font-size: 0.94rem; }
+}
+@media (prefers-reduced-motion: reduce) { .page-hero.page-hero::before { animation: none; } }
+
+/* ---- Cart drawer refresh: cream panel, serif head, soft item cards, pill buttons ---- */
+.cd-panel, .cart-drawer, .cd-drawer { background: #fbf9f5; }
+.cd-head { padding: 18px 20px; border-bottom: 0; }
+.cd-head h2 { font-family: var(--font-serif); font-weight: 600; font-size: 1.45rem; }
+.cd-head h2 em { font-style: italic; font-weight: 500; color: var(--gold-text); }
+.cd-head h2 svg { color: var(--gold-text); }
+.cd-count { background: var(--ink); color: var(--gold-bright); font-family: var(--font-body); }
+.cd-close { border-radius: 50%; background: #fff; border: 1px solid var(--border-light); }
+.cd-items { gap: 10px; }
+.cd-item { padding: 10px; border: 1px solid var(--border-light); border-radius: 18px; background: #fff; }
+.cd-item:first-child { padding-top: 10px; }
+.cd-thumb { border-radius: 14px; border: 0; background: #efe9de; }
+.cd-qty { border-radius: 999px; }
+.cd-qty button { border-radius: 50%; }
+.cd-promo { border-radius: 18px; background: #fff; border: 1px solid var(--border-light); }
+.cd-promo-form { border-radius: 999px; }
+.cd-foot { background: #fff; border-top: 1px solid var(--border-light); border-radius: 22px 22px 0 0; }
+.cd-checkout { border-radius: 999px; background: var(--ink); color: var(--gold-bright); }
+.cd-checkout:hover:not(:disabled) { background: #000; }
+.cd-empty-icon { background: var(--gold-wash); color: var(--gold-text); }
+.cd-empty h3 { font-family: var(--font-serif); font-weight: 600; font-size: 1.5rem; }
+
+/* Gold buttons on the dark banner cards (the ink button would vanish on ink). */
+.tr-search-card .btn-primary, .ac-signedout .btn-primary, .page-hero .btn-primary {
+  background: var(--gold) !important; color: var(--ink) !important; border-color: var(--gold) !important; }
+.tr-search-card .btn-primary:hover:not(:disabled), .ac-signedout .btn-primary:hover:not(:disabled), .page-hero .btn-primary:hover:not(:disabled) {
+  background: var(--gold-bright) !important; }
+.tr-search-card .btn-primary svg, .ac-signedout .btn-primary svg, .page-hero .btn-primary svg { color: var(--ink); }

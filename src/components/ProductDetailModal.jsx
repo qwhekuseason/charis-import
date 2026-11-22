@@ -4,7 +4,8 @@ import { sizedImage } from '../utils/images';
 import { productCategorySlug } from '../utils/categories';
 import { HiddenGem } from './HiddenGem';
 import { SmartImage } from './SmartImage';
-import { productOptions, selectionComplete, cleanSelection, priceFor, priceRange, pricedOption } from '../utils/options';
+import { productOptions, selectionComplete, cleanSelection, priceFor, priceRange, pricedOption, swatchOf, isColourOption } from '../utils/options';
+import { ProductCard } from './ProductCard';
 import './ProductDetailModal.css';
 import {
   X,
@@ -375,6 +376,7 @@ export const ProductDetailModal = () => {
                             className={`pd-chip ${selected[o.name] === v ? 'is-active' : ''}`}
                             onClick={() => choose(o.name, v)}
                           >
+                            {isColourOption(o) && swatchOf(v) && <i className="pd-chip-swatch" style={{ background: swatchOf(v) }} aria-hidden="true" />}
                             {v}
                             {sizePriced?.name === o.name && range.varies && <span className="pd-chip-price">{money(priceFor(product, { ...selected, [o.name]: v }).price)}</span>}
                           </button>
@@ -590,20 +592,9 @@ export const ProductDetailModal = () => {
 
               {relatedProducts.length > 0 && (
                 <section className="pd-related" aria-label="You may also like">
-                  <h3>You may also like</h3>
+                  <h3>You may also <em>like</em></h3>
                   <div className="pd-related-row">
-                    {relatedProducts.map((rel) => (
-                      <button key={rel.id} type="button" className="pd-related-card" onClick={() => setSelectedProduct(rel)}>
-                        <SmartImage
-                          src={sizedImage(rel.images?.[0] || rel.image || '', 320)}
-                          alt=""
-                          fallbackLabel={rel.name}
-                          className="pd-related-img"
-                        />
-                        <span className="pd-related-name">{rel.name}</span>
-                        <span className="pd-related-price">{money(rel.price)}</span>
-                      </button>
-                    ))}
+                    {relatedProducts.map((rel) => <ProductCard key={rel.id} product={rel} />)}
                   </div>
                 </section>
               )}

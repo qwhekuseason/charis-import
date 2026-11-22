@@ -583,7 +583,7 @@ export const CheckoutPage = () => {
                 /* Step 1: delivery details */
                 <form id="co-delivery-form" ref={formRef} onSubmit={handleProceedToPayment} className="co-card" noValidate>
                   <div className="co-card-head">
-                    <h1>Delivery details</h1>
+                    <h1>Delivery <em>details</em></h1>
                     <p>Where should we send your order?</p>
                   </div>
 
@@ -686,7 +686,7 @@ export const CheckoutPage = () => {
                 /* Step 2: payment and review */
                 <div className="co-card">
                   <div className="co-card-head">
-                    <h1>Payment</h1>
+                    <h1>Secure <em>payment</em></h1>
                     <p>Check your details, then place your order and pay by Mobile Money.</p>
                   </div>
 
@@ -783,7 +783,7 @@ export const CheckoutPage = () => {
 
             {/* Desktop: summary sidebar */}
             <aside className="co-card co-summary" aria-label="Order summary">
-              <h2 className="co-summary-title">Order summary</h2>
+              <h2 className="co-summary-title">Order <em>summary</em></h2>
               {summaryBody}
             </aside>
           </div>

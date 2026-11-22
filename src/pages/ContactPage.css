@@ -85,3 +85,10 @@
   .ct-form-card { padding: 20px 16px; }
   .ct-row { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---- Contact refresh ---- */
+.ct-card { border-radius: 24px; box-shadow: 0 20px 40px -32px rgba(23, 20, 15, 0.35); }
+.ct-card h2 { font-family: var(--font-serif); font-weight: 600; font-size: 1.5rem; }
+.ct-quick-card { border-radius: 20px; }
+.ct-quick-icon { border-radius: 50%; background: var(--gold-wash); color: var(--gold-text); }
+.ct-form-card .btn { border-radius: 999px; }

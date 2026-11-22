@@ -172,7 +172,7 @@ export const TrackOrderPage = () => {
         {/* Search */}
         <div className="tr-search-card">
           <div className="tr-search-icon" aria-hidden="true"><Package size={24} /></div>
-          <h1>Track your order <HiddenGem spot="track-page" /></h1>
+          <h1>Track your <em>order</em> <HiddenGem spot="track-page" /></h1>
           <p className="tr-sub">Enter your order code and the phone number you used at checkout.</p>
 
           <form onSubmit={handleSearch} className="tr-form" noValidate>
