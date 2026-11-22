@@ -4,7 +4,7 @@ import { sizedImage } from '../utils/images';
 import { SmartImage } from './SmartImage';
 import { getFoundCodes } from '../utils/hunt';
 import { validateDiscountCode } from '../services/api';
-import { lineIdOf, optionsLabel } from '../utils/options';
+import { lineIdOf, optionsLabel, priceFor } from '../utils/options';
 import { X, Trash2, Plus, Minus, ShoppingBag, ArrowRight, Tag, Check, AlertTriangle, Lock, Truck } from 'lucide-react';
 
 const money = (n) => `GH₵${Number(n || 0).toFixed(2)}`;
@@ -87,7 +87,7 @@ export const CartDrawer = () => {
   const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
   // What shoppers save versus the "was" prices on the products themselves.
   const productSavings = cart.reduce((sum, item) => {
-    const was = Number(item.product.originalPrice);
+    const was = Number(priceFor(item.product, item.options).was);
     return was > item.unitPrice ? sum + (was - item.unitPrice) * item.quantity : sum;
   }, 0);
   const unavailable = cart.filter((item) => item.product.inStock === false);
@@ -131,7 +131,7 @@ export const CartDrawer = () => {
                 {cart.map((item) => {
                   const p = item.product;
                   const out = p.inStock === false;
-                  const was = Number(p.originalPrice);
+                  const was = Number(priceFor(p, item.options).was);
                   const line = lineIdOf(item);
                   return (
                     <li key={line} className={`cd-item ${out ? 'is-out' : ''}`}>

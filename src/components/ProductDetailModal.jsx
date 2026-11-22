@@ -4,7 +4,7 @@ import { sizedImage } from '../utils/images';
 import { productCategorySlug } from '../utils/categories';
 import { HiddenGem } from './HiddenGem';
 import { SmartImage } from './SmartImage';
-import { productOptions, selectionComplete, cleanSelection } from '../utils/options';
+import { productOptions, selectionComplete, cleanSelection, priceFor, priceRange, pricedOption } from '../utils/options';
 import './ProductDetailModal.css';
 import {
   X,
@@ -139,15 +139,20 @@ export const ProductDetailModal = () => {
   const product = selectedProduct;
   const isFavorited = isInWishlist(product.id);
   const soldOut = product.inStock === false;
-  const discount = product.originalPrice > product.price
-    ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
+  // Sizes can have their own prices: show the chosen one, or "From …" until one is picked.
+  const sizePriced = pricedOption(product);
+  const range = priceRange(product);
+  const choosingPrice = sizePriced && !sizePriced.values.includes(selected[sizePriced.name]) && range.varies;
+  const shown = priceFor(product, selected);
+  const discount = shown.was > shown.price
+    ? Math.round(((shown.was - shown.price) / shown.was) * 100)
     : null;
   const dealLeft = product.onDeal && product.dealEndsAt ? timeLeft(product.dealEndsAt) : null;
   const label = soldOut ? { text: 'Out of stock', tone: 'muted' }
     : product.onDeal ? { text: 'Deal', tone: 'deal' }
     : product.justLanded ? { text: 'New', tone: 'new' }
     : null;
-  const totalCost = product.price * quantity;
+  const totalCost = (choosingPrice ? range.min : shown.price) * quantity;
   const reviews = getReviewsForProduct(product.id);
   const reviewCount = reviews.length || product.reviewCount || 0;
   const avgRating = reviews.length
@@ -335,10 +340,10 @@ export const ProductDetailModal = () => {
               )}
 
               <div className="pd-price">
-                <span className="pd-now">{money(product.price)}</span>
-                {discount && (
+                <span className="pd-now">{choosingPrice ? <><small className="pd-from">From </small>{money(range.min)}</> : money(shown.price)}</span>
+                {discount && !choosingPrice && (
                   <>
-                    <s className="pd-was">{money(product.originalPrice)}</s>
+                    <s className="pd-was">{money(shown.was)}</s>
                     <span className="pd-off">Save {discount}%</span>
                   </>
                 )}
@@ -371,6 +376,7 @@ export const ProductDetailModal = () => {
                             onClick={() => choose(o.name, v)}
                           >
                             {v}
+                            {sizePriced?.name === o.name && range.varies && <span className="pd-chip-price">{money(priceFor(product, { ...selected, [o.name]: v }).price)}</span>}
                           </button>
                         ))}
                       </div>
