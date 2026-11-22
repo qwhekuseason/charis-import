@@ -98,8 +98,9 @@ export const ContactPage = () => {
   return (
     <div className="section ct-page">
       <div className="container ct-container">
-        <header className="ct-head">
-          <h1>How can we help? <HiddenGem spot="contact-page" /></h1>
+        <header className="ct-head page-hero">
+          <span className="ip-eyebrow">Contact</span>
+          <h1>How can we <em>help?</em> <HiddenGem spot="contact-page" /></h1>
           <p>Our Kumasi team replies on WhatsApp every day. For most things, one of these is quickest:</p>
         </header>
 

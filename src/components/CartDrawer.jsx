@@ -104,7 +104,7 @@ export const CartDrawer = () => {
       <div className="drawer-overlay" onClick={close} />
       <aside className="cart-drawer cd" role="dialog" aria-modal="true" aria-labelledby="cd-title">
         <header className="cd-head">
-          <h2 id="cd-title"><ShoppingBag size={20} /> Your cart {itemCount > 0 && <span className="cd-count">{itemCount}</span>}</h2>
+          <h2 id="cd-title"><ShoppingBag size={20} /> Your <em>cart</em> {itemCount > 0 && <span className="cd-count">{itemCount}</span>}</h2>
           <button type="button" className="cd-close" onClick={close} aria-label="Close cart"><X size={20} /></button>
         </header>
 

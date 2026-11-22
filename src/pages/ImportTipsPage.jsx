@@ -50,9 +50,9 @@ export const ImportTipsPage = () => {
   return (
     <div className="section ip-page">
       <div className="container ip-narrow">
-        <header className="ip-hero">
+        <header className="ip-hero page-hero">
           <span className="ip-eyebrow">Buying guide</span>
-          <h1>How ordering works <HiddenGem spot="import-tips-page" /></h1>
+          <h1>How ordering <em>works</em> <HiddenGem spot="import-tips-page" /></h1>
           <p>Everything you need to know before you order from overseas with CHARI — in a few steps.</p>
         </header>
 

@@ -153,7 +153,7 @@ export const AccountPage = () => {
       <div className="section ac-page">
         <div className="container ac-signedout">
           <div className="ac-signedout-icon"><User size={30} /></div>
-          <h1>Your account</h1>
+          <h1>Your <em>account</em></h1>
           <p>Sign in to follow your orders, save your delivery address and use your store credit.</p>
           <ul className="ac-perks">
             <li><Package size={16} aria-hidden="true" /> See every order and where it is</li>
@@ -261,7 +261,7 @@ export const AccountPage = () => {
           <div className="ac-hero-who">
             <div className="ac-avatar" aria-hidden="true">{user.name.charAt(0).toUpperCase()}</div>
             <div className="ac-hero-text">
-              <h1>Hi, {firstName}</h1>
+              <h1>Hi, <em>{firstName}</em></h1>
               <span>{user.email}</span>
             </div>
           </div>

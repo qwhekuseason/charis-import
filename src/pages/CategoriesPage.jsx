@@ -12,6 +12,8 @@ const money = (n) => `GH₵${Number(n).toLocaleString(undefined, { maximumFracti
 export const CategoriesPage = () => {
   const { categories, products, catalogStatus, setSelectedCategory, navigate, openQuote } = useStore();
 
+  const heroPhoto = sizedImage((categories || []).filter((c) => c.image)[1]?.image || (categories || []).find((c) => c.image)?.image || '', 1400);
+
   const open = (slug) => {
     setSelectedCategory(slug);
     navigate('shop');
@@ -30,8 +32,9 @@ export const CategoriesPage = () => {
   return (
     <div className="section ip-page">
       <div className="container">
-        <header className="ip-head">
-          <h1>Shop by category <HiddenGem spot="categories-page" /></h1>
+        <header className="ip-head page-hero" style={heroPhoto ? { '--ph-img': `url("${heroPhoto}")` } : undefined}>
+          <span className="ip-eyebrow">{(categories || []).length} categories</span>
+          <h1>Shop by <em>category</em> <HiddenGem spot="categories-page" /></h1>
           <p>Everything we stock, grouped to help you find it faster. Delivery anywhere in Ghana.</p>
         </header>
 

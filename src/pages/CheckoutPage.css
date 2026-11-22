@@ -198,3 +198,13 @@
 .co-totals .co-ship-tbc dd { font-weight: 600; color: var(--gold-text); }
 .co-pay-note-ship { margin: -4px 0 14px; padding: 10px 12px; border-radius: 10px; background: var(--gold-wash); border: 1px solid rgba(184, 145, 58, 0.3); font-size: 0.86rem; line-height: 1.5; color: var(--text-secondary); }
 .co-ship-hint { margin: -2px 0 10px; font-size: 0.84rem; color: var(--text-muted); }
+
+/* ---- Checkout refresh: rounded cream cards, serif titles, pill controls ---- */
+.co-card { border-radius: 26px; padding: 30px; box-shadow: 0 20px 40px -30px rgba(23, 20, 15, 0.35); }
+.co-card-head h1, .co-summary-title, .co-done-head h1 { font-family: var(--font-serif); font-weight: 600; letter-spacing: -0.01em; }
+.co-card-head h1 { font-size: 1.9rem; }
+.co-card-head h1 em, .co-summary-title em { font-style: italic; font-weight: 500; color: var(--gold-text); }
+.co-summary-title { font-size: 1.45rem; }
+.co-step.is-current .co-step-line, .co-step.is-done .co-step-line { background: var(--gold); }
+.co-card .btn, .co-summary .btn { border-radius: 999px; }
+.co-done-head h1 { font-size: 2.2rem; }

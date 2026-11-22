@@ -19,9 +19,9 @@ export const AboutPage = () => {
   return (
     <div className="section ip-page">
       <div className="container ip-narrow">
-        <header className="ip-hero">
+        <header className="ip-hero page-hero">
           <span className="ip-eyebrow">About CHARI</span>
-          <h1>Quality imports, delivered across Ghana <HiddenGem spot="about-page" /></h1>
+          <h1>Quality imports, <em>delivered</em> across Ghana <HiddenGem spot="about-page" /></h1>
           <p>
             CHARI helps shoppers and small businesses in Ghana buy directly from suppliers in China, Turkey and Dubai —
             without the middlemen, high markups or customs stress.
