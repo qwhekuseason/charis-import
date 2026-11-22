@@ -138,7 +138,8 @@ export const HomePage = () => {
     setReferralModalOpen,
     reviews,
     catalogStatus,
-    setSearchQuery
+    setSearchQuery,
+    setSelectedProduct
   } = useStore();
   const [moreFilter, setMoreFilter] = useState('all');
   const [activeBatch, setActiveBatch] = useState(null);
@@ -261,9 +262,24 @@ export const HomePage = () => {
     .filter(matchesMoreFilter)
     .slice(0, 8);
 
-  // Four category photos make the hero picture — real products, not a stock photo.
-  const heroCategories = categories.filter((c) => c.image).slice(0, 4);
-  const tileCategories = categories.slice(0, 7);
+  // The hero photo: the first category with a picture — a real product, not a stock photo.
+  const heroImage = categories.find((c) => c.image)?.image || products.find((p) => p.image)?.image || '';
+  const tileCategories = categories.slice(0, 5);
+
+  // Two spotlights: the most reviewed product, and the newest one (each with a real photo).
+  const hasPhoto = (p) => Boolean(p && (p.images?.[0] || p.image));
+  const bestSeller = [...products].filter(hasPhoto).sort((a, b) => (b.reviewsCount || b.reviewCount || 0) - (a.reviewsCount || a.reviewCount || 0))[0];
+  const newest = products.filter(hasPhoto).find((p) => p.justLanded && p.id !== bestSeller?.id)
+    || products.filter(hasPhoto).find((p) => p.id !== bestSeller?.id);
+  const spotlights = [
+    bestSeller && { product: bestSeller, kicker: 'Customer favourite', title: 'Best', accent: 'seller' },
+    newest && { product: newest, kicker: 'Just landed', title: 'New', accent: 'arrival' },
+  ].filter(Boolean);
+
+  const ratedReviews = (reviews || []).filter((r) => r.rating > 0);
+  const reviewSummary = ratedReviews.length
+    ? { avg: (ratedReviews.reduce((sum, r) => sum + r.rating, 0) / ratedReviews.length).toFixed(1), count: ratedReviews.length }
+    : null;
 
   return (
     <div className={`home hm ${introOn ? 'hm-intro-on' : ''}`} ref={homeRef}>
@@ -272,21 +288,39 @@ export const HomePage = () => {
           <GlobeIntro onDone={endIntro} photos={introPhotos} />
         </Suspense>
       )}
-      {/* Hero — ink, like the logo */}
-      <section className="hm-hero" onPointerMove={onHeroPointer} onPointerLeave={resetHeroPointer}>
-        {/* A plane flies a gold route across the hero, like the one circling the logo */}
-        <svg className="hm-flight" viewBox="0 0 1200 640" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
-          <path id="hm-route" className="hm-flight-route" d="M -60 560 C 220 520 360 300 600 260 S 980 120 1260 -40" />
-          <g className="hm-flight-plane">
-            <path d="M14 0 L-6 -3.2 L-10 -12 L-14 -12 L-10 -2.6 L-16 -2 L-19 -6 L-21 -6 L-19.5 0 L-21 6 L-19 6 L-16 2 L-10 2.6 L-14 12 L-10 12 L-6 3.2 Z" />
-            <animateMotion dur="14s" repeatCount="indefinite" rotate="auto" keyPoints="0;1" keyTimes="0;1" calcMode="linear">
-              <mpath href="#hm-route" />
-            </animateMotion>
-          </g>
-        </svg>
-        <div className="container hm-hero-grid">
-          <div className="hm-hero-copy">
-            <span className="hm-eyebrow"><Plane size={14} aria-hidden="true" /> Direct imports, delivered across Ghana</span>
+      {/* Hero — one big photo card with the headline over it */}
+      <section className="container hm-stage-wrap">
+        <div className="hm-stage hm-hero" onPointerMove={onHeroPointer} onPointerLeave={resetHeroPointer}>
+          {heroImage && <SmartImage src={sizedImage(heroImage, 1600)} alt="" className="hm-stage-bg" loading="eager" fetchpriority="high" />}
+          <span className="hm-stage-shade" aria-hidden="true" />
+          {/* A plane flies a gold route across the photo, like the one circling the logo */}
+          <svg className="hm-flight" viewBox="0 0 1200 640" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+            <path id="hm-route" className="hm-flight-route" d="M -60 560 C 220 520 360 300 600 260 S 980 120 1260 -40" />
+            <g className="hm-flight-plane">
+              <path d="M14 0 L-6 -3.2 L-10 -12 L-14 -12 L-10 -2.6 L-16 -2 L-19 -6 L-21 -6 L-19.5 0 L-21 6 L-19 6 L-16 2 L-10 2.6 L-14 12 L-10 12 L-6 3.2 Z" />
+              <animateMotion dur="14s" repeatCount="indefinite" rotate="auto" keyPoints="0;1" keyTimes="0;1" calcMode="linear">
+                <mpath href="#hm-route" />
+              </animateMotion>
+            </g>
+          </svg>
+
+          <div className="hm-stage-top hm-hero-copy">
+            <span className="hm-eyebrow"><Plane size={14} aria-hidden="true" /> Direct imports · Ghana</span>
+            <form className="hm-search" role="search" onSubmit={runSearch}>
+              <Search size={17} aria-hidden="true" />
+              <input
+                type="search"
+                enterKeyHint="search"
+                placeholder="Search air fryers, dresses…"
+                aria-label="Search products"
+                value={heroSearch}
+                onChange={(e) => setHeroSearch(e.target.value)}
+              />
+              <button type="submit" className="btn btn-gold">Search</button>
+            </form>
+          </div>
+
+          <div className="hm-stage-copy hm-hero-copy">
             <h1 className="hm-hero-title">
               <span className="hm-line"><span>See it. Send it.</span></span>
               <span className="hm-line"><em>We'll source it.</em></span>
@@ -295,18 +329,6 @@ export const HomePage = () => {
             <p className="hm-hero-text">
               Clothes, kitchen appliances, mannequins and more — bought from trusted overseas suppliers, checked, and delivered to your door.
             </p>
-            <form className="hm-search" role="search" onSubmit={runSearch}>
-              <Search size={18} aria-hidden="true" />
-              <input
-                type="search"
-                enterKeyHint="search"
-                placeholder="Search air fryers, dresses, mannequins…"
-                aria-label="Search products"
-                value={heroSearch}
-                onChange={(e) => setHeroSearch(e.target.value)}
-              />
-              <button type="submit" className="btn btn-gold">Search</button>
-            </form>
             <div className="hm-hero-actions">
               <button type="button" className="btn btn-gold btn-lg" onClick={() => navigate('shop')}>
                 Shop now <ArrowRight size={17} />
@@ -315,41 +337,31 @@ export const HomePage = () => {
                 <PackagePlus size={17} /> Request an item
               </button>
             </div>
-            <ul className="hm-trust">
-              <li><Smartphone size={15} aria-hidden="true" /> Pay with MoMo</li>
-              <li><ShieldCheck size={15} aria-hidden="true" /> Customs included</li>
-              <li><Truck size={15} aria-hidden="true" /> Delivery across Ghana</li>
-            </ul>
           </div>
 
-          <div className="hm-hero-visual">
-            {heroCategories.length === 4 ? (
-              <div className="hm-mosaic">
-                {heroCategories.map((cat, i) => (
-                  <button type="button" key={cat.id} className={`hm-mosaic-tile is-${i}`} onClick={() => openCategory(cat.slug)}>
-                    <SmartImage src={sizedImage(cat.image, i === 0 ? 640 : 360)} alt="" loading={i === 0 ? 'eager' : 'lazy'} />
-                    <span>{cat.name} <ArrowRight size={14} aria-hidden="true" /></span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="hm-mosaic is-empty" aria-hidden="true">
-                {[0, 1, 2, 3].map((i) => <span key={i} className={`hm-mosaic-tile is-${i}`} />)}
-              </div>
-            )}
-            {batchInfo && (
-              <div className="hm-shipment">
-                <span className="hm-shipment-icon"><Plane size={16} aria-hidden="true" /></span>
-                <div className="hm-shipment-text">
-                  <strong>{batchInfo.title}</strong>
-                  <span>{batchInfo.status}</span>
-                  {batchInfo.progress !== null && (
+          {/* Glass card: the shipment on its way, or why buying here is safe */}
+          <aside className="hm-stage-card" aria-label={batchInfo ? 'Current shipment' : 'Why order with us'}>
+            {batchInfo ? (
+              <>
+                <span className="hm-stage-card-lines"><strong>{batchInfo.title}</strong><span>{batchInfo.status}</span></span>
+                {batchInfo.progress !== null && (
+                  <>
+                    <span className="hm-stage-card-big">{Math.round(batchInfo.progress)}%</span>
                     <span className="hm-shipment-bar" aria-hidden="true"><span style={{ width: `${batchInfo.progress}%` }} /></span>
-                  )}
-                </div>
-              </div>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <span className="hm-stage-card-lines">
+                  <span><Smartphone size={13} aria-hidden="true" /> Pay with MoMo</span>
+                  <span><ShieldCheck size={13} aria-hidden="true" /> Customs included</span>
+                  <span><Truck size={13} aria-hidden="true" /> Delivered across Ghana</span>
+                </span>
+                {products.length > 0 && <span className="hm-stage-card-big">{products.length}<small> items in store</small></span>}
+              </>
             )}
-          </div>
+          </aside>
         </div>
       </section>
 
@@ -403,23 +415,24 @@ export const HomePage = () => {
       {/* Categories — one tidy row of tiles; the last one opens the full list */}
       <section className="container home-section">
         <div className="hm-head" data-reveal>
-          <h2>Shop by category <HiddenGem spot="home-categories" /></h2>
+          <h2>Shop by <em>category</em> <HiddenGem spot="home-categories" /></h2>
           <button type="button" className="hm-head-link" onClick={() => navigate('categories')}>All categories <ArrowRight size={15} /></button>
         </div>
         <div className="hm-cats">
-          {catalogStatus === 'loading' && categories.length === 0 && [...Array(8)].map((_, i) => (
-            <div key={i} className="hm-cat is-loading" aria-hidden="true"><span className="hm-cat-img" /><span className="hm-cat-name">&nbsp;</span></div>
+          {catalogStatus === 'loading' && categories.length === 0 && [...Array(5)].map((_, i) => (
+            <div key={i} className="hm-cat is-loading" aria-hidden="true" />
           ))}
           {tileCategories.map((cat, i) => (
             <button type="button" key={cat.id} className="hm-cat" data-reveal style={{ '--i': i }} onClick={() => openCategory(cat.slug)}>
-              <span className="hm-cat-img"><SmartImage src={sizedImage(cat.image, 240)} alt="" width="120" height="120" loading="lazy" /></span>
-              <span className="hm-cat-name">{cat.name}</span>
+              <SmartImage src={sizedImage(cat.image, 420)} alt="" className="hm-cat-img" loading="lazy" fallbackLabel={cat.name} />
+              <span className="hm-cat-label"><small>Explore</small><em>{cat.name}</em></span>
+              <span className="hm-cat-shop">Shop <ArrowRight size={13} aria-hidden="true" /></span>
             </button>
           ))}
           {categories.length > tileCategories.length && (
             <button type="button" className="hm-cat is-more" data-reveal style={{ '--i': tileCategories.length }} onClick={() => navigate('categories')}>
-              <span className="hm-cat-img"><span>+{categories.length - tileCategories.length}</span></span>
-              <span className="hm-cat-name">More</span>
+              <span className="hm-cat-label"><small>{categories.length - tileCategories.length} more</small><em>All categories</em></span>
+              <span className="hm-cat-shop">See all <ArrowRight size={13} aria-hidden="true" /></span>
             </button>
           )}
         </div>
@@ -451,10 +464,35 @@ export const HomePage = () => {
       {popularProducts.length > 0 && (
         <section className="container home-section">
           <div className="hm-head" data-reveal>
-            <h2>Popular right now</h2>
+            <h2>Popular <em>right now</em></h2>
             <button type="button" className="hm-head-link" onClick={() => navigate('shop')}>See all <ArrowRight size={15} /></button>
           </div>
           <ProductRail products={popularProducts} label="Popular products" onSeeAll={() => navigate('shop')} seeAllLabel="See all products" />
+        </section>
+      )}
+
+      {/* Spotlights — a best seller and a new arrival, big photo beside the story */}
+      {spotlights.length > 0 && (
+        <section className="container home-section hm-spots">
+          {spotlights.map((spot, i) => (
+            <article key={spot.product.id} className={`hm-spot ${i % 2 ? 'is-flip' : ''}`} data-reveal>
+              <div className="hm-spot-text">
+                <span className="hm-eyebrow">{spot.kicker}</span>
+                <h2>{spot.title} <em>{spot.accent}</em></h2>
+                <p className="hm-spot-name">{spot.product.name}</p>
+                {spot.product.description && <p className="hm-spot-desc">{spot.product.description.slice(0, 140)}{spot.product.description.length > 140 ? '…' : ''}</p>}
+                <div className="hm-spot-actions">
+                  <button type="button" className="btn btn-primary" onClick={() => setSelectedProduct(spot.product)}>
+                    View · GH₵{Number(spot.product.price).toFixed(2).replace(/\.00$/, '')} <ArrowRight size={16} />
+                  </button>
+                  <button type="button" className="hm-head-link" onClick={() => navigate('shop')}>Shop all</button>
+                </div>
+              </div>
+              <button type="button" className="hm-spot-img" onClick={() => setSelectedProduct(spot.product)} aria-label={`View ${spot.product.name}`}>
+                <SmartImage src={sizedImage(spot.product.images?.[0] || spot.product.image, 900)} alt="" loading="lazy" fallbackLabel={spot.product.name} />
+              </button>
+            </article>
+          ))}
         </section>
       )}
 
@@ -489,7 +527,7 @@ export const HomePage = () => {
       {/* More products */}
       <section className="container home-section">
         <div className="hm-head" data-reveal>
-          <h2>More to explore</h2>
+          <h2>More to <em>explore</em></h2>
           <div className="hm-chips" role="tablist" aria-label="Filter products">
             {[
               { id: 'all', label: 'All' },
@@ -539,7 +577,8 @@ export const HomePage = () => {
       {customerReviews.length > 0 && (
         <section className="container home-section">
           <div className="hm-head" data-reveal>
-            <h2>What customers say</h2>
+            <h2>What customers <em>say</em></h2>
+            {reviewSummary && <span className="hm-rating"><strong>{reviewSummary.avg}</strong>/5 · from {reviewSummary.count} review{reviewSummary.count === 1 ? '' : 's'}</span>}
           </div>
           <div className="hm-reviews">
             {customerReviews.map((r) => (
