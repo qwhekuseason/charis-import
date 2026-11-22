@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { useStore } from '../context/StoreContext';
 import { ProductCard } from '../components/ProductCard';
 import { SmartImage } from '../components/SmartImage';
@@ -8,7 +8,7 @@ import { ArrowRight, Search, Smartphone, ShieldCheck, Truck, ChevronLeft, Chevro
 import './HomePage.css';
 
 // The globe intro's code only downloads when it actually plays.
-const GlobeIntro = lazy(() => import('../components/GlobeIntro').then((m) => ({ default: m.GlobeIntro })));
+const VideoIntro = lazy(() => import('../components/VideoIntro').then((m) => ({ default: m.VideoIntro })));
 const INTRO_KEY = 'chari_intro_seen';
 // Once per visit, and never for people who ask their device for less motion.
 const shouldPlayIntro = () => {
@@ -147,12 +147,6 @@ export const HomePage = () => {
   const homeRef = useRef(null);
   const [introOn, setIntroOn] = useState(shouldPlayIntro);
   const endIntro = useCallback(() => setIntroOn(false), []);
-  // Real photos from the shop make up the intro globe (small copies, so they load fast).
-  const introPhotos = useMemo(() => [
-    ...products.map((p) => p.images?.[0] || p.image),
-    ...categories.map((c) => c.image),
-  ].filter(Boolean).map((url) => sizedImage(url, 200)), [products, categories]);
-
   // Remember it played (even if the page is refreshed half-way), and keep the page still behind it.
   useEffect(() => {
     if (!introOn) return undefined;
@@ -284,8 +278,8 @@ export const HomePage = () => {
   return (
     <div className={`home hm ${introOn ? 'hm-intro-on' : ''}`} ref={homeRef}>
       {introOn && (
-        <Suspense fallback={<div style={{ position: 'fixed', inset: 0, zIndex: 3000, background: '#0e0c09' }} />}>
-          <GlobeIntro onDone={endIntro} photos={introPhotos} />
+        <Suspense fallback={<div style={{ position: 'fixed', inset: 0, zIndex: 3000, background: '#000' }} />}>
+          <VideoIntro onDone={endIntro} />
         </Suspense>
       )}
       {/* Hero — one big photo card with the headline over it */}
