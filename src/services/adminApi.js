@@ -80,3 +80,11 @@ export const uploadPhoto = async (file) => {
   form.append('image', file);
   return (await request('/upload', { method: 'POST', body: form, isForm: true })).url;
 };
+
+// Import from link — drafts waiting for review
+export const listDrafts = async () => request('/product-drafts'); // { data, pricing, currencies }
+export const importLinks = async (links) => request('/product-drafts/import', { method: 'POST', body: { links } }); // { data, skipped }
+export const editDraft = async (id, changes) => (await request(`/product-drafts/${id}`, { method: 'PUT', body: changes })).data;
+export const removeDraft = async (id) => request(`/product-drafts/${id}`, { method: 'DELETE' });
+export const approveDraft = async (id, product) => request(`/product-drafts/${id}/approve`, { method: 'POST', body: product }); // { data, photosDropped }
+export const saveImportPricing = async (pricing) => (await request('/product-drafts/pricing', { method: 'PUT', body: pricing })).pricing;

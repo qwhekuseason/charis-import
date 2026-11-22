@@ -27,6 +27,8 @@ model Product {
   // Time-limited deal set from Admin: while dealEndsAt is in the future, customers pay dealPrice.
   dealPrice     Float?
   dealEndsAt    DateTime?
+  // Where the admin buys it (from "Import from link"). Admin-only — never sent to shoppers.
+  sourceUrl     String?
   reviews       Review[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -173,6 +175,27 @@ model Review {
   verified     Boolean  @default(true)
   helpfulCount Int      @default(0)
   createdAt    DateTime @default(now())
+}
+
+// "Import from link": a product fetched from a supplier's page, waiting for the admin to check
+// it, set the price and approve it. Kept apart from Product so a draft can never reach the shop.
+model ProductDraft {
+  id             String   @id @default(cuid())
+  sourceUrl      String
+  sourceSite     String
+  status         String   @default("READY") // READY (details found) or NEEDS_INFO (fill in by hand)
+  note           String?
+  name           String   @default("")
+  category       String?
+  description    String   @default("")
+  images         String[] @default([])
+  sourcePrice    Float?
+  sourceCurrency String?
+  price          Float? // the shop price in cedis the admin will charge (suggested from the rates)
+  specs          Json?
+  options        Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
 
 // Business details and site text the admin can change without a developer
