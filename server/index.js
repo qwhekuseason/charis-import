@@ -184,7 +184,7 @@ const promoLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 60, message: 'To
 app.disable('x-powered-by'); // don't advertise what the server runs on
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
-  "script-src 'self'", // only the shop's own code can run — injected scripts are blocked
+  "script-src 'self' https://apexeye-collector.vercel.app", // only the shop's own code (plus the ApexEye monitoring script) can run — injected scripts are blocked
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:",
   "img-src 'self' data: blob: https:",
